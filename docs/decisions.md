@@ -221,6 +221,26 @@ before execution. It touches Sculptcore too, so it needs coordination.
 
 ---
 
+## DEC-006 — Follow Sculptcore: NW.js, defer the N-API migration and Python; SoA B-rep modelled on Sculptcore
+
+- **Date:** 2026-11-17
+- **Decision:**
+  - **Chromium shell = NW.js**, following Sculptcore (Electron kept as a fallback, as
+    Sculptcore does).
+  - **The N-API migration into litestl is deferred.** It happens later, not as a
+    prerequisite of early UberTopo work. Until then, UberTopo has no UX or N-API
+    dependency.
+  - **Python is not needed yet.** Q-E is deferred.
+  - **The B-rep uses a struct-of-arrays approach similar to Sculptcore's**, and
+    Sculptcore's mesh (`source/mesh/`) may be used as a reference. See
+    [research/sculptcore-brep-reference.md](research/sculptcore-brep-reference.md) for
+    what carries over, what must change, and what must be added: regions/shells,
+    face sides, inclusions, persistent IDs, angular radial order, COW pages, f64 or
+    exact coordinates, geometry pools.
+- **Answers:** Q-E (deferred), Q-F (later), Q-G (NW.js).
+
+---
+
 ## Open questions
 
 - ~~Q-A — WASM target~~ → DEC-005 (native N-API in a Chromium shell).
@@ -228,12 +248,17 @@ before execution. It touches Sculptcore too, so it needs coordination.
   UberTopo).
 - ~~Q-C — offline converters~~ → DEC-004 (third-party converters allowed).
 - ~~Q-D — how litestl is included~~ → DEC-003 (submodule at `source/litestl`).
-- **Q-E — Python binding runtime** *(still open)*. litestl's Python generator emits
+- ~~Q-E~~ deferred by DEC-006 (Python not needed yet). Original text: **Python binding runtime**. litestl's Python generator emits
   `.pyi` stubs only. Should native Python go through a CPython extension module
   generated from the same descriptors as the N-API runtime, or ctypes/cffi over a
   C ABI? Is Python needed early at all?
-- **Q-F — Sculptcore coordination.** Can the N-API migration modify Sculptcore in the
+- ~~Q-F~~ → DEC-006 (migrate N-API later). Original text: **Sculptcore coordination.** Can the N-API migration modify Sculptcore in the
   same effort, or should litestl gain the runtime first and Sculptcore switch over
   later?
-- **Q-G — Chromium shell.** NW.js (Sculptcore's default) or Electron? Sculptcore keeps
+- ~~Q-G~~ → DEC-006 (NW.js). Original text: **Chromium shell.** NW.js (Sculptcore's default) or Electron? Sculptcore keeps
   both, so we could follow it.
+- **Q-H — Sculptcore's attribute system.** Should Sculptcore's paged attribute system
+  (`AttrData`/`AttrGroup`/`BuiltinAttr`, plus the `DeformPool` intern pattern) be
+  **moved** into litestl and generalised, with Sculptcore becoming a client? Or should
+  litestl get a new implementation modelled on it, leaving Sculptcore untouched for now?
+  See [research/sculptcore-brep-reference.md §3](research/sculptcore-brep-reference.md#3-proposed-reuse-path-input-to-the-core-data-model-design-doc).

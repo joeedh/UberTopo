@@ -18,6 +18,7 @@ track.
 | Environment generation | [environment-generation/](environment-generation/README.md) | Buildings, interiors, roads, terrain, water, vegetation, infrastructure, GIS data |
 | Attributes & queries | [attributes-and-queries/](attributes-and-queries/README.md) | Attribute systems, embedded geometry, spatial indices, query API, coordinates, LOD |
 | Simulation requirements | [simulation-requirements/](simulation-requirements/README.md) | Acoustics, EO/IR, RF, vulnerability surveys, simulators, requirements matrix |
+| Sculptcore reference | [sculptcore-brep-reference.md](sculptcore-brep-reference.md) | Sculptcore's SoA mesh B-rep mapped against the UberTopo recommendation (added after DEC-006) |
 
 > **Decisions since this synthesis:** see [../decisions.md](../decisions.md). DEC-001 sets
 > C++20 on litestl; DEC-002 says avoid third-party libraries in the core (DEC-004 allows

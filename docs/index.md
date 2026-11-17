@@ -7,7 +7,7 @@ Index of everything under `docs/`. Update this file whenever a doc is added, mov
 | Doc | Description |
 |---|---|
 | [requirements.md](requirements.md) | Project requirements |
-| [decisions.md](decisions.md) | Project decision log: DEC-001 C++20/litestl, DEC-002 no third-party libs in core, DEC-003 litestl submodule + additions in litestl, DEC-004 allowed third-party (formats/compression/LAZ), DEC-005 Chromium shell + N-API; open questions |
+| [decisions.md](decisions.md) | Project decision log: DEC-001 C++20/litestl, DEC-002 no third-party libs in core, DEC-003 litestl submodule + additions in litestl, DEC-004 allowed third-party (formats/compression/LAZ), DEC-005 Chromium shell + N-API, DEC-006 NW.js / defer N-API migration & Python / SoA B-rep modelled on Sculptcore; open questions |
 | [debugging.md](debugging.md) | Running debugging guide |
 | [index.md](index.md) | This index |
 
@@ -18,6 +18,8 @@ _None yet._ Plans must be pressure-tested by a fresh-context agent before implem
 ## Research (`research/`)
 
 - [research/README.md](research/README.md) — **Start here.** Synthesis across all research tracks: answers to the requirements questions (2- vs 3-manifold, holes, attributes, curves, queries), the convergent architecture, cross-track disagreements, consolidated open questions, next steps.
+
+- [research/sculptcore-brep-reference.md](research/sculptcore-brep-reference.md) — Sculptcore's SoA mesh B-rep as a reference: what carries over, what must change, what to add
 
 ### B-rep topology (`research/brep-topology/`)
 

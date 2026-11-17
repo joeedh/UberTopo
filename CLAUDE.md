@@ -32,7 +32,7 @@ defense systems. See `docs/requirements.md`.
   and pushed there, then the submodule pointer is bumped. **B-splines stay in
   UberTopo**, not litestl.
 * **TypeScript/Python glue goes through litestl's binding system** (`defineBindings()`).
-  The UX runs in a Chromium shell (NW.js/Electron) and loads UberTopo as a **native
+  The UX runs in an NW.js shell (DEC-006; N-API migration and Python deferred) and loads UberTopo as a **native
   N-API addon**, not WASM (DEC-005). Use raw C N-API (`node_api.h`), never
   node-addon-api.
 * **Avoid third-party libraries in the core** (DEC-002). Allowed: litestl and what it
@@ -41,3 +41,6 @@ defense systems. See `docs/requirements.md`.
   needs an explicit decision before linking. GPL or other third-party code (CGAL,
   Clothoids) may be used only as an offline test oracle, never linked. Re-implementing
   published algorithms is the default for geometry.
+* **B-rep storage is struct-of-arrays modelled on Sculptcore's mesh** (DEC-006). Use
+  `docs/research/sculptcore-brep-reference.md` and Sculptcore's `source/mesh/` (MIT,
+  same author) as reference.
