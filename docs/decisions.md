@@ -370,7 +370,10 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
   - The generator is **Philox4x32-10** in `litestl::rng`.
   - The counter layout is pinned as `{elem_lo32, elem_hi32, draw, block}`.
   - `range()` rejection advances `block`, never `draw`.
-  - The stream key's low half is the Philox key, and its high half salts `ctr[3]`.
+  - The Philox key is `stream_key.lo ^ mixHash(stream_key.hi)`, so all 128 bits of
+    the stream key matter. The plan's original "high half salts `ctr[3]`" was
+    replaced during implementation, so that `ctr[3]` stays a full 32-bit block
+    index.
   - Persistent IDs fold to 64-bit elements; the fold is documented.
 - **Pinned goldens.** ID-derivation, RNG-stream and determinism-digest goldens are
   pinned in litestl tests. **Changing any of them requires a new DEC entry**, because

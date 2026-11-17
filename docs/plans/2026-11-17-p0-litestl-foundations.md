@@ -1,7 +1,8 @@
 # Plan P0 — litestl numeric and determinism foundations
 
-- **Status:** v2. The pressure test is done (§10) and all findings are incorporated.
-  Ready for implementation.
+- **Status:** **implemented** (litestl branch `ubertopo/p0-foundations`). See §11 for
+  implementation notes and deviations from this plan. v2 was the pressure-tested
+  version (§10).
 - **Date:** 2026-11-17
 - **Design:** [core-data-model/06 §2–3](../design/core-data-model/06-modules-litestl-and-phasing.md)
   (phase P0). Rationale is in
@@ -548,3 +549,20 @@ All findings were accepted. Their disposition:
 | 19 | Minor | UberTopo docs (DEC entry, OI-4, design 02 budgets, index) not covered | Added to W7 |
 | 20 | Nit | SipHash-128 isn't in the paper; rationale; attribution | Fixed citation, rationale and attribution (W3, W4) |
 | 21 | Nit | Global vs thread-local undecided; float promotion helper; LOC estimate low | Thread-local; conversion helper; estimates raised (W2, W5, §8) |
+
+## 11. Implementation notes and deviations (2026-11-17)
+
+Implemented on litestl `ubertopo/p0-foundations`, one commit per work item. The UberTopo
+side has the submodule bump, a top-level `CMakeLists.txt` and the smoke test.
+
+| Item | Deviation or note |
+|---|---|
+| W0 | **Harness improvements** beyond the plan:<br>• `test_break` flushes stdout before trapping, so diagnostics already printed aren't lost.<br>• `LITESTL_TEST_NO_BREAK=1` reports every failure instead of trapping on the first.<br>• `LITESTL_PRINT_GOLDENS=1` prints pinned goldens.<br>• All test targets build with `-ffp-contract=off`.<br>• litestl `CLAUDE.md` now documents the harness conventions. |
+| W1 | `Int128`/`Int256` are `WideInt<2>`/`WideInt<4>`, one template rather than separate structs. The API is unchanged. A planted carry bug was caught by the oracle; it is only observable in `Int256`, because with two words there is no carry-in chain. |
+| W2 | **Predicates are their own libraries**, `predicates` and `predicates_stats`, rather than part of `math`. That way the strict FP flags apply to exactly those translation units, and the stats variant can be linked by tests only.<br>**The double predicates are a mechanical port** of Shewchuk's public-domain `predicates.c`, made by a generator script committed in `math/predicates/generator/`. That is lower-risk than a free re-implementation. The original host (cs.cmu.edu) returned 403, so a GitHub mirror was used.<br>**`-fno-reciprocal-math`** was added to the flag set.<br>**Integer range violations abort** in Release too: `LITESTL_PRED_CHECK_RANGE=1` by default. |
+| W2 tests | **Case counts** at `LITESTL_TEST_SCALE=1` are about 400k per predicate, not 2·10⁶. Each case is evaluated three times (direct, swap, rotation), all checked against the oracle or the metamorphic relation. Release runtime is about 45 s; a larger count was not worth the oracle cost.<br>**Stage coverage** far exceeds the ≥10⁴ target, with stage D at 130k–240k hits per predicate. Two generator families made the difference:<br>• the **span family**: power-of-two multiples of base vectors. These give exact zeros with inexact differences for *all four* predicates, because collinear points lift to a plane and coplanar points to a hyperplane.<br>• the **near-filter family**: exact lattice configurations with 1–4096 ulp perturbations, which reaches stage B.<br>**A leak was found and fixed**: the heap scratch wasn't released, because the generator's regex missed the return-statement form. The generator now asserts it found exactly one return.<br>**Domain bound confirmed**: the only oracle disagreements seen were for subnormal inputs created by a generator bug, which lie outside the documented domain. The generator never perturbs zero coordinates now. |
+| W3 | As planned. 64/64 official vectors pass. |
+| W4 | **Stream key derivation changed:** the Philox key is `key.lo ^ mixHash(key.hi)`, instead of salting `ctr[3]` with `key.hi`. All 128 key bits still matter, and `ctr[3]` stays a full block index. DEC-009 and design 04 are updated to match. `util/hash.h` `mixHash` became `constexpr` (additive). |
+| W5 | As planned. `ScopedBandCount` is thread-local. Chunked APIs run serially on pool workers. Atomic chunk claiming was *not* added, because static band assignment of chunk indices was simpler and results are stored by index anyway. |
+| W6 | `test_determinism_digest` is pinned to `faa8caf7a78cea9f195969b9ce97109a`. The digest is also the check that the five configurations agree. |
+| W7 | UberTopo `CMakeLists.txt`, `source/ubertopo/tests/` (own minimal harness `ut_test.h`, because litestl's harness depends on DTL) and `test_smoke_litestl`. `.gitignore` ignores `build/`. |

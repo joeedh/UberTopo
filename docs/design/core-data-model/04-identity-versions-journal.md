@@ -78,7 +78,7 @@ hashes use `f64_bits`. Golden values are pinned in litestl tests.
 This lives at the procedural level, but the kernel relies on it, so it is specified here:
 
 ```
-bits = Philox4x32-10( key = H128(world_seed, op_site_id, stream_name)  (lo = key, hi = salt),
+bits = Philox4x32-10( key = fold64(H128(world_seed, op_site_id, stream_name)),
                counter = {elem_lo32, elem_hi32, draw, block} )   // DEC-009 layout
 ```
 
