@@ -1,0 +1,8 @@
+Create a CLAUDE.md with the following rules:
+* Temporary comments must be prefixed with CLAUDENOTE: for later stripping
+* Keep a running debugging guide in docs/debugging.md
+* Design Docs go in docs/
+* Research docs go in docs/research 
+* All plans must be saved to the repo, in docs/plans; use 
+  an agent with a fresh context to pressure test them before implementation.
+* Maintain an index for the docs folder in docs/index.md
