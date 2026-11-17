@@ -125,7 +125,7 @@ Booleans are the hardest case. In a non-manifold B-rep a "Boolean" is usually
 implemented as **general merge** (compute the arrangement of all operands into a
 cellular complex) followed by **selection** (keep the cells satisfying the predicate).
 Radial-edge / SGC-style systems take this approach
-([Weiler 1986; Rossignac & O'Connor 1989, *SGC*](https://doi.org/10.1016/B978-0-444-87423-5.50021-8)).
+(Weiler 1986, radial-edge structure; Rossignac & O'Connor 1989, *SGC*; cited from memory).
 The approach is good for attributes:
 
 * Every output face is a sub-face of exactly one input face (or of a coplanar overlap
@@ -292,7 +292,7 @@ Propagation bugs are silent, so automated invariants are essential:
 * Spatial ACIS attributes: https://doc.spatial.com/get_doc_page/articles/a/t/t/Attributes_d0ce.html (from memory; URL may have moved)
 * Blender `customdata.cc`: https://projects.blender.org/blender/blender/src/branch/main/source/blender/blenkernel/intern/customdata.cc
 * Blender Manual, Attributes Reference: https://docs.blender.org/manual/en/latest/modeling/geometry_nodes/attributes_reference.html
-* Rossignac & O'Connor, *SGC: A dimension-independent model for pointsets with internal structures and incomplete boundaries* (1989): https://doi.org/10.1016/B978-0-444-87423-5.50021-8
+* Rossignac & O'Connor, *SGC: A dimension-independent model for pointsets with internal structures and incomplete boundaries*, in Geometric Modeling for Product Engineering, North-Holland 1990 (cited from memory; no URL verified)
 * Zhou, Grinspun, Zorin, Jacobson, *Mesh Arrangements for Solid Geometry*, SIGGRAPH 2016: https://www.cs.columbia.edu/cg/mesh-arrangements/
 * Cherchi, Pellacini, Attene, Livesu, *Interactive and Robust Mesh Booleans*, SIGGRAPH Asia 2022: https://arxiv.org/abs/2205.14151
 * CGAL Polygon Mesh Processing (corefinement, visitors): https://doc.cgal.org/latest/Polygon_mesh_processing/index.html
