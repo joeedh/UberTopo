@@ -107,6 +107,6 @@ Those are later designs that build on this one.
 | OI-1 | ~~Plane-based exact representation~~ **Resolved (DEC-008):** `Lattice` vertices plus an exact plane table, with homogeneous points inside the Boolean engine only. **Re-review in P5** | [02 §5](02-coordinates-and-predicates.md#5-the-plane-based-option-d2) |
 | OI-2 | ~~Region maintenance~~ **Resolved (DEC-008):** rebuilt by `build_regions()`, with a `regions_dirty` state | [01 §6](01-cell-complex.md#6-shells-and-regions-maintenance-model) |
 | OI-3 | Page size for copy-on-write columns (Sculptcore uses 4096; the research suggests 1–16K). Measure | [03 §3](03-attributes.md#3-paged-copy-on-write-storage) |
-| OI-4 | Choice of 128-bit hash function (re-implemented, platform-stable) | [04 §3](04-identity-versions-journal.md#3-persistent-ids) |
+| OI-4 | ~~Choice of 128-bit hash function~~ **Resolved (DEC-009):** SipHash-2-4-128 with type-tagged, domain-separated tuple encoding | [04 §3](04-identity-versions-journal.md#3-persistent-ids) |
 | OI-5 | ~~Location of the attribute machinery~~ **Resolved (DEC-008):** litestl `attr/` from day one | [06](06-modules-litestl-and-phasing.md) |
 | OI-6 | Sculptcore adoption of the new attribute system (Q-H) | [decisions.md](../../decisions.md) |

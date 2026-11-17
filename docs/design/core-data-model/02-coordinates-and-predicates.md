@@ -87,20 +87,23 @@ struct Lattice {            // a strong typedef; no implicit conversions
 template <> struct CoordTraits<Lattice> {
   using Point = math::Vec<Lattice, 3>;
   using Point2 = math::Vec<Lattice, 2>;
-  using Wide = litestl::Int256;
+  using Wide = litestl::math::Int256;
   static constexpr bool is_exact = true;
   static constexpr int input_bits = 26;     // validated on construction (see below)
-  /* With 27-bit coordinate differences:
-     orient3d: 3x3 det, 3 x 27-bit factors per term, 6 terms -> ~84 bits -> Int128
-     incircle: 3x3 det with one 54-bit lifted column -> ~111 bits -> Int128
-     insphere: 4x4 det with one 54-bit lifted column -> ~140 bits -> Int256
-     (re-derive exactly in Spike 0; plane-based predicates need more, see section 5) */
+  /* Hadamard bounds for 27-bit coordinate differences (P0 plan, W2):
+     orient2d: <= 2^55               -> int64
+     orient3d: ~2^83.4  (85 bits)    -> Int128
+     incircle: ~2^111.4 (113 bits)   -> Int128
+     insphere: ~2^140.6 (142 bits)   -> Int256
+     litestl's integer predicates are templated on input bits; plane-based
+     predicates need more, see section 5 */
 };
 ```
 
 - **Bit budget.** Inputs are limited to **±2²⁶ quanta** about the tile origin. The
-  cad-kernels research estimate is that 26-bit inputs keep plane-based predicates inside
-  256 bits. This needs re-deriving during Spike 0 for each predicate actually used.
+  budgets for the vertex predicates were re-derived in the
+  [P0 plan](../../plans/2026-11-17-p0-litestl-foundations.md) (W2) and are listed in
+  the comment above. Plane-based predicates are budgeted in P5.
 - **Coverage.** At a 0.1 mm quantum, ±2²⁶ covers about ±6.7 km per tile. At 1 mm it
   covers about ±67 km.
 - **Range checking.** `Lattice` construction from a double is range-checked. Overflow is
@@ -142,7 +145,10 @@ brep-topology and the "no ε" rule from cad-kernels are reconciled (D1).
 | `lexicographic_compare` | Canonical sorting for determinism |
 
 **Implementation home** (DEC-003): adaptive `double` predicates, wide integers and the
-exact integer determinants are general-purpose, so they go into **litestl** (`math/`).
+exact integer determinants are general-purpose, so they go into **litestl**
+(`litestl::math::pred`, `litestl::math::Int128/Int256`).
+- **Input domain** (adaptive `double`): |x| in [2⁻¹⁵⁰, 2²⁰⁰], or exactly 0. That keeps
+  every exact component above the FTZ threshold, even for insphere (see the P0 plan).
 UberTopo supplies only the `CoordTraits` glue and the derived predicates.
 
 ## 5. The plane-based option (D2)

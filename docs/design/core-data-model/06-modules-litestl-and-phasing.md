@@ -39,8 +39,9 @@ CMakeLists.txt             C++20; clang required (Sculptcore toolchain conventio
 | `Int128` / `Int256` signed fixed-width integers | `math/wideint.h` | 02 Lattice predicates | Use `__int128` where available; portable fallback; constexpr-friendly |
 | Adaptive `double` predicates (orient2d/3d, incircle, insphere) | `math/predicates.h` | 02 | Re-implementation of the published adaptive-expansion algorithms |
 | Exact integer determinants | `math/predicates.h` | 02 | Templated on input width |
-| `hash128` (stable, seedable) | `util/hash.h` | 03, 04, 05 | OI-4. Golden-value tests |
-| Counter-based RNG (Philox4x32-10) | `util/rng.h` | 04 | Replaces the use of `util/rand.h`; leave the old one for Sculptcore compatibility |
+| `Hash128`/`Hasher128` (SipHash-2-4-128, DEC-009) | `util/hash128.h` | 03, 04, 05 | Golden-value tests |
+| Counter-based RNG (Philox4x32-10, `litestl::rng`) | `util/rng.h` | 04 | Replaces the use of `util/rand.h`; leave the old one for Sculptcore compatibility |
+| Deterministic exclusive scan; standard-library-independent deterministic sort | `util/task.h`, `util/sort.h` | P2 bulk builder (04 §8.2) | Deferred from P0 by its review |
 | Deterministic `parallel_reduce` / ordered `parallel_for` chunks | `util/task.h` | 04 §8 | Chunking independent of worker count |
 | Paged copy-on-write store, `ColumnBase`, `Column<T>`, `BoolColumn`, `AttrGroup`, `ColumnTypeRegistry` | `attr/` (new module) | 03 | OI-5; new design modelled on Sculptcore (DEC-007) |
 | `InternPool<T>` (refcounted, canonical renumbering) | `attr/intern_pool.h` | 05 | Generalised `DeformPool` |

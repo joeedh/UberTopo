@@ -66,28 +66,26 @@ operator-derived:    id = H128(parent_id, op_kind, role)
 - **Lookup.** The map `PersistentId → Ref` is a derived cache per frozen version, built
   lazily.
 
-**Hash function (OI-4).** It needs to be:
-- a 128-bit, seedable, platform-stable, re-implemented hash over a canonical byte
-  encoding (little-endian, no padding);
-- fast on short keys (IDs plus a few integers).
-
-Candidates: a 128-bit wide-multiply construction (e.g. the XXH3-128 algorithm,
-re-implemented), or SipHash-2-4 with 128-bit output (slower, keyed). It goes into litestl
-(`litestl::hash::hash128`) per DEC-003, with golden-value tests pinned in CI.
+**Hash function (OI-4, resolved by DEC-009).** SipHash-2-4 with 128-bit output, in
+`litestl::hash::Hasher128`. Every hash begins with a **`DomainTag`**, so that generator
+IDs, operator-derived IDs and content hashes never share a space. Every field is
+**type-tagged**, so tuples can't collide structurally. `H128(...)` in this document means
+a `Hasher128` over the listed fields in order. Identity uses `f64_canonical`; content
+hashes use `f64_bits`. Golden values are pinned in litestl tests.
 
 ## 4. Keyed randomness
 
 This lives at the procedural level, but the kernel relies on it, so it is specified here:
 
 ```
-bits = Philox4x32-10( key = H128(world_seed, op_site_id, stream_name)[0..63],
-                      counter = (element_persistent_id[0..63], draw_index) )
+bits = Philox4x32-10( key = H128(world_seed, op_site_id, stream_name)  (lo = key, hi = salt),
+               counter = {elem_lo32, elem_hi32, draw, block} )   // DEC-009 layout
 ```
 
 - **Counter-based and stateless.** It is order-independent and thread-count-independent.
   Philox4x32-10 is the proposal (well studied, simple); Squares is the alternative.
-  Either is re-implemented in litestl (`litestl::util::rng`), replacing the weak LCG in
-  `util/rand.h`.
+  It is re-implemented in litestl (`litestl::rng`, DEC-009). The weak LCG in `util/rand.h`
+  is left in place for existing users.
 - **Named streams** mean that adding a new random attribute never shifts existing ones.
 
 ## 5. Versions: editable and frozen

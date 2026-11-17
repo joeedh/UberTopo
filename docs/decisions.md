@@ -348,6 +348,36 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
 
 ---
 
+## DEC-009 — Hash, canonical tuple encoding and RNG layout (resolves OI-4)
+
+- **Date:** 2026-11-17, decided while pressure-testing the
+  [P0 plan](plans/2026-11-17-p0-litestl-foundations.md).
+- **Hash:**
+  - **SipHash-2-4 with 128-bit output**, as defined by the reference implementation, is
+    re-implemented in litestl as `litestl::hash::Hash128` / `Hasher128`.
+  - It uses a public fixed key, so it provides no adversarial collision resistance.
+    That is acceptable for this project.
+  - P1 may add a faster function for page content behind the same `Hasher128`
+    interface if measurements require it.
+- **Canonical tuple encoding:**
+  - Every `Hasher128` starts with a mandatory **`DomainTag`**, which separates
+    generator IDs, operator-derived IDs and content hashes.
+  - Every encoder writes a **1-byte type tag** followed by a little-endian payload.
+    Strings are u64-length-prefixed.
+  - `f64_canonical` (−0 → +0, NaN → `0x7ff8000000000000`) is used **for identity**.
+    `f64_bits` and `raw_bytes` are used **for content hashes**.
+- **RNG:**
+  - The generator is **Philox4x32-10** in `litestl::rng`.
+  - The counter layout is pinned as `{elem_lo32, elem_hi32, draw, block}`.
+  - `range()` rejection advances `block`, never `draw`.
+  - The stream key's low half is the Philox key, and its high half salts `ctr[3]`.
+  - Persistent IDs fold to 64-bit elements; the fold is documented.
+- **Pinned goldens.** ID-derivation, RNG-stream and determinism-digest goldens are
+  pinned in litestl tests. **Changing any of them requires a new DEC entry**, because
+  it changes all procedural output.
+
+---
+
 ## Open questions
 
 - ~~Q-A — WASM target~~ → DEC-005 (native N-API in a Chromium shell).
