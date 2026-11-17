@@ -1,6 +1,6 @@
 # Core Data Model — Design
 
-**Status:** draft v0.1 (2026-11-17). Not yet reviewed. Implementation plans derived from
+**Status:** draft v0.2 (2026-11-17). OI-1, OI-2 and OI-5 resolved by [DEC-008](../../decisions.md). Not yet reviewed. Implementation plans derived from
 it go in `docs/plans/` and are pressure-tested first (see `CLAUDE.md`).
 
 This design covers UberTopo's central data structure:
@@ -104,9 +104,9 @@ Those are later designs that build on this one.
 
 | # | Issue | Where |
 |---|---|---|
-| OI-1 | Plane-based exact representation (D2): either a `Coord` instantiation with homogeneous points, or a separate plane table plus explicit vertices. Spike 1 decides | [02 §5](02-coordinates-and-predicates.md#5-the-plane-based-option-d2) |
-| OI-2 | Whether shells and regions are maintained incrementally by every operator, or rebuilt by a region pass after construction batches. The proposal is the latter, with a `regions_dirty` state | [01 §6](01-cell-complex.md#6-shells-and-regions-maintenance-model) |
+| OI-1 | ~~Plane-based exact representation~~ **Resolved (DEC-008):** `Lattice` vertices plus an exact plane table, with homogeneous points inside the Boolean engine only. **Re-review in P5** | [02 §5](02-coordinates-and-predicates.md#5-the-plane-based-option-d2) |
+| OI-2 | ~~Region maintenance~~ **Resolved (DEC-008):** rebuilt by `build_regions()`, with a `regions_dirty` state | [01 §6](01-cell-complex.md#6-shells-and-regions-maintenance-model) |
 | OI-3 | Page size for copy-on-write columns (Sculptcore uses 4096; the research suggests 1–16K). Measure | [03 §3](03-attributes.md#3-paged-copy-on-write-storage) |
 | OI-4 | Choice of 128-bit hash function (re-implemented, platform-stable) | [04 §3](04-identity-versions-journal.md#3-persistent-ids) |
-| OI-5 | Whether the generic attribute machinery lives in litestl (`litestl::attr`) from day one or starts in UberTopo and moves later. The proposal is litestl, per DEC-003 | [06](06-modules-litestl-and-phasing.md) |
+| OI-5 | ~~Location of the attribute machinery~~ **Resolved (DEC-008):** litestl `attr/` from day one | [06](06-modules-litestl-and-phasing.md) |
 | OI-6 | Sculptcore adoption of the new attribute system (Q-H) | [decisions.md](../../decisions.md) |

@@ -17,6 +17,8 @@ defense systems. See `docs/requirements.md`.
   pressure test it with an agent that has a fresh context (one that has not seen
   the discussion that produced the plan); record the review's findings and any plan
   changes in the plan file.
+* **Source file size:** when a source file exceeds **40 KB**, split it, using an
+  intelligent subdirectory layout as needed. This does not apply to auto-generated files.
 * **Docs index:** maintain `docs/index.md`. Every time a doc is added, moved, renamed
   or removed under `docs/`, update the index in the same change.
 
@@ -29,7 +31,8 @@ defense systems. See `docs/requirements.md`.
   test harness, and `path` instead of `std::filesystem`.
 * **litestl is ours to modify.** General-purpose additions (RNG, hashing, wide ints,
   predicates, containers, N-API runtime) go into litestl, committed in the submodule
-  and pushed there, then the submodule pointer is bumped. **B-splines stay in
+  and pushed there (to a feature branch, not `master`, unless told otherwise), then the
+  submodule pointer is bumped. **B-splines stay in
   UberTopo**, not litestl.
 * **TypeScript/Python glue goes through litestl's binding system** (`defineBindings()`).
   The UX runs in an NW.js shell (DEC-006; N-API migration and Python deferred) and loads UberTopo as a **native

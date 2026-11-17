@@ -19,6 +19,8 @@ CMakeLists.txt             C++20; clang required (Sculptcore toolchain conventio
 ```
 
 **Conventions.**
+- Source files over 40 KB are split into subdirectories (`CLAUDE.md`), except
+  auto-generated files.
 - Namespaces are `ubertopo::{geom,curves,attr,topo,ident,io}`.
 - Follow litestl conventions: `.h`/`.cc`, its containers and allocator, `path`, and its
   test harness.
@@ -45,9 +47,8 @@ CMakeLists.txt             C++20; clang required (Sculptcore toolchain conventio
 | `UniquePtr` | `util/memory.h` | 03 | Missing: litestl has only `shared_ptr`/`weak_ptr` |
 | io `Writer`/`Reader` interface for columns | `io/` | 03 | Build on `binfile` |
 
-**Push access.** Changes are made in the submodule and pushed to litestl, and then the
-pointer is bumped here. The first litestl change needs push access for the working
-session (currently read-only).
+**Push access.** Granted (DEC-008). Changes are made in the submodule, pushed to a
+litestl feature branch, and then the pointer is bumped here.
 
 ## 3. Phased delivery
 

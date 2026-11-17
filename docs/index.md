@@ -7,13 +7,13 @@ Index of everything under `docs/`. Update this file whenever a doc is added, mov
 | Doc | Description |
 |---|---|
 | [requirements.md](requirements.md) | Project requirements |
-| [decisions.md](decisions.md) | Project decision log: DEC-001 C++20/litestl, DEC-002 no third-party libs in core, DEC-003 litestl submodule + additions in litestl, DEC-004 allowed third-party (formats/compression/LAZ), DEC-005 Chromium shell + N-API, DEC-006 NW.js / defer N-API migration & Python / SoA B-rep modelled on Sculptcore, DEC-007 coord type as template param / concepts / open attribute system; open questions |
+| [decisions.md](decisions.md) | Project decision log: DEC-001 C++20/litestl, DEC-002 no third-party libs in core, DEC-003 litestl submodule + additions in litestl, DEC-004 allowed third-party (formats/compression/LAZ), DEC-005 Chromium shell + N-API, DEC-006 NW.js / defer N-API migration & Python / SoA B-rep modelled on Sculptcore, DEC-007 coord type as template param / concepts / open attribute system, DEC-008 core data model OIs resolved / litestl push / 40 KB file rule; open questions |
 | [debugging.md](debugging.md) | Running debugging guide |
 | [index.md](index.md) | This index |
 
 ## Design (`design/`)
 
-### Core data model (`design/core-data-model/`) — draft v0.1
+### Core data model (`design/core-data-model/`) — draft v0.2
 
 - [README.md](design/core-data-model/README.md) — Overview, ten core rules, open issues
 - [01-cell-complex.md](design/core-data-model/01-cell-complex.md) — Entities, topology columns, faces with holes, radial order and wedge rule, inclusions, shells/regions, primitives, validation, editable/frozen

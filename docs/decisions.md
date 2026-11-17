@@ -328,6 +328,26 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
 
 ---
 
+## DEC-008 — Core data model open issues resolved; litestl push access; source file size rule
+
+- **Date:** 2026-11-17
+- **Decisions** (on [design/core-data-model](design/core-data-model/README.md)):
+  - **OI-1 (exact representation):** accept the lean. Store `Lattice` vertices plus an
+    exact plane table, and use plane-based homogeneous points only inside the Boolean
+    engine. **Re-review in phase P5**, where the prototype will confirm or overturn it.
+  - **OI-2 (regions):** accepted. Shells and regions are derived and rebuilt by
+    `build_regions()` after construction batches, with incremental maintenance only in
+    trivial operators.
+  - **OI-5 (generic attribute machinery):** goes into a new **litestl `attr/`** module
+    from day one.
+  - **litestl push access** granted. Work is pushed to litestl feature branches, and the
+    submodule pointer is bumped in UberTopo.
+  - **New rule:** source files over **40 KB** are split, with an intelligent
+    subdirectory layout where needed. Auto-generated files are exempt. Added to
+    `CLAUDE.md`.
+
+---
+
 ## Open questions
 
 - ~~Q-A — WASM target~~ → DEC-005 (native N-API in a Chromium shell).
