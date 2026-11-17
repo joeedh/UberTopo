@@ -11,6 +11,18 @@ Index of everything under `docs/`. Update this file whenever a doc is added, mov
 | [debugging.md](debugging.md) | Running debugging guide |
 | [index.md](index.md) | This index |
 
+## Design (`design/`)
+
+### Core data model (`design/core-data-model/`) — draft v0.1
+
+- [README.md](design/core-data-model/README.md) — Overview, ten core rules, open issues
+- [01-cell-complex.md](design/core-data-model/01-cell-complex.md) — Entities, topology columns, faces with holes, radial order and wedge rule, inclusions, shells/regions, primitives, validation, editable/frozen
+- [02-coordinates-and-predicates.md](design/core-data-model/02-coordinates-and-predicates.md) — Coord concepts and traits, instantiations (double/float/Lattice/plane-based option), predicates, tile frames, conversions
+- [03-attributes.md](design/core-data-model/03-attributes.md) — Open attribute system: paged COW storage, column interface, registry, domains, propagation, schemas
+- [04-identity-versions-journal.md](design/core-data-model/04-identity-versions-journal.md) — Indices, handles, persistent IDs, keyed RNG, snapshots, journal, compaction, determinism contract
+- [05-geometry-pools.md](design/core-data-model/05-geometry-pools.md) — GeomRef, geometry pools, layered exact/approximation geometry, initial curve and surface kinds
+- [06-modules-litestl-and-phasing.md](design/core-data-model/06-modules-litestl-and-phasing.md) — Source layout, litestl work list, phases P0–P5
+
 ## Plans (`plans/`)
 
 _None yet._ Plans must be pressure-tested by a fresh-context agent before implementation.
