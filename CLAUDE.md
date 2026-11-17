@@ -19,3 +19,17 @@ defense systems. See `docs/requirements.md`.
   changes in the plan file.
 * **Docs index:** maintain `docs/index.md`. Every time a doc is added, moved, renamed
   or removed under `docs/`, update the index in the same change.
+
+## Technology (see `docs/decisions.md`)
+
+* **C++20 on [litestl](https://github.com/joeedh/litestl)** (DEC-001). Follow litestl's
+  conventions: its containers (`util::Vector/Map/Set/...`) over the STL in hot paths,
+  allocate via `litestl::alloc`, hash via `litestl::hash`, `.h`/`.cc` files, its test
+  harness, and `path` instead of `std::filesystem`.
+* **TypeScript/Python glue goes through litestl's binding system** (`defineBindings()`),
+  not pybind11/embind/etc.
+* **Avoid third-party libraries** (DEC-002). litestl and what it vendors (Eigen, lz4) are
+  fine. The Manifold library is the only candidate exception and needs an explicit
+  decision before it is linked. Third-party/GPL code (e.g. CGAL, Clothoids) may be used
+  only as an offline test oracle, never linked. Re-implementing published algorithms is
+  the default.

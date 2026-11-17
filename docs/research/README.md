@@ -19,6 +19,11 @@ track.
 | Attributes & queries | [attributes-and-queries/](attributes-and-queries/README.md) | Attribute systems, embedded geometry, spatial indices, query API, coordinates, LOD |
 | Simulation requirements | [simulation-requirements/](simulation-requirements/README.md) | Acoustics, EO/IR, RF, vulnerability surveys, simulators, requirements matrix |
 
+> **Decisions since this synthesis:** see [../decisions.md](../decisions.md). DEC-001 sets
+> C++20 on litestl; DEC-002 says avoid third-party libraries. Wherever a track doc says
+> "borrow" (Embree, OpenVDB, Clipper2, meshoptimizer, Shewchuk/Geogram, Clothoids), read
+> "build", following the revised table in DEC-002.
+
 > **Verification caveat.** Web search worked for all tracks, but direct page fetches were
 > blocked for many hosts (arxiv.org, doi.org, blender.org, buildingsmart, ASAM), and the
 > shared search budget ran out late in several tracks. Claims taken from memory are
@@ -211,7 +216,7 @@ The consensus points, with the tracks that support each:
 | D1 | **Coordinates and exactness** | cad-kernels: integer homogeneous **plane-based** coordinates on a per-tile lattice (~26-bit inputs, ≤256-bit predicates), with tolerances only as explicit modelling ops | brep-topology / attributes: **f64** tile-local frames with **local journaled tolerances** (Parasolid-style) for mixed GIS/scan/CAD inputs | Use **both, by provenance**. Generated planar content uses the exact lattice. Imported, scanned or curved content enters through an explicit "import/snap" operation that records its tolerance. Prototype both before committing. |
 | D2 | **Vertex representation** | cad-kernels: vertices may be *implicit* (plane triples) and planes are first-class shared entities | brep-topology: explicit vertex points with curves and surfaces as geometry | Depends on D1. If plane-based, planes become a first-class geometry pool referenced by faces, and vertex points are cached roundings. |
 | D3 | **Float tile frames** | attributes: f32 is allowed in tile frames up to about 8 km for mm precision | cad-kernels: f32 only at the GPU boundary (camera-relative) | Keep the f32 boundary at GPU and render only. All kernel computation uses f64 or exact arithmetic. |
-| D4 | **Boolean back end** | cad-kernels: build our own plane-based exact arrangement, with Manifold as fallback | brep-topology: arrangement-and-select on our complex | These are compatible. The open risk is that no permissively licensed production implementation exists. Mitigate with differential testing against Manifold and CGAL Nef_3. |
+| D4 | **Boolean back end** | cad-kernels: build our own plane-based exact arrangement, with Manifold as fallback | brep-topology: arrangement-and-select on our complex | These are compatible. The open risk is that no permissively licensed production implementation exists. Mitigate with differential testing against Manifold and CGAL Nef_3 (CGAL only as an offline oracle, per DEC-002). |
 
 ---
 
@@ -222,8 +227,10 @@ the design.
 
 **Shape the core architecture**
 
-1. **Language:** Rust or C++? This decides reuse of kurbo (Rust) versus Clothoids, OCCT,
-   Manifold and OpenVDB (C++).
+1. ~~**Language:** Rust or C++?~~ **Answered:** C++20 on litestl, with litestl bindings
+   for TS/Py glue, and third-party libraries avoided (Manifold a possible exception). See
+   [../decisions.md](../decisions.md) DEC-001/DEC-002, which also revise the
+   borrow-vs-build tables in the track docs.
 2. **Reproducibility:** is bit-identical output across machines, thread counts and GPUs
    required, or is statistical reproducibility enough? The designs assume bit-identical
    for discrete decisions.
@@ -276,7 +283,7 @@ the design.
 Per [CLAUDE.md](../../CLAUDE.md), each of these becomes a plan in `docs/plans/` and is
 pressure-tested by a fresh-context agent before implementation.
 
-1. **Get answers to questions 1–5 above.** They change the plans materially.
+1. **Get answers to questions 2–5 above**, plus Q-A to Q-E in [../decisions.md](../decisions.md). They change the plans materially.
 2. **Write a design doc in `docs/`** for the core data model:
    - cell complex entities and storage modes;
    - identity scheme;
