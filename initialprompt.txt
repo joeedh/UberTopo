@@ -6,3 +6,7 @@ Create a CLAUDE.md with the following rules:
 * All plans must be saved to the repo, in docs/plans; use 
   an agent with a fresh context to pressure test them before implementation.
 * Maintain an index for the docs folder in docs/index.md
+
+Read docs/requirements.md.  Do deep research on procedural modeling systems,
+you will likely end up with a large document afterwards, if so split it into 
+smaller ones.

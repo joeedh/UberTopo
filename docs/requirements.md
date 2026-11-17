@@ -1,10 +1,16 @@
 I need to create a system to model human and natural environments at a variety of levels of detail.  This will require a decent CAD kernel and a procedural modeling core. 
+The purpose is developing and testing drone defense systems. 
 
 Environments include:
 * All building types.
 * Forests, swamps, deserts, etc.
 * Road networks
 * Physical infrastructure.
+* Bodies of water and waterways.
+
+The kind of situations we want to test:
+* Detecting and locating drone swarms based on microphone, camera, etc networks, dealing with sonic reflections etc.
+* Surveying sites for vulnerability to drones.
 
 Be skeptical of the design of existing systems, many are built on foundations written in the 90s.  At the very least we will need:
 
