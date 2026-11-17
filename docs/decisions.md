@@ -36,15 +36,15 @@ than editing the old one.
 
 | Gap | Why it is needed | Proposed home |
 |---|---|---|
-| **Counter-based RNG** (Philox-4x32 or Squares) with keyed named streams | `util/rand.h` is a self-described "very bad" LCG with 19-bit output. Procedural determinism needs `rng(seed, node, purpose, element_id)` to be stateless and order-independent. | litestl (general purpose) |
+| **Counter-based RNG** (Philox-4x32 or Squares) with keyed named streams | `util/rand.h` is a self-described "very bad" LCG with 19-bit output. Procedural determinism needs `rng(seed, node, purpose, element_id)` to be stateless and order-independent. | litestl |
 | **128-bit hashing** (stable across platforms, independent of pointers) | Persistent provenance IDs and content-addressed cache keys | litestl |
-| **Fixed-width wide integers** (128/256-bit signed, with mul/add/sign) | Exact plane-based predicates (~26-bit inputs, ≤256-bit intermediates) | UberTopo kernel, or litestl if wanted |
-| **Adaptive floating-point predicates** (orient2d/3d, incircle; Shewchuk-style expansions) | Exact 2D arrangements and CDT | UberTopo kernel |
-| **B-spline library** (`math/bspline.h` is an empty stub) | Certified curve and surface caches | UberTopo curves module, or finish litestl's stub |
-| **Deterministic reductions** for `parallel_for` | Floating-point sums must not depend on chunking or thread count | UberTopo, as a fixed-chunk reduce helper |
-| **Copy-on-write paged columns** | Versioned topology and attribute storage | UberTopo core |
+| **Fixed-width wide integers** (128/256-bit signed, with mul/add/sign) | Exact plane-based predicates (~26-bit inputs, ≤256-bit intermediates) | litestl |
+| **Adaptive floating-point predicates** (orient2d/3d, incircle; Shewchuk-style expansions) | Exact 2D arrangements and CDT | litestl |
+| **B-spline library** (`math/bspline.h` is an empty stub) | Certified curve and surface caches | **UberTopo** (DEC-003: not litestl) |
+| **Deterministic reductions** for `parallel_for` | Floating-point sums must not depend on chunking or thread count | litestl (`task`) |
+| **Copy-on-write paged columns** | Versioned topology and attribute storage | litestl (generic container) |
 
-The proposed homes are suggestions. See open question Q-B below.
+Homes are as decided in DEC-003: everything goes into litestl except B-splines.
 
 ---
 
@@ -120,20 +120,120 @@ only simple, documented formats. See Q-C.
 
 ---
 
-## Open questions raised by these decisions
+## DEC-003 — litestl is a git submodule, and additions go into litestl
 
-- **Q-A — WASM target.** Must UberTopo run in WASM (browser or Node), given litestl's
-  first-class WASM build and the TS glue? WASM32 limits memory to 4 GB (memory64 is
-  needed beyond that), threading needs SharedArrayBuffer, and wide-integer exact
-  arithmetic is slower. This affects tile sizes and the design of the exact core.
-- **Q-B — Where should general-purpose additions live?** Should counter-based RNG,
-  128-bit hashing, wide integers and B-splines go into **litestl** (shared with
-  Sculptcore) or stay in UberTopo?
-- **Q-C — Offline converters.** Can format conversion (GeoTIFF, OSM PBF, LAZ, STEP) live
-  in separate offline tools that may use third-party libraries, or must the whole
-  toolchain be in-house?
-- **Q-D — How litestl is included.** The proposal is a git submodule (e.g. `extern/litestl`
-  or `source/litestl`, as in Sculptcore), pinned per commit.
-- **Q-E — Python binding runtime.** litestl's Python generator emits `.pyi` stubs. What is
-  the intended native Python runtime path (CPython extension module, ctypes or cffi over
-  the C ABI, or Python via WASM)?
+- **Date:** 2026-11-17
+- **Decision:**
+  - litestl is included as a **git submodule at `source/litestl`**. This matches
+    Sculptcore's layout, so `source/` is the include root and includes read
+    `"litestl/util/vector.h"`.
+  - **We modify litestl as needed.** General-purpose additions go **into litestl**:
+    counter-based RNG, 128-bit hashing, wide integers, adaptive predicates,
+    deterministic reductions, copy-on-write paged columns, and the N-API runtime
+    (DEC-005).
+  - **Exception: B-splines live in UberTopo**, not litestl. litestl's `math/bspline.h`
+    stub is left alone.
+- **Answers:** Q-B and Q-D.
+- **Workflow note:** changes to litestl are made in the submodule, committed and pushed
+  to the litestl repo, and then the submodule pointer is bumped in UberTopo. The
+  Claude session currently has read-only access to `joeedh/litestl`. Pushing litestl
+  changes needs push access to be granted when the first litestl change is made.
+
+---
+
+## DEC-004 — Third-party libraries allowed for formats, compression and LiDAR
+
+- **Date:** 2026-11-17
+- **Decision:** these refine DEC-002. The following third-party categories are
+  acceptable:
+  - **Protobuf** (e.g. for OSM PBF).
+  - **Compression and decompression** libraries.
+  - **Third-party format converters.**
+  - **A third-party compressed-LiDAR (LAZ) library**, "for now".
+- **Answers:** Q-C.
+- **Candidates.** These are recommendations, not yet decisions; choose when the
+  importer is built.
+
+| Need | Candidate | Licence | Notes |
+|---|---|---|---|
+| Protobuf (OSM PBF) | **protozero** | BSD-2 | Header-only, minimal; the decoder libosmium uses. Google `protobuf` (BSD-3) also works but is much heavier and needs code generation. |
+| Deflate / zlib (GeoTIFF, OSM PBF, glTF/PNG) | **libdeflate** or **zlib** | MIT / zlib | libdeflate is faster for whole-buffer decode; zlib is needed for streaming. |
+| Other compression | zstd | BSD-3 | Optional, for our own tile/cache blobs alongside litestl's lz4. |
+| LAZ (compressed LiDAR) | **laz-perf** | Apache-2.0 | Supports LAS 1.4 point formats 6–8, used by PDAL. LASzip (LGPL-2.1) is the reference alternative. *(Verify current versions and point-format coverage when adopting.)* |
+| Format conversion | GDAL/OGR, PDAL (external tools) | MIT / BSD | Run as **offline converters** outside the UberTopo binary, e.g. GeoTIFF → raw tiles, shapefile → GeoJSON. |
+
+The core geometry stays in-house per DEC-002. The DEC-002 consequences on the I/O and
+format layer are relaxed accordingly. JSON, XML and the glTF / 3D Tiles / CityJSON /
+OpenDRIVE writers are still ours, since they are simple.
+
+---
+
+## DEC-005 — UX in a Chromium shell through litestl's N-API support (not WASM)
+
+- **Date:** 2026-11-17
+- **Decision:**
+  - The UX may run in a **Chromium shell** (NW.js or Electron).
+  - UberTopo is loaded as a **native Node-API (N-API) addon** using litestl's N-API
+    binding support. It is not compiled to WASM, so the WASM32 4 GB memory and
+    threading limits do not apply.
+- **Answers:** Q-A.
+- **Known state:** the N-API support is "somewhat hackish" and we may need to improve it.
+
+### Where the N-API code lives today (Sculptcore `d508c0b`, read 2026-11-17)
+
+litestl currently contains **no N-API code**. Its binding system has a TS/WASM runtime
+and a Python `.pyi` generator only. The N-API reflection runtime has **bled into
+Sculptcore**, under `source/napi/`. Classification:
+
+| Sculptcore file | Generic (move to litestl) | Sculptcore-specific |
+|---|---|---|
+| `napi_runtime.h/.cc` — C++ port of the TS binding runtime reading `litestl::binding` descriptors; log sink | ✅ (rename `sc_`-prefixed symbols) | |
+| `napi_object_model.cc` — JS class construction, instance wrapping, member/array accessors | ✅ | |
+| `napi_introspection.cc` — method/constructor invocation, `structInfo`, `construct`, `makeXVector` out-param helpers | ✅ | |
+| `napi_vector_bridge.cc` — typed-array views over `util::Vector`, element access, JS→C++ assign | ✅ | |
+| `napi_util.h/.cc` — marshalling helpers | ✅ | |
+| `napi_log.h` — log sink indirection | ✅ | |
+| `napi_debug.cc` — allocator introspection, stdout redirect | partly (allocator dumps) | Crashpad, smoke test |
+| `napi_entry.cc`, `napi_c_api.h`, `napi_mesh_vdm.cc`, `napi_gpu_brush.cc`, `napi_spatial_multires.cc` | | ✅ |
+| `typescript/api/nativeManager.ts`, `nativeBackend.ts` | likely (TS side of the runtime) | |
+| Build: cmake-js configure, clang `/DELAYLOAD` fix, NW.js/Electron runtime selection (`spike/napi/RESULTS.md`) | ✅ as a reusable CMake macro | |
+
+### Hacks and limitations seen so far (to fix in litestl)
+
+- **Strings and JS arrays can't cross the generic method binding** (`marshalArg`).
+  Sculptcore works around this with dedicated `extern "C"` seams per call
+  (`napi_spatial_multires.cc`, `napi_mesh_vdm.cc`). Generic `string`, `Span`, `Vector`
+  and typed-array marshalling is needed.
+- **Vector out-params** need hand-written `makeXVector` helpers. This matches litestl's
+  own TODO (find `Vector` template instantiations, and create and free them
+  automatically).
+- Raw C N-API only, because node-addon-api's `CallbackInfo` miscompiles under clang on
+  Windows (per the Sculptcore spike). Keep it that way.
+- Opaque engine objects cross as externals without GC finalizers, by design in
+  Sculptcore. UberTopo needs an explicit ownership policy per bound type.
+
+### Plan implication
+
+Before any UberTopo UX work there is a **litestl N-API migration task**: move the generic
+runtime from Sculptcore into `litestl/binding/napi/`, generalise the marshalling, and
+switch Sculptcore to it. That will be its own plan in `docs/plans/`, pressure-tested
+before execution. It touches Sculptcore too, so it needs coordination.
+
+---
+
+## Open questions
+
+- ~~Q-A — WASM target~~ → DEC-005 (native N-API in a Chromium shell).
+- ~~Q-B — where general-purpose additions live~~ → DEC-003 (litestl; B-splines in
+  UberTopo).
+- ~~Q-C — offline converters~~ → DEC-004 (third-party converters allowed).
+- ~~Q-D — how litestl is included~~ → DEC-003 (submodule at `source/litestl`).
+- **Q-E — Python binding runtime** *(still open)*. litestl's Python generator emits
+  `.pyi` stubs only. Should native Python go through a CPython extension module
+  generated from the same descriptors as the N-API runtime, or ctypes/cffi over a
+  C ABI? Is Python needed early at all?
+- **Q-F — Sculptcore coordination.** Can the N-API migration modify Sculptcore in the
+  same effort, or should litestl gain the runtime first and Sculptcore switch over
+  later?
+- **Q-G — Chromium shell.** NW.js (Sculptcore's default) or Electron? Sculptcore keeps
+  both, so we could follow it.

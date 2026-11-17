@@ -20,7 +20,9 @@ track.
 | Simulation requirements | [simulation-requirements/](simulation-requirements/README.md) | Acoustics, EO/IR, RF, vulnerability surveys, simulators, requirements matrix |
 
 > **Decisions since this synthesis:** see [../decisions.md](../decisions.md). DEC-001 sets
-> C++20 on litestl; DEC-002 says avoid third-party libraries. Wherever a track doc says
+> C++20 on litestl; DEC-002 says avoid third-party libraries in the core (DEC-004 allows
+> format, compression and LAZ libraries); DEC-005 makes the UX a Chromium shell with a
+> native N-API addon. Wherever a track doc says
 > "borrow" (Embree, OpenVDB, Clipper2, meshoptimizer, Shewchuk/Geogram, Clothoids), read
 > "build", following the revised table in DEC-002.
 
@@ -283,7 +285,7 @@ the design.
 Per [CLAUDE.md](../../CLAUDE.md), each of these becomes a plan in `docs/plans/` and is
 pressure-tested by a fresh-context agent before implementation.
 
-1. **Get answers to questions 2–5 above**, plus Q-A to Q-E in [../decisions.md](../decisions.md). They change the plans materially.
+1. **Get answers to questions 2–5 above**, plus the remaining open questions in [../decisions.md](../decisions.md). They change the plans materially.
 2. **Write a design doc in `docs/`** for the core data model:
    - cell complex entities and storage modes;
    - identity scheme;

@@ -22,14 +22,22 @@ defense systems. See `docs/requirements.md`.
 
 ## Technology (see `docs/decisions.md`)
 
-* **C++20 on [litestl](https://github.com/joeedh/litestl)** (DEC-001). Follow litestl's
-  conventions: its containers (`util::Vector/Map/Set/...`) over the STL in hot paths,
-  allocate via `litestl::alloc`, hash via `litestl::hash`, `.h`/`.cc` files, its test
-  harness, and `path` instead of `std::filesystem`.
-* **TypeScript/Python glue goes through litestl's binding system** (`defineBindings()`),
-  not pybind11/embind/etc.
-* **Avoid third-party libraries** (DEC-002). litestl and what it vendors (Eigen, lz4) are
-  fine. The Manifold library is the only candidate exception and needs an explicit
-  decision before it is linked. Third-party/GPL code (e.g. CGAL, Clothoids) may be used
-  only as an offline test oracle, never linked. Re-implementing published algorithms is
-  the default.
+* **C++20 on [litestl](https://github.com/joeedh/litestl)** (DEC-001), included as a git
+  submodule at `source/litestl` (DEC-003); `source/` is the include root. Follow
+  litestl's conventions: its containers (`util::Vector/Map/Set/...`) over the STL in hot
+  paths, allocate via `litestl::alloc`, hash via `litestl::hash`, `.h`/`.cc` files, its
+  test harness, and `path` instead of `std::filesystem`.
+* **litestl is ours to modify.** General-purpose additions (RNG, hashing, wide ints,
+  predicates, containers, N-API runtime) go into litestl, committed in the submodule
+  and pushed there, then the submodule pointer is bumped. **B-splines stay in
+  UberTopo**, not litestl.
+* **TypeScript/Python glue goes through litestl's binding system** (`defineBindings()`).
+  The UX runs in a Chromium shell (NW.js/Electron) and loads UberTopo as a **native
+  N-API addon**, not WASM (DEC-005). Use raw C N-API (`node_api.h`), never
+  node-addon-api.
+* **Avoid third-party libraries in the core** (DEC-002). Allowed: litestl and what it
+  vendors (Eigen, lz4); protobuf, compression/decompression libraries, a LAZ library,
+  and third-party format converters (DEC-004). Manifold is a candidate exception that
+  needs an explicit decision before linking. GPL or other third-party code (CGAL,
+  Clothoids) may be used only as an offline test oracle, never linked. Re-implementing
+  published algorithms is the default for geometry.
