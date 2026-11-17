@@ -44,3 +44,10 @@ defense systems. See `docs/requirements.md`.
 * **B-rep storage is struct-of-arrays modelled on Sculptcore's mesh** (DEC-006). Use
   `docs/research/sculptcore-brep-reference.md` and Sculptcore's `source/mesh/` (MIT,
   same author) as reference.
+* **Use C++20 concepts** to constrain templates (DEC-007). The coordinate numeric type
+  is a template parameter of the geometry core (constrained by a coord/predicate
+  concept); attributes, IDs and topology columns are not templated on it.
+* **The attribute system is open:** custom attribute column classes register through a
+  polymorphic column interface. Don't add central `switch`/trampoline dispatch over all
+  attribute types; per-column virtual dispatch is fine, but keep per-element hot loops
+  on typed columns.

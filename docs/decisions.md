@@ -241,6 +241,93 @@ before execution. It touches Sculptcore too, so it needs coordination.
 
 ---
 
+## DEC-007 — Coordinate type as a template parameter; C++20 concepts; open, modular attribute system
+
+- **Date:** 2026-11-17
+- **Decisions:**
+  1. **The coordinate numeric type is a template parameter** of the topology/geometry
+     core rather than a fixed `float`/`double`. **C++20 concepts** constrain template
+     parameters throughout the codebase, rather than SFINAE or unconstrained templates.
+  2. **Ordering faces around an edge is a solved, local problem**, not a design driver.
+     Sort the radial cycle by angle around the edge on insert, or in a frozen-mode
+     rebuild.
+  3. **The attribute system is modular and open.** Custom attribute classes can be
+     added as needed without touching core code. This relaxes Sculptcore's design, where
+     attributes come from a closed set fixed at compile time and are dispatched through
+     `type_dispatch` switches and specialisation trampolines to avoid virtual calls.
+     Core attribute code does **not** need a switch or trampoline covering every valid
+     type, and some dynamic dispatch is acceptable.
+
+### Implications
+
+**Coordinate template parameter (resolves the shape of open decision D1):**
+- **Instantiations instead of a choice.** Instead of choosing "f64 + tolerances" *or*
+  "exact integer lattice", the core is generic over a `Coord` concept. Each tile or
+  complex is instantiated with one type: `double` for imported or scanned content, an
+  exact or lattice type for generated planar content, and `float` for light tools and
+  tests. D1 now means "which instantiations exist, and which is the default for which
+  content".
+- **Predicates come with the type.** The concept must carry the geometric predicates,
+  not just arithmetic. Orientation and in-circle tests are exact for integer and lattice
+  types and adaptive-exact for `double`. A traits or concept pair (sketch below) keeps
+  algorithms such as arrangements and CDT written once.
+- **Wider intermediates.** Exact types need intermediate types: products widen, e.g.
+  int64 → int128 → 256-bit (the wide-integer types going into litestl per DEC-003). The
+  concept must expose them.
+- **Explicit conversion between complexes.** Two complexes with different `Coord` types
+  can't share topology directly. Moving between them (snapping imported data onto a
+  lattice, exporting doubles) is an explicit, journaled operation. This matches the
+  "import/snap operation that records its tolerance" resolution suggested for D1.
+- **Attributes are not templated.** Attributes, IDs and topology columns stay
+  independent of `Coord`. Only position or plane columns and geometry pools are
+  parameterised. This keeps template bloat to the geometric layer.
+- **Bindings.** The binding system binds concrete types, so each exported
+  instantiation is registered explicitly (e.g. `Complex<double>`). This ties in with
+  litestl's TODO about finding template instantiations for `Vector`.
+
+```cpp
+// Sketch only: names are illustrative, not decided.
+template <typename T>
+concept CoordScalar = requires(T a, T b) {
+  { a + b } -> std::convertible_to<T>;
+  { a - b } -> std::convertible_to<T>;
+  { a * b };                                   // may widen
+  { CoordTraits<T>::is_exact } -> std::convertible_to<bool>;
+  typename CoordTraits<T>::Wide;               // widened type for products
+};
+
+template <typename T>
+concept ExactPredicates = CoordScalar<T> && requires(const math::Vec<T, 3> &p) {
+  { orient3d(p, p, p, p) } -> std::same_as<int>; // sign only; exact or adaptive-exact
+  { orient2d(p, p, p) } -> std::same_as<int>;
+};
+
+template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec<Coord,3> */ };
+```
+
+**Open attribute system:**
+- **Extension point.** A polymorphic attribute *column* base class (virtual `resize`,
+  `swap`, `reorder`, `copy`, `interpolate/merge`, `serialize`, `default`) replaces the
+  closed `AttrType` enum plus `type_dispatch`. New attribute classes register a factory
+  under a type key, e.g. acoustic band arrays, material handles, geometry-pool slots,
+  persistent IDs.
+- **Where virtual calls happen.** Dispatch is per column operation (once per column per
+  topology op or bulk pass), not per element. Hot loops get the typed column through a
+  checked downcast (`group.get<AttrData<T>>("name")`), so the cost is negligible.
+- **What stays.** Paged storage, lazy page materialisation and copy-on-write pages stay
+  generic in `AttrData<T>`. Packed bools can remain a specialised column class.
+  Merge/interpolation policy becomes a per-column hook rather than a central switch.
+- **Schema metadata.** Each registered attribute class or instance carries unit, role,
+  frame and quantity kind (see
+  [attributes-and-queries/recommendations](research/attributes-and-queries/recommendations.md)).
+  Registration and metadata use litestl's binding descriptors where possible, so that
+  custom attribute classes are also bindable.
+- **Q-H, partly answered.** The new system is a **modular redesign modelled on**
+  Sculptcore's attributes, not a straight move of them. Whether Sculptcore later adopts
+  it is left open.
+
+---
+
 ## Open questions
 
 - ~~Q-A — WASM target~~ → DEC-005 (native N-API in a Chromium shell).
@@ -257,7 +344,7 @@ before execution. It touches Sculptcore too, so it needs coordination.
   later?
 - ~~Q-G~~ → DEC-006 (NW.js). Original text: **Chromium shell.** NW.js (Sculptcore's default) or Electron? Sculptcore keeps
   both, so we could follow it.
-- **Q-H — Sculptcore's attribute system.** Should Sculptcore's paged attribute system
+- **Q-H — Sculptcore's attribute system** *(partly answered by DEC-007: new modular design modelled on Sculptcore; Sculptcore adoption open)*. Should Sculptcore's paged attribute system
   (`AttrData`/`AttrGroup`/`BuiltinAttr`, plus the `DeformPool` intern pattern) be
   **moved** into litestl and generalised, with Sculptcore becoming a client? Or should
   litestl get a new implementation modelled on it, leaving Sculptcore untouched for now?

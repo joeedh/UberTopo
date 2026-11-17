@@ -71,11 +71,11 @@ Supporting machinery:
 
 | Sculptcore | Why it doesn't fit UberTopo | Change |
 |---|---|---|
-| `co` is `float3` | Site-scale coordinates need f64, or exact lattice coordinates (open decision D1 in [README](README.md#3-where-the-tracks-disagree-decisions-needed)) | `double3` positions in tile frames, and/or plane-based integer geometry in a pool |
+| `co` is `float3` | Site-scale coordinates need f64, or exact lattice coordinates (open decision D1 in [README](README.md#3-where-the-tracks-disagree-decisions-needed)) | DEC-007: the coordinate type is a concept-constrained template parameter (`double`, exact lattice, ...) |
 | **Indices used as identity** (`IDMap` deprecated in favour of "mesh indices work as ids") | Procedural caching, overrides and simulation ground truth need IDs stable across *re-evaluation*, not just across edits | Add a **128-bit persistent-ID column** per domain, derived from provenance. Indices stay the fast internal handle |
 | Radial cycle is **unordered** | Assigning regions and finding diffraction-edge wedges need faces **sorted by angle** around each edge | Keep `radial_next/prev`, but maintain angular order on insert, or rebuild it in frozen mode |
 | Pages are copied, not shared | Versioned immutable snapshots for the procedural cache and concurrent readers | **Refcounted copy-on-write pages.** Per DEC-003, the paged column moves into litestl |
-| `AttrType` is a fixed bitmask (float/int vectors, bool, byte, short, weights) | Needs `double`, `int64`, `u128` IDs, fixed-length band arrays (e.g. 8 or 24 acoustic bands), enum/material handles, and references to other elements or pools | Extensible type registry with schema metadata (unit, role, frame, quantity kind, merge policy) |
+| `AttrType` is a fixed bitmask (float/int vectors, bool, byte, short, weights) with `type_dispatch` switches (closed set, DEC-007 relaxes this) | Needs `double`, `int64`, `u128` IDs, fixed-length band arrays (e.g. 8 or 24 acoustic bands), enum/material handles, and references to other elements or pools | Extensible type registry with schema metadata (unit, role, frame, quantity kind, merge policy) |
 | Bools bit-packed per domain | Fine | Keep |
 | Fan triangulation in `utils/triangulate.h` | Not valid for concave faces or faces with holes | Constrained Delaunay on exact predicates (DEC-002) |
 | `MESH_FACE_VS_LIMIT = 10000` iteration guard | Terrain and footprint faces can be larger | Raise it, or make it a debug-only check |
