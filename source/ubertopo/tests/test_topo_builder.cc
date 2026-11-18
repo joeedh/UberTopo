@@ -4,6 +4,7 @@
 #include "ubertopo/topo/builder.h"
 
 #include "litestl/util/alloc.h"
+#include "litestl/util/task.h"
 #include "support/splitmix64.h"
 #include "support/topo_fixtures.h"
 #include "ut_test.h"
@@ -418,6 +419,30 @@ template <geom::CoordType C> static void test_permutation_invariance()
   }
 }
 
+/* Bit-identical output at any band count (parallel phases are chunked). */
+template <geom::CoordType C> static void test_band_counts()
+{
+  test::GridBuilder<C> g;
+  for (int64_t i = 0; i < 16; i++) {
+    for (int64_t j = 0; j < 16; j++) {
+      g.box({i * 10, j * 10, 0}, {i * 10 + 10, j * 10 + 10, 10 + 10 * ((i + j) % 2)});
+    }
+  }
+  ident::PersistentId ref{};
+  for (int bands : {1, 2, 4, 12}) {
+    litestl::task::ScopedBandCount scope(bands);
+    Complex<C> k;
+    BuildReport rep;
+    UT_CHECK(g.b.build(k, rep) && rep.ok());
+    UT_CHECK(k.faces.live_count() > 1000 && k.edges.live_count() > 2048);
+    const ident::PersistentId h = test::complex_hash(k);
+    if (bands == 1) {
+      ref = h;
+    }
+    UT_CHECK(h == ref);
+  }
+}
+
 template <geom::CoordType C> static void run_all()
 {
   test_tetrahedron<C>();
@@ -427,6 +452,7 @@ template <geom::CoordType C> static void run_all()
   test_rejections<C>();
   test_weld_equal_positions<C>();
   test_permutation_invariance<C>();
+  test_band_counts<C>();
 }
 
 int main()
