@@ -18,6 +18,8 @@ add_library(ubertopo_topo STATIC
   topo/validate.cc
   topo/regions.cc
   topo/validate_geom.cc
+  topo/freeze.cc
+  topo/io.cc
 )
 target_link_libraries(ubertopo_topo PUBLIC ubertopo_geom ubertopo_ident attr util)
 

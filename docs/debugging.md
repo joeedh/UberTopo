@@ -156,3 +156,13 @@ Entry format:
   face interior is to the left of every coedge. To check a hand-written loop, compute
   its shoelace sum in the face's own (u, w) coordinates.
 
+
+## Crash in `build_regions()` after freeing elements
+- **Symptom:** a segfault in `build_regions()`, at the union-find `find`, on a complex from which a fence had been freed. Under ASan it showed up as a wild index into the face-side array.
+- **Causes**, both in a test helper:
+  1. It picked "sheets in region 0" to free, which also matched open-window walls. Those share edges with other walls, so freeing them left dangling radial links.
+  2. It freed coedges while walking their loop. `Domain::free` resets every column but `.gen`, including `.c.next`, so the walk stopped after the first coedge. The remaining coedges stayed live on freed loops and faces, with `.l.f = NONE`.
+- **Fix / technique:**
+  - free only components that are closed under edge adjacency;
+  - collect elements first, then free them;
+  - `build_regions()` assumes a complex that passes the combinatorial validator. Run `validate()` first when a crash shows up there.

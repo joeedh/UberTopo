@@ -10,6 +10,7 @@
  * All link access goes through get<"name">() or the accessors below, never
  * through raw slot indices (DEC-012). */
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 
@@ -43,6 +44,21 @@ constexpr uint32_t side_toward_next(bool sense)
   return sense ? FRONT : BACK;
 }
 
+/** Caches built by freeze() (design 01 §9, plan P2 W10). Valid only while
+ * the complex's version stamp equals @p stamp; any mutation invalidates them.
+ * Not serialised (rebuilt after read()). */
+struct FrozenCaches {
+  uint64_t stamp = 0;
+  litestl::util::Vector<uint32_t> v2e_off, v2e;              /* vertex -> incident edges (ascending) */
+  litestl::util::Vector<uint32_t> shell_off, shell_sides;    /* shell -> face sides (ascending) */
+  /* inclusions: container -> (index << 1) | is_edge, ascending */
+  litestl::util::Vector<uint32_t> face_incl_off, face_incl;
+  litestl::util::Vector<uint32_t> region_incl_off, region_incl;
+  /* T(f) of projected faces: local corner indices; tri_off per face */
+  litestl::util::Vector<uint32_t> tri_off;
+  litestl::util::Vector<std::array<uint32_t, 3>> tris;
+};
+
 class ComplexBase {
 public:
   Domain<EdgeSchema> edges;
@@ -69,6 +85,21 @@ public:
   }
   /** Regions and shells don't reflect the current faces (design 01 §6). */
   bool regions_dirty = true;
+  FrozenCaches caches;
+  /** Version stamp at the last freeze (0: never frozen). */
+  uint64_t frozen_stamp = 0;
+
+  /** Version of the coordinate-independent groups (any mutation changes it). */
+  uint64_t base_version() const
+  {
+    uint64_t v = 0;
+    for (const attr::AttrGroup *g : {&edges.group(), &coedges.group(), &loops.group(), &faces.group(),
+                                     &faces.sides().group(), &shells.group(), &regions.group(), &global.group()})
+    {
+      v = std::max(v, g->version());
+    }
+    return v;
+  }
 
   /* ---- coedges ---- */
   EdgeRef edge_of(CoedgeRef c) const
@@ -272,6 +303,21 @@ public:
   using Point = geom::Point<C>;
 
   Domain<VertexSchema<C>> verts;
+
+  /** Version stamp of the whole complex: changes after any column mutation. */
+  uint64_t version() const
+  {
+    return std::max(base_version(), verts.group().version());
+  }
+  /** True if freeze() caches match the current contents. */
+  bool caches_valid() const
+  {
+    return caches.stamp != 0 && caches.stamp == version();
+  }
+  bool frozen() const
+  {
+    return frozen_stamp != 0 && frozen_stamp == version();
+  }
 
   const Point &pos(VertRef v) const
   {

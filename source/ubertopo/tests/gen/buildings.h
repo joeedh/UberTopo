@@ -61,7 +61,15 @@ template <geom::CoordType C> struct Model {
   std::map<std::vector<uint32_t>, uint32_t> fkeys; /* by vertex set: shared walls once */
   topo::BuildPolicy policy;
 
-  explicit Model(PersistentId r) : root(r) {}
+  /* the frame quantum matches the double scaling (2^-8), so Morton codes and
+   * therefore frozen orders agree between double and Lattice */
+  static geom::TileFrame frame()
+  {
+    geom::TileFrame f;
+    f.quantum_log2 = -8;
+    return f;
+  }
+  explicit Model(PersistentId r) : b(frame()), root(r) {}
 
   static PersistentId outside()
   {

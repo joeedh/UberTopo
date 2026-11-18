@@ -145,6 +145,18 @@ public:
     return live(h.index) && gen(h.index) == h.gen;
   }
 
+  /** Permutes rows (old_to_new: injective, kDropped for removed slots) and
+   * rebuilds the allocator. Index values stored in rows are not rewritten
+   * (see remap.h). */
+  bool permute(litestl::util::span<const uint32_t> old_to_new, uint32_t new_size)
+  {
+    if (!g_.group().permute(old_to_new, new_size)) {
+      return false;
+    }
+    rebuild_allocator();
+    return true;
+  }
+
   /** Drops the freelist and recomputes the live count from ".live" (after a
    * read or a permutation). The freelist is rebuilt in descending index
    * order, so the next alloc() reuses the lowest free slot. */
@@ -195,6 +207,21 @@ public:
     for (uint32_t c = 0; c < g.column_count(); c++) {
       g.column(c).set_default_list(litestl::util::span<const uint32_t>(rows, 2));
     }
+  }
+
+  /** Permutes faces and their side rows together (row 2f + s follows f). */
+  bool permute(litestl::util::span<const uint32_t> old_to_new, uint32_t new_size)
+  {
+    litestl::util::Vector<uint32_t> side_map;
+    for (uint32_t f = 0; f < old_to_new.size(); f++) {
+      const uint32_t n = old_to_new[f];
+      side_map.append(n == attr::ColumnBase::kDropped ? n : 2 * n);
+      side_map.append(n == attr::ColumnBase::kDropped ? n : 2 * n + 1);
+    }
+    if (!Domain::permute(old_to_new, new_size)) {
+      return false;
+    }
+    return sides_.group().permute(litestl::util::span<const uint32_t>(side_map.data(), side_map.size()), 2 * new_size);
   }
 
   SideGroup &sides()
