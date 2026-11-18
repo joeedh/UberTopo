@@ -4,6 +4,11 @@
 #include "ubertopo/topo/compact.h"
 #include "ubertopo/topo/freeze.h"
 
+#include <algorithm>
+#include <map>
+#include <string>
+#include <vector>
+
 #include "litestl/util/alloc.h"
 #include "support/edit_fixture.h"
 
@@ -459,6 +464,182 @@ template <geom::CoordType C> void test_holes()
   UT_CHECK(hk(fx.k) == h_end && ed.index_consistent());
 }
 
+/* ---- W7: weld (plan P3b §3.6, C2, C3, C14) ---- */
+
+/* The faces of an axis-aligned box as grid-point loops (GridBuilder::box's
+ * order and orientation): -z, +z, -y, +y, -x, +x. */
+inline std::vector<std::vector<I3>> box_loops(const I3 &lo, const I3 &hi)
+{
+  const int64_t x0 = lo[0], y0 = lo[1], z0 = lo[2], x1 = hi[0], y1 = hi[1], z1 = hi[2];
+  return {{{x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0}, {x1, y0, z0}},
+          {{x0, y0, z1}, {x1, y0, z1}, {x1, y1, z1}, {x0, y1, z1}},
+          {{x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1}},
+          {{x0, y1, z0}, {x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}},
+          {{x0, y0, z0}, {x0, y0, z1}, {x0, y1, z1}, {x0, y1, z0}},
+          {{x1, y0, z0}, {x1, y1, z0}, {x1, y1, z1}, {x1, y0, z1}}};
+}
+
+/* Structure by position (C2): vertices, edges with their coedge counts,
+ * faces as oriented position cycles, and the region/shell counts. Neither
+ * IDs nor row order enter it. */
+template <geom::CoordType C> std::string structure(const Complex<C> &k)
+{
+  auto key = [&](VertRef v) {
+    const auto &p = k.pos(v);
+    char buf[96];
+    snprintf(buf, sizeof(buf), "(%.6g,%.6g,%.6g)", double(geom::CoordTraits<C>::to_double(p[0])),
+             double(geom::CoordTraits<C>::to_double(p[1])), double(geom::CoordTraits<C>::to_double(p[2])));
+    return std::string(buf);
+  };
+  std::vector<std::string> vs, es, fs;
+  k.verts.for_each_live([&](uint32_t v) { vs.push_back(key(VertRef(v))); });
+  k.edges.for_each_live([&](uint32_t e) {
+    const auto ev = k.edge_verts(EdgeRef(e));
+    std::string a = key(ev[0]), b = key(ev[1]);
+    if (b < a) {
+      std::swap(a, b);
+    }
+    uint32_t m = 0;
+    k.for_each_radial(EdgeRef(e), [&](CoedgeRef) { m++; });
+    es.push_back(a + b + "#" + std::to_string(m));
+  });
+  k.faces.for_each_live([&](uint32_t f) {
+    std::string face;
+    k.for_each_loop(FaceRef(f), [&](LoopRef l) {
+      std::vector<std::string> cyc;
+      k.for_each_coedge(l, [&](CoedgeRef c) { cyc.push_back(key(k.start_vert(c))); });
+      std::rotate(cyc.begin(), std::min_element(cyc.begin(), cyc.end()), cyc.end());
+      for (auto &s : cyc) {
+        face += s;
+      }
+      face += "|";
+    });
+    fs.push_back(face);
+  });
+  std::sort(vs.begin(), vs.end());
+  std::sort(es.begin(), es.end());
+  std::sort(fs.begin(), fs.end());
+  std::string out = "R" + std::to_string(k.regions.live_count()) + "S" + std::to_string(k.shells.live_count()) + "\n";
+  for (auto *list : {&vs, &es, &fs}) {
+    for (auto &s : *list) {
+      out += s + "\n";
+    }
+  }
+  return out;
+}
+
+template <geom::CoordType C> void test_weld()
+{
+  /* reference: the two rooms built directly, sharing the wall x = 4 */
+  Complex<C> ref;
+  {
+    test::GridBuilder<C> g;
+    g.box({0, 0, 0}, {4, 4, 4});
+    g.box({4, 0, 0}, {8, 4, 4});
+    BuildReport br;
+    RegionReport rr;
+    UT_CHECK(g.b.build(ref, br) && build_regions(ref, rr));
+  }
+  /* A closed; B open (no x = 4 wall) with its own rim vertices */
+  Fixture<C> fx;
+  {
+    test::GridBuilder<C> g;
+    g.box({0, 0, 0}, {4, 4, 4});
+    std::map<I3, uint32_t> bkeys;
+    auto vb = [&](const I3 &p) {
+      if (p[0] != 4) {
+        return g.v(p); /* only the rim at x = 4 is duplicated */
+      }
+      auto it = bkeys.find(p);
+      if (it != bkeys.end()) {
+        return it->second;
+      }
+      const uint32_t key = g.b.vertex(ident::derive_generator(hid("bodyB"), "v", p[0], p[1], p[2]), pt<C>(p));
+      bkeys[p] = key;
+      return key;
+    };
+    const auto loops = box_loops({4, 0, 0}, {8, 4, 4});
+    for (int i = 0; i < 6; i++) {
+      if (i == 4) {
+        continue; /* the -x wall is A's */
+      }
+      std::vector<uint32_t> keys;
+      for (const I3 &p : loops[i]) {
+        keys.push_back(vb(p));
+      }
+      const uint32_t sizes[1] = {4};
+      g.b.face(ident::derive(ident::tag::TestOnly, std::string_view("bodyB.face"), uint32_t(i)),
+               std::span<const uint32_t>(keys), std::span<const uint32_t>(sizes, 1));
+    }
+    BuildReport br;
+    UT_CHECK(g.b.build(fx.k, br));
+  }
+  Editor<C> ed(fx.k, &fx.j);
+  /* the pairs: A's wall corners and B's rim vertices, by position */
+  std::vector<std::pair<VertRef, VertRef>> pairs;
+  for (const I3 &p : std::vector<I3>{{4, 0, 0}, {4, 4, 0}, {4, 4, 4}, {4, 0, 4}}) {
+    VertRef a, b;
+    fx.k.verts.for_each_live([&](uint32_t v) {
+      if (geom::lex_compare<C>(fx.k.pos(VertRef(v)), pt<C>(p)) == 0) {
+        (a ? b : a) = VertRef(v);
+      }
+    });
+    UT_CHECK(a && b);
+    pairs.push_back({a, b});
+  }
+  const PersistentId h_pre = hk(fx.k);
+  /* refusals */
+  {
+    const std::pair<VertRef, VertRef> far[1] = {{pairs[0].first, pairs[1].second}};
+    EXPECT_EDIT(ed, ed.weld(std::span<const std::pair<VertRef, VertRef>>(far, 1)), EditCode::Coincident);
+    const std::pair<VertRef, VertRef> twice[2] = {pairs[0], {pairs[0].second, pairs[0].first}};
+    EXPECT_EDIT(ed, ed.weld(std::span<const std::pair<VertRef, VertRef>>(twice, 2)), EditCode::BadArgument);
+    /* one pair alone leaves the other corners coincident: invalid */
+    const std::pair<VertRef, VertRef> one[1] = {pairs[0]};
+    EXPECT_EDIT(ed, ed.weld(std::span<const std::pair<VertRef, VertRef>>(one, 1)), EditCode::Invalid);
+    UT_CHECK(hk(fx.k) == h_pre);
+  }
+  EXPECT_EDIT(ed, ed.weld(std::span<const std::pair<VertRef, VertRef>>(pairs.data(), pairs.size())), EditCode::Ok);
+  UT_CHECK(fx.valid() && fx.k.regions_dirty);
+  EXPECT_EDIT(ed, ed.rebuild_regions(), EditCode::Ok);
+  UT_CHECK(fx.valid());
+  const std::string got = structure(fx.k), want = structure(ref);
+  UT_CHECK(got == want);
+  if (got != want) {
+    fprintf(stderr, "welded:\n%s\nbuilt:\n%s\n", got.c_str(), want.c_str());
+  }
+  const PersistentId h_weld = hk(fx.k);
+  EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+  EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+  UT_CHECK(hk(fx.k) == h_pre);
+  EXPECT_EDIT(ed, ed.redo(), EditCode::Ok);
+  EXPECT_EDIT(ed, ed.redo(), EditCode::Ok);
+  UT_CHECK(hk(fx.k) == h_weld && ed.index_consistent());
+
+  /* a wire snapped onto a box corner: one pair; the end loses its container */
+  {
+    Fixture<C> fw;
+    UT_CHECK(fw.box());
+    Editor<C> ew(fw.k, &fw.j);
+    const VertRef corner = fw.vert_at({0, 0, 4}); /* before a second vertex sits there */
+    VertRef far, end;
+    EXPECT_EDIT(ew, ew.make_vertex(pt<C>({0, 0, 9}), hid("pole_top"), &far), EditCode::Ok);
+    ew.options().validate = ValidateMode::None; /* the end coincides with a corner until welded */
+    EXPECT_EDIT(ew, ew.make_vertex(pt<C>({0, 0, 4}), hid("wire_end"), &end), EditCode::Ok);
+    EXPECT_EDIT(ew, ew.embed_vertex(end, EmbedTarget::region(RegionRef(0))), EditCode::Ok);
+    EdgeRef wire;
+    EXPECT_EDIT(ew, ew.make_edge(far, end, ident::kNoId, &wire), EditCode::Ok);
+    ew.options().validate = ValidateMode::Full;
+    const std::pair<VertRef, VertRef> snap[1] = {{corner, end}};
+    EXPECT_EDIT(ew, ew.weld(std::span<const std::pair<VertRef, VertRef>>(snap, 1)), EditCode::Ok);
+    UT_CHECK(fw.valid());
+    const VertRef s = fw.vert_at({0, 0, 4});
+    UT_CHECK(s && fw.k.verts.template get<".v.container">()[s.i].is_none());
+    const auto wv = fw.k.edge_verts(wire);
+    UT_CHECK(wv[0] == s || wv[1] == s);
+  }
+}
+
 } // namespace
 
 int main()
@@ -472,6 +653,8 @@ int main()
   test_imprint<geom::Lattice>();
   test_holes<double>();
   test_holes<geom::Lattice>();
+  test_weld<double>();
+  test_weld<geom::Lattice>();
   UT_CHECK(litestl::alloc::getMemorySize() == baseline);
   return ut_test_end();
 }

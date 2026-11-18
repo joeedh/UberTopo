@@ -7,6 +7,7 @@
 #include "ubertopo/topo/edit/editor_impl_face.h"
 #include "ubertopo/topo/edit/editor_impl_imprint.h"
 #include "ubertopo/topo/edit/editor_impl_unimprint.h"
+#include "ubertopo/topo/edit/editor_impl_weld.h"
 #include "ubertopo/topo/edit/editor_impl_txn.h"
 #include "ubertopo/topo/edit/editor_impl_vertex_edge.h"
 
@@ -62,6 +63,7 @@ const char *edit_code_name(EditCode c)
     UT_CASE(NotEmbedded)
     UT_CASE(HoleInside)
     UT_CASE(EdgeShared)
+    UT_CASE(Coincident)
 #undef UT_CASE
   }
   return "?";

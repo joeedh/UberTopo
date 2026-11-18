@@ -33,6 +33,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "litestl/util/vector.h"
@@ -148,6 +149,12 @@ public:
   EditCode add_hole(FaceRef f, std::span<const EdgeRef> chain);
   /** A hole of @p f is filled; its edges and vertices become inclusions. */
   EditCode remove_hole(FaceRef f, LoopRef hole);
+  /* ---- primitives (P3b W7) ---- */
+  /** Merges each pair of coincident vertices into the one with the smaller
+   * ID and fuses the parallel edges that result (smaller edge ID survives;
+   * radial cycles re-sorted). One call may go from an invalid state
+   * (coincident distinct vertices) to a valid one (plan P3b C3). */
+  EditCode weld(std::span<const std::pair<VertRef, VertRef>> pairs);
   EditCode set_side_hint(FaceRef f, uint32_t side, ident::PersistentId hint);
   /** Writes one non-Topo attribute value (raw bytes of column @p column). */
   EditCode set_attr(Grp g, uint32_t row, uint32_t column, std::span<const uint8_t> bytes);

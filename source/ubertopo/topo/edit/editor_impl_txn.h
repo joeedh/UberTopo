@@ -448,6 +448,13 @@ template <geom::CoordType C> EditCode Editor<C>::apply_op(const OpRecord<C> &op)
       return unimprint(EdgeRef(u[0]));
     case OpKind::RemoveHole:
       return remove_hole(FaceRef(u[0]), LoopRef(u[1]));
+    case OpKind::Weld: {
+      litestl::util::Vector<std::pair<VertRef, VertRef>, 8> ps;
+      for (uint32_t i = 0; i < u[0]; i++) {
+        ps.append({VertRef(u[1 + 2 * i]), VertRef(u[2 + 2 * i])});
+      }
+      return weld(std::span<const std::pair<VertRef, VertRef>>(ps.data(), ps.size()));
+    }
     case OpKind::RebuildRegions:
     case OpKind::Compact:
       return EditCode::OpenTransaction; /* barriers are replayed on their own (redo) */

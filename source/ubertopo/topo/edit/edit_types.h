@@ -65,6 +65,7 @@ enum class EditCode : uint16_t {
   NotEmbedded,    /* a chain element is not embedded in the face */
   HoleInside,     /* a hole would be nested in a new hole or island (refused) */
   EdgeShared,     /* a hole's edges or vertices belong to other faces */
+  Coincident,     /* weld: the vertices of a pair are not at the same point */
   /* results */
   Invalid,         /* the edit produced an invalid complex (see report().validation) */
   RegionsFailed,   /* build_regions failed (see report().region_code) */
@@ -107,6 +108,7 @@ enum class OpKind : uint8_t {
   Unimprint,
   AddHole,
   RemoveHole,
+  Weld,
 };
 
 /** Arguments of one operation: indices, IDs, points and raw bytes. P3a
