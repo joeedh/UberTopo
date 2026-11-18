@@ -243,6 +243,222 @@ template <geom::CoordType C> void test_region_ids()
   }
 }
 
+/* ---- W6: imprint / unimprint / add_hole / remove_hole (plan P3b §3.6) ---- */
+
+template <geom::CoordType C> struct Wires {
+  Fixture<C> &fx;
+  Editor<C> &ed;
+  uint32_t n = 0;
+  VertRef vert(FaceRef f, const I3 &p)
+  {
+    VertRef v;
+    EXPECT_EDIT(ed, ed.make_vertex(pt<C>(p), ident::derive(ident::tag::TestOnly, std::string_view("wv"), n++), &v),
+                EditCode::Ok);
+    if (f) {
+      EXPECT_EDIT(ed, ed.embed_vertex(v, EmbedTarget::face(f)), EditCode::Ok);
+    }
+    return v;
+  }
+  EdgeRef edge(FaceRef f, VertRef a, VertRef b)
+  {
+    EdgeRef e;
+    EXPECT_EDIT(ed, ed.make_edge(a, b, ident::kNoId, &e), EditCode::Ok);
+    if (f) {
+      EXPECT_EDIT(ed, ed.embed_edge(e, EmbedTarget::face(f)), EditCode::Ok);
+    }
+    return e;
+  }
+  /* a closed square of embedded wires on the plane y = 0 */
+  std::vector<EdgeRef> square(FaceRef f, int64_t lo, int64_t hi, std::vector<VertRef> *vs = nullptr)
+  {
+    const VertRef a = vert(f, {lo, 0, lo}), b = vert(f, {hi, 0, lo}), c = vert(f, {hi, 0, hi}), d = vert(f, {lo, 0, hi});
+    if (vs) {
+      *vs = {a, b, c, d};
+    }
+    return {edge(f, a, b), edge(f, b, c), edge(f, c, d), edge(f, d, a)};
+  }
+};
+
+template <geom::CoordType C> uint32_t loop_count(const Complex<C> &k, FaceRef f)
+{
+  uint32_t n = 0;
+  k.for_each_loop(f, [&](LoopRef) { n++; });
+  return n;
+}
+
+template <geom::CoordType C> FaceRef wall_y0(Fixture<C> &fx)
+{
+  return fx.face_with({{0, 0, 0}, {4, 0, 0}, {4, 0, 4}, {0, 0, 4}});
+}
+
+template <geom::CoordType C> void test_imprint()
+{
+  /* split case: a 3-edge chain across the wall y = 0, then unimprint */
+  {
+    Fixture<C> fx;
+    UT_CHECK(fx.box());
+    Editor<C> ed(fx.k, &fx.j);
+    Wires<C> w{fx, ed};
+    const FaceRef wall = wall_y0(fx);
+    const VertRef a = fx.vert_at({0, 0, 0}), b = fx.vert_at({4, 0, 4});
+    const VertRef p = w.vert(wall, {2, 0, 1}), q = w.vert(wall, {3, 0, 2});
+    const EdgeRef e1 = w.edge(wall, a, p), e2 = w.edge(wall, p, q), e3 = w.edge(wall, q, b);
+    UT_CHECK(fx.valid());
+    const PersistentId h_pre = hk(fx.k);
+    const uint32_t faces0 = fx.k.faces.live_count();
+    /* refusals are bit-identical no-ops */
+    {
+      const EdgeRef bad[2] = {e1, e3}; /* not connected */
+      EXPECT_EDIT(ed, ed.imprint(wall, std::span<const EdgeRef>(bad, 2)), EditCode::ChainNotSimple);
+      const EdgeRef dup[2] = {e1, e1};
+      EXPECT_EDIT(ed, ed.imprint(wall, std::span<const EdgeRef>(dup, 2)), EditCode::ChainNotSimple);
+      const FaceRef other = fx.face_with({{0, 0, 0}, {0, 4, 0}, {4, 4, 0}, {4, 0, 0}});
+      const EdgeRef one[1] = {e1};
+      EXPECT_EDIT(ed, ed.imprint(other, std::span<const EdgeRef>(one, 1)), EditCode::NotEmbedded);
+      UT_CHECK(hk(fx.k) == h_pre);
+    }
+    const EdgeRef chain[3] = {e1, e2, e3};
+    FaceRef child;
+    EXPECT_EDIT(ed, ed.imprint(wall, std::span<const EdgeRef>(chain, 3), &child), EditCode::Ok);
+    UT_CHECK(fx.valid() && fx.k.faces.live_count() == faces0 + 1 && bool(child));
+    for (const EdgeRef e : chain) {
+      UT_CHECK(fx.k.edges.template get<".e.container">()[e.i].is_none());
+      uint32_t m = 0;
+      fx.k.for_each_radial(e, [&](CoedgeRef) { m++; });
+      UT_CHECK(m == 2);
+    }
+    UT_CHECK(fx.k.verts.template get<".v.container">()[p.i].is_none());
+    const PersistentId h_imp = hk(fx.k);
+    EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+    UT_CHECK(hk(fx.k) == h_pre);
+    EXPECT_EDIT(ed, ed.redo(), EditCode::Ok);
+    UT_CHECK(hk(fx.k) == h_imp);
+    /* unimprint from the middle edge: the faces merge, the chain is wires again */
+    FaceRef surv;
+    EXPECT_EDIT(ed, ed.unimprint(e2, &surv), EditCode::Ok);
+    UT_CHECK(fx.valid() && fx.k.faces.live_count() == faces0);
+    ident::ContainerRef cs;
+    ident::ContainerRef::face(surv, cs);
+    for (const EdgeRef e : chain) {
+      UT_CHECK(fx.k.edges.template get<".e.container">()[e.i] == cs);
+      UT_CHECK(fx.k.edges.template get<".e.c">()[e.i] == NONE);
+    }
+    UT_CHECK(fx.k.verts.template get<".v.container">()[q.i] == cs);
+    EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+    UT_CHECK(hk(fx.k) == h_imp);
+  }
+  /* island case: a square on the wall with a sensor inside */
+  {
+    Fixture<C> fx;
+    UT_CHECK(fx.box());
+    Editor<C> ed(fx.k, &fx.j);
+    Wires<C> w{fx, ed};
+    const FaceRef wall = wall_y0(fx);
+    const std::vector<EdgeRef> sq = w.square(wall, 1, 3);
+    const VertRef s = w.vert(wall, {2, 0, 2});
+    const PersistentId h_pre = hk(fx.k);
+    FaceRef island;
+    EXPECT_EDIT(ed, ed.imprint(wall, std::span<const EdgeRef>(sq.data(), sq.size()), &island), EditCode::Ok);
+    UT_CHECK(fx.valid() && bool(island) && loop_count(fx.k, wall) == 2 && loop_count(fx.k, island) == 1);
+    ident::ContainerRef ci;
+    ident::ContainerRef::face(island, ci);
+    UT_CHECK(fx.k.verts.template get<".v.container">()[s.i] == ci);
+    EXPECT_EDIT(ed, ed.rebuild_regions(), EditCode::Ok); /* the room is still closed */
+    UT_CHECK(fx.valid());
+    EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+    FaceRef surv;
+    EXPECT_EDIT(ed, ed.unimprint(sq[1], &surv), EditCode::Ok);
+    UT_CHECK(fx.valid() && surv == wall && loop_count(fx.k, wall) == 1);
+    ident::ContainerRef cw;
+    ident::ContainerRef::face(wall, cw);
+    UT_CHECK(fx.k.verts.template get<".v.container">()[s.i] == cw);
+    EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+    EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+    UT_CHECK(hk(fx.k) == h_pre);
+  }
+}
+
+template <geom::CoordType C> void test_holes()
+{
+  Fixture<C> fx;
+  UT_CHECK(fx.box({0, 0, 0}, {8, 8, 8}));
+  Editor<C> ed(fx.k, &fx.j);
+  Wires<C> w{fx, ed};
+  const FaceRef wall = fx.face_with({{0, 0, 0}, {8, 0, 0}, {8, 0, 8}, {0, 0, 8}});
+  std::vector<VertRef> corners;
+  const std::vector<EdgeRef> sq = w.square(wall, 3, 5, &corners);
+  /* an inclusion inside the opening is refused */
+  {
+    const VertRef s = w.vert(wall, {4, 0, 4});
+    const PersistentId h = hk(fx.k);
+    EXPECT_EDIT(ed, ed.add_hole(wall, std::span<const EdgeRef>(sq.data(), sq.size())), EditCode::ContainedElement);
+    UT_CHECK(hk(fx.k) == h);
+    EXPECT_EDIT(ed, ed.embed_vertex(s, EmbedTarget{}), EditCode::Ok);
+    EXPECT_EDIT(ed, ed.kill_vertex(s), EditCode::Ok);
+  }
+  /* an open chain is refused */
+  {
+    const EdgeRef open[3] = {sq[0], sq[1], sq[2]};
+    EXPECT_EDIT(ed, ed.add_hole(wall, std::span<const EdgeRef>(open, 3)), EditCode::ChainNotSimple);
+  }
+  EXPECT_EDIT(ed, ed.add_hole(wall, std::span<const EdgeRef>(sq.data(), sq.size())), EditCode::Ok);
+  UT_CHECK(fx.valid() && loop_count(fx.k, wall) == 2);
+  LoopRef hole;
+  fx.k.for_each_loop(wall, [&](LoopRef l) {
+    if (l != fx.k.first_loop(wall)) {
+      hole = l;
+    }
+  });
+  /* a bigger cycle around the hole is refused (nested holes), as hole and
+   * as island */
+  {
+    const std::vector<EdgeRef> big = w.square(wall, 1, 7);
+    const PersistentId h = hk(fx.k);
+    EXPECT_EDIT(ed, ed.add_hole(wall, std::span<const EdgeRef>(big.data(), big.size())), EditCode::HoleInside);
+    EXPECT_EDIT(ed, ed.imprint(wall, std::span<const EdgeRef>(big.data(), big.size())), EditCode::HoleInside);
+    UT_CHECK(hk(fx.k) == h);
+  }
+  /* a window filling the hole, then remove_hole refuses the shared edges */
+  {
+    const VertRef wv[4] = {corners[0], corners[3], corners[2], corners[1]};
+    const uint32_t sizes[1] = {4};
+    FaceRef win;
+    EditCode c = ed.make_face(std::span<const VertRef>(wv, 4), std::span<const uint32_t>(sizes, 1),
+                              ident::derive(ident::tag::TestOnly, std::string_view("window")), 0, ident::kNoId,
+                              ident::kNoId, &win);
+    if (c != EditCode::Ok) {
+      /* the other orientation */
+      const VertRef wv2[4] = {corners[0], corners[1], corners[2], corners[3]};
+      c = ed.make_face(std::span<const VertRef>(wv2, 4), std::span<const uint32_t>(sizes, 1),
+                       ident::derive(ident::tag::TestOnly, std::string_view("window")), 0, ident::kNoId, ident::kNoId,
+                       &win);
+    }
+    EXPECT_EDIT(ed, c, EditCode::Ok);
+    UT_CHECK(fx.valid());
+    EXPECT_EDIT(ed, ed.remove_hole(wall, hole), EditCode::EdgeShared);
+    EXPECT_EDIT(ed, ed.kill_face(win), EditCode::Ok);
+  }
+  EXPECT_EDIT(ed, ed.remove_hole(wall, fx.k.first_loop(wall)), EditCode::NotOuterLoop);
+  EXPECT_EDIT(ed, ed.remove_hole(wall, hole), EditCode::Ok);
+  UT_CHECK(fx.valid() && loop_count(fx.k, wall) == 1);
+  ident::ContainerRef cw;
+  ident::ContainerRef::face(wall, cw);
+  for (const EdgeRef e : sq) {
+    UT_CHECK(fx.k.edges.template get<".e.container">()[e.i] == cw);
+  }
+  UT_CHECK(fx.k.verts.template get<".v.container">()[corners[0].i] == cw);
+  /* everything undoes */
+  const PersistentId h_end = hk(fx.k);
+  const uint32_t applied = fx.j.undo_count();
+  for (uint32_t i = 0; i < applied; i++) {
+    EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+  }
+  for (uint32_t i = 0; i < applied; i++) {
+    EXPECT_EDIT(ed, ed.redo(), EditCode::Ok);
+  }
+  UT_CHECK(hk(fx.k) == h_end && ed.index_consistent());
+}
+
 } // namespace
 
 int main()
@@ -252,6 +468,10 @@ int main()
   test_compact<geom::Lattice>();
   test_region_ids<double>();
   test_region_ids<geom::Lattice>();
+  test_imprint<double>();
+  test_imprint<geom::Lattice>();
+  test_holes<double>();
+  test_holes<geom::Lattice>();
   UT_CHECK(litestl::alloc::getMemorySize() == baseline);
   return ut_test_end();
 }

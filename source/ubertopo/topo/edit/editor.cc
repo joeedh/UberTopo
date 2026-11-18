@@ -5,6 +5,7 @@
 
 #include "ubertopo/topo/edit/editor_impl_cycles.h"
 #include "ubertopo/topo/edit/editor_impl_face.h"
+#include "ubertopo/topo/edit/editor_impl_imprint.h"
 #include "ubertopo/topo/edit/editor_impl_txn.h"
 #include "ubertopo/topo/edit/editor_impl_vertex_edge.h"
 
@@ -56,6 +57,10 @@ const char *edit_code_name(EditCode c)
     UT_CASE(Invalid)
     UT_CASE(RegionsFailed)
     UT_CASE(PropagationFailed)
+    UT_CASE(ChainNotSimple)
+    UT_CASE(NotEmbedded)
+    UT_CASE(HoleInside)
+    UT_CASE(EdgeShared)
 #undef UT_CASE
   }
   return "?";

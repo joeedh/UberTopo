@@ -135,6 +135,19 @@ public:
   /** Joins the two faces on either side of @p e and removes e. */
   EditCode join_faces(EdgeRef e, FaceRef *survivor = nullptr);
   EditCode flip_face(FaceRef f);
+  /* ---- primitives (P3b W6) ---- */
+  /** Turns a chain of wires embedded in @p f (edges in path order) into face
+   * topology: a path between two outer-loop vertices splits f (as
+   * split_face: the child holding the chain coedges a -> b keeps f's slot);
+   * a closed cycle becomes a hole of f filled by a new face, *other. */
+  EditCode imprint(FaceRef f, std::span<const EdgeRef> chain, FaceRef *other = nullptr);
+  /** Inverts imprint from one edge of the chain between two faces: the
+   * faces merge and the chain becomes wires embedded in the survivor. */
+  EditCode unimprint(EdgeRef e, FaceRef *survivor = nullptr);
+  /** A closed chain of wires embedded in @p f becomes a hole (an opening). */
+  EditCode add_hole(FaceRef f, std::span<const EdgeRef> chain);
+  /** A hole of @p f is filled; its edges and vertices become inclusions. */
+  EditCode remove_hole(FaceRef f, LoopRef hole);
   EditCode set_side_hint(FaceRef f, uint32_t side, ident::PersistentId hint);
   /** Writes one non-Topo attribute value (raw bytes of column @p column). */
   EditCode set_attr(Grp g, uint32_t row, uint32_t column, std::span<const uint8_t> bytes);
@@ -182,6 +195,25 @@ private:
   void restore(TxnLog &log, uint32_t rows_mark, uint32_t alloc_mark, const uint32_t *sizes, bool regions_dirty);
   void rebuild_captured();
   EditCode apply_op(const OpRecord<C> &op);
+  /* ---- P3b W6 cores (editor_impl_imprint.h); they set rep_ and return a
+   * code, and the calling primitive fails with it ---- */
+  EditCode fail_report(EditCode c, ident::ElemKind kind, uint32_t index, const char *detail = nullptr);
+  EditCode read_chain(FaceRef f,
+                      std::span<const EdgeRef> chain,
+                      litestl::util::Vector<uint32_t, 32> &vs,
+                      bool &closed);
+  EditCode split_core(FaceRef f,
+                      std::span<const uint32_t> chain_e,
+                      std::span<const uint32_t> chain_v,
+                      bool make_chord,
+                      FaceRef *other,
+                      EdgeRef *chord);
+  EditCode island_core(FaceRef f,
+                       std::span<const uint32_t> chain_e,
+                       std::span<const uint32_t> chain_v,
+                       bool make_face,
+                       FaceRef *island);
+  void drop_hole(FaceRef f, LoopRef hole);
   /** rebuild_regions() / compact(): a snapshot transaction of its own. */
   EditCode run_barrier(OpKind kind);
   EditCode validate_now();

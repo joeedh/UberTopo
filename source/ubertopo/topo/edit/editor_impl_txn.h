@@ -435,6 +435,19 @@ template <geom::CoordType C> EditCode Editor<C>::apply_op(const OpRecord<C> &op)
       return set_side_hint(FaceRef(u[0]), u[1], op.ids[0]);
     case OpKind::SetAttr:
       return set_attr(Grp(u[0]), u[1], u[2], std::span<const uint8_t>(op.bytes.data(), op.bytes.size()));
+    case OpKind::Imprint:
+    case OpKind::AddHole: {
+      litestl::util::Vector<EdgeRef, 32> es;
+      for (uint32_t i = 0; i < u[1]; i++) {
+        es.append(EdgeRef(u[2 + i]));
+      }
+      const std::span<const EdgeRef> chain(es.data(), es.size());
+      return op.kind == OpKind::Imprint ? imprint(FaceRef(u[0]), chain) : add_hole(FaceRef(u[0]), chain);
+    }
+    case OpKind::Unimprint:
+      return unimprint(EdgeRef(u[0]));
+    case OpKind::RemoveHole:
+      return remove_hole(FaceRef(u[0]), LoopRef(u[1]));
     case OpKind::RebuildRegions:
     case OpKind::Compact:
       return EditCode::OpenTransaction; /* barriers are replayed on their own (redo) */

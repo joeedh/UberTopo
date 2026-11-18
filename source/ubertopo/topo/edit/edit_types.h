@@ -60,6 +60,11 @@ enum class EditCode : uint16_t {
   HoleOrientation,
   DegenerateLoop,
   RadialTie, /* two faces at exactly equal angles about an edge */
+  /* P3b */
+  ChainNotSimple, /* an imprint/hole chain repeats, branches or is disconnected */
+  NotEmbedded,    /* a chain element is not embedded in the face */
+  HoleInside,     /* a hole would be nested in a new hole or island (refused) */
+  EdgeShared,     /* a hole's edges or vertices belong to other faces */
   /* results */
   Invalid,         /* the edit produced an invalid complex (see report().validation) */
   RegionsFailed,   /* build_regions failed (see report().region_code) */
@@ -98,6 +103,10 @@ enum class OpKind : uint8_t {
   SetAttr,
   RebuildRegions,
   Compact,
+  Imprint,
+  Unimprint,
+  AddHole,
+  RemoveHole,
 };
 
 /** Arguments of one operation: indices, IDs, points and raw bytes. P3a
