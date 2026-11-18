@@ -828,5 +828,9 @@ decisions are recorded in DEC-013.
   - geom: radial sign, point-in-polygon rule, segment overlap, winding sign;
   - radial: half-plane sign, reference sign;
   - validator: wedge rule flipped, radial order reversed.
-- **The configuration matrix** results are listed below.
-
+- **Configuration matrix:**
+  - UberTopo (11 suites, including 3 compile-fail and compile-ok checks): clang Release,
+    gcc Release, clang `-march=x86-64-v3`, gcc Debug + ASan, gcc Debug + UBSan and gcc
+    TSan (with `LITESTL_ATTR_CHECKS`) all pass.
+  - litestl (39 tests, on `ubertopo/p2-support`): clang-rel, gcc-rel, clang-v3,
+    clang-noi128, gcc-tsan, gcc-ubsan and gcc-asan all pass.
