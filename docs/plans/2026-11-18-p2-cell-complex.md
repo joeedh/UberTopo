@@ -732,7 +732,8 @@ Each part is pushed as a separate commit series.
 | W10 | ~750 | ~300 |
 | W11 | — | ~200 |
 
-About 5.7k LOC of code and 4k LOC of tests. W8 grows because of the exact
+About 5.7k LOC of code and 4k LOC of tests, plus amendment A1 (§12): about 1.2k LOC of
+code (the CDT is about 700 of it) and about 0.9k LOC of tests, mostly in W2. W8 grows because of the exact
 triangle–triangle tests (review 12), and W10 because of the remap pass.
 
 ## 9. Owner decisions (2026-11-18)
@@ -837,9 +838,9 @@ decisions are recorded in DEC-013.
 
 ## 12. Amendment A1 — opt-in projectable faces (2026-11-18)
 
-**Status:** v3. v2 was revised after the fresh-context pressure test (§12.6). v3
-swaps ear clipping for a canonical CDT at the owner's request, and is under its own
-pressure test (§12.7).
+**Status:** v3, final. v2 was revised after the first fresh-context pressure test
+(§12.6). v3 swaps ear clipping for a canonical CDT at the owner's request, and was
+revised after its own pressure test (§12.7). It is ready for P2b.
 
 ### 12.1 Motivation and owner decision
 
@@ -904,10 +905,22 @@ edges, not on insertion order, loop heads or loop order.
   **symbolic perturbation of the lifting**: vertex `i` is lifted to
   `x² + y² + ε^(rank(i))`, where `rank` is the projected lexicographic order of the
   vertex.
-  - An `incircle` that evaluates to exactly 0 is resolved by the sign of the leading
-    perturbation term. That sign is an exact `orient2d` of the other three points,
-    with a fixed sign rule derived in the implementation and checked against brute
-    force.
+  - The perturbation is `ε^(rank+1)`, so it is infinitesimal for every rank,
+    rank 0 included.
+  - An `incircle(a,b,c,d)` that evaluates to exactly 0, with `a,b,c` counter-clockwise,
+    is resolved by the **vertex of smallest rank among the four**. That vertex has the
+    largest perturbation. The result is the sign of its coefficient (review v3, derived
+    and checked exhaustively on a 5×5 grid):
+
+    | Smallest rank | Sign |
+    |---|---|
+    | `a` | `+orient2d(b,c,d)` |
+    | `b` | `−orient2d(a,c,d)` |
+    | `c` | `+orient2d(a,b,d)` |
+    | `d` | `−orient2d(a,b,c)` |
+
+    The coefficient is never zero on a tie, because three distinct cocicular points
+    are never collinear.
   - Ranks are lexicographic comparisons, so they are identical in `double` and
     `Lattice`.
 - **Collinearity is not perturbed.** `orient2d` stays exact, the algorithm never forms
@@ -916,25 +929,73 @@ edges, not on insertion order, loop heads or loop order.
 
 **Algorithm** (`geom/cdt.h`, re-implemented per DEC-002):
 1. **Vertices.** Insert the vertices in projected lexicographic order into an
-   incremental Delaunay triangulation, using Lawson flips.
+   incremental Delaunay triangulation, using Lawson flips with the perturbed
+   `incircle`.
+   - **Duplicate points.** Two vertices with the same projected position
+     (`lex_compare == 0`) make the face `NotProjectable`. This is reported, never
+     asserted: the perturbation needs distinct ranks.
+   - **Degenerate start** (review v3, 2). While every point inserted so far is
+     collinear, the state is a 1-D chain of ghost-only edges. The first non-collinear
+     point fans to the whole chain.
+   - **Ghost rules:**
+     - a point `d` is in the ghost triangle `(a, b, ∞)` iff `orient2d(a,b,d) > 0`, or
+       `orient2d(a,b,d) = 0` with `d` strictly inside the segment `ab`;
+     - new triangles are created only on hull edges with strict `orient2d > 0`;
+     - a point on a hull edge's collinear extension extends the hull.
    - The convex hull is closed with **ghost triangles** on a symbolic vertex at
      infinity, so no bounding triangle is constructed. A large bounding triangle would
      leave the `Lattice` range.
-   - Point location walks from the last inserted triangle.
+   - **Point location** (review v3, 6). In lexicographic order every new point lies
+     strictly outside the current hull, or on its collinear extension. Production
+     location is therefore a hull walk from the previous vertex, which is always a hull
+     vertex.
+   - **General location.** The uniqueness test hook, and the later BRIO ordering,
+     insert in arbitrary order. They need general location, including inside a
+     triangle and on an interior or hull edge (edge splits). That path is implemented
+     and tested separately.
 2. **Constraints.** Insert the constraint edges in sorted (min rank, max rank) order.
-   Each one is inserted by removing the triangles it crosses and retriangulating the
-   two cavity polygons, which is the standard cavity method.
+   Each one removes the triangles it crosses, and the two cavity polygons are
+   retriangulated (review v3, 3).
+   - **Cavity algorithm.** Each cavity is retriangulated as its **own CDT, with the
+     same perturbed `incircle`**, using Anglada's recursive method: for the base edge
+     `(a, b)`, pick the cavity vertex `c` with strict `orient2d(a,b,c) > 0` whose
+     perturbed circle `(a,b,c)` contains no other cavity vertex, then recurse on the two
+     sides.
+   - **Why perturbed.** An unperturbed choice breaks uniqueness on cocircular grid
+     cavities.
    - **Failure.** A constraint that crosses another constraint, or passes through a
      vertex, can't occur on a projectable face. If it does, insertion fails and the
      face is `NotProjectable`. A partial `T(f)` is never returned.
-3. **Inside test.** Classify triangles by flood fill from the ghost triangles, flipping
-   inside/outside on each constraint edge crossed. Keep the inside triangles.
-4. **Output.** Emit the triangles in canonical order: each triangle rotated to start at
-   its smallest local index, with the triangles sorted by their index triples. The
-   indices are the face's local corner indices, in canonical loop order.
-5. **Predicates.** The algorithm uses only exact `orient2d_proj` and an `incircle` in
-   projection. `Lattice` uses `incircle<26>` (Int128), and `double` uses the adaptive
-   predicate.
+3. **Inside test** (review v3, 8). Normalise so the outer loop is counter-clockwise.
+   - **Kept triangles.** A triangle is kept when it lies to the left of the directed
+     loop edges, found by flood fill from the left triangle of each directed loop edge
+     without crossing constraints.
+   - **Orientation rule.** For every directed loop edge, the triangle on its left must
+     be kept and the one on its right must not.
+   - **Rejections.** A violation is a precondition failure. A nested hole, a hole
+     outside the outer loop and a crossing are `NotProjectable`, and a wrong hole
+     winding alone is `HoleOrientation`.
+4. **Output:**
+   - **Winding** (review v3, 1). Each triangle is emitted in the face's **front
+     winding**. CDT triangles are counter-clockwise in projection, so they are reversed
+     when σ = −1.
+   - **Order.** Each triangle is rotated to start at its smallest index, and the
+     triangles are sorted by index triple.
+   - **Indices** (review v3, 9) are **stored corner indices**: positions in the face's
+     stored loop order, with the loops in storage order. The invariance tests compare
+     triangles by vertex ID, because loop heads change the indices.
+5. **Predicates** (review v3, 10). The algorithm uses `orient2d_proj`, plus new
+   `incircle_proj` and `incircle_perturbed_proj` in `geom/predicates.h`, in `drop_axis`
+   order.
+   - **litestl.** The generic rank-perturbed predicate goes into litestl
+     `math/predicates.h` as `incircle_sos(a,b,c,d, ra,rb,rc,rd)`, for
+     `double`/`float`/`int64`, because CLAUDE.md puts general predicates in litestl.
+     The CDT itself, templated on UberTopo's `CoordType`, stays in UberTopo `geom/`.
+   - **Budgets.** `Lattice` uses `incircle<26>` (Int128, ≤ 3·2^110), and `double` uses
+     the adaptive predicate. `T(f)` uses only stored vertices, never `ext_bits` points.
+   - **File layout.** The CDT is split under `geom/cdt/`, into `triangulation.h`,
+     `insert.h` and `constrain.h`, to stay under 40 KB per file. It uses litestl
+     containers.
 
 **Planar faces.** P2 computes `T(f)` only for flagged faces. The same CDT is the
 intended triangulator for planar faces' render meshes later, so one triangulator
@@ -963,8 +1024,10 @@ volumes and ray tests, which are correct on planar faces (review 11).
   new code `WireOnProjectedFace`. A straight wire leaves the surface where it crosses a
   fold.
 - **Triangulation entry points:**
-  - `geom::cdt_proj(PolyView, axis, out)` returns `bool`, and outputs local corner
-    indices;
+  - `geom::cdt_proj(PolyView, axis, sigma, out)` returns a status (`Ok`,
+    `NotProjectable`, `HoleOrientation`), and outputs stored corner indices in front
+    winding. **`is_projectable_proj` is this call**: the CDT succeeding plus the
+    orientation rule, with no separate O(E²) crossing test (review v3, 8);
   - `topo::face_triangles(complex, f, out)` works only for flagged faces, and returns
     `false` on failure (review 11).
 - **Radial half-planes** (review 10). `radial_order` takes a **per-coedge half-plane
@@ -977,11 +1040,11 @@ volumes and ray tests, which are correct on planar faces (review 11).
 
 | Item | Change |
 |---|---|
-| W2 | Add `is_projectable_proj` (the exact checks of §12.2) and `geom/cdt.h` (`cdt_proj`). **Tests:** <ul><li>the Delaunay property under the symbolic perturbation, checked by brute force: no kept edge that isn't a constraint fails the perturbed `incircle` test against the opposite vertex;</li><li>every constraint edge is present;</li><li>the triangle-area sum equals the polygon area, compared exactly with the big-integer oracle;</li><li>**uniqueness**: an internal test hook inserts the vertices in random orders, and the output must be identical;</li><li>loop-head and loop-order invariance;</li><li>identical `T(f)` indices across the two instantiations;</li><li>cocircular grids (many exact `incircle` ties) and collinear or T-junction runs;</li><li>nested holes, self-touching loops, holes outside or crossing the outer loop;</li><li>a 10⁴-vertex random polygon, as a performance smoke test</li></ul> |
+| W2 | Add `geom/cdt/` (`cdt_proj`, which is also the projectability check), the projected `incircle` predicates, and litestl `incircle_sos`. **Tests** (review v3, 4): <ul><li>**global** constrained-Delaunay property: for every kept triangle and every vertex strictly inside its perturbed circumcircle, that vertex is not visible from the triangle's interior, by segment tests against the constraints;</li><li>**validity**: every triangle has `orient2d > 0` in the CDT frame and `vol3` agrees with the face front for every emitted triangle (mirrored σ = −1 family); each interior edge is shared by exactly two triangles with opposite directions; each loop edge lies in exactly one triangle;</li><li>the triangle-area sum equals the polygon area, compared exactly with the big-integer oracle;</li><li>**uniqueness**: the test hook shuffles both vertex and constraint insertion order, and the output must be identical;</li><li>loop-head and loop-order invariance, compared by vertex ID;</li><li>identical triangles across the two instantiations;</li><li>`incircle_sos` against a formal-polynomial oracle: the coefficient vector in ε, compared lexicographically, so no ε value has to be chosen (review v3, 5);</li><li>cocircular grids, collinear and T-junction runs, and degenerate starts (the first k points collinear);</li><li>duplicate projected points, nested holes, holes outside or crossing the outer loop, wrong winding;</li><li>**performance**: a 10⁴-vertex random polygon, and a convex-arc worst case (a finely tessellated round roof outline), each with a stated time budget</li></ul> |
 | W5 | A flagged face's half-plane at `e` is the plane of the `T(f)` triangle that has `e` as an edge: `q` is its third vertex and `s = +1`. Unflagged faces keep the P2a rule. **Tests:** <ul><li>both rules agree on planar faces;</li><li>a mirrored (σ = −1) flagged face;</li><li>a mixed flagged/unflagged fan, checked against `atan2`</li></ul> |
 | W6 | Planarity becomes "planar, or projectable when the policy allows it", tried on axes in the §12.2 order. Adds `NotProjectable`, `ReservedFaceFlags` and `WireOnProjectedFace`; sets `ProjAxis` and `allows_projectable`; counts projected faces |
 | W7 | Volumes and `ray_winding` use `T(f)` for flagged faces and fans for planar ones. The nesting test points of W7.3b come from `T(f)` triangles on flagged faces (review 8) |
-| W8 | **Embedding layer:** <ul><li>a flagged face must be non-planar, or the flag is spurious;</li><li>it must be projectable along its stored axis;</li><li>flagged faces are allowed only when `allows_projectable` is set;</li><li>a vertex included in a flagged face must lie exactly on `T(f)`: the projected point is located in a triangle, then `vol3 == 0` against it (review 5);</li><li>mutation tests on the axis bits.</li></ul>**Global layer:** face–face intersection uses `T(f)` |
+| W8 | **Embedding layer:** <ul><li>a flagged face must be non-planar, or the flag is spurious;</li><li>it must be projectable along its stored axis;</li><li>flagged faces are allowed only when `allows_projectable` is set;</li><li>a vertex included in a flagged face must lie exactly on `T(f)`: the projected point is located in a **closed** triangle, then `vol3 == 0` against it. A point that projects onto a `T(f)` edge or vertex is accepted against any closed triangle containing it (review 5; review v3, 12);</li><li>mutation tests on the axis bits.</li></ul>**Global layer:** face–face intersection uses `T(f)` |
 | W9 | A `sloped_roof` / `rotated_wall` family, built with the option enabled. Snapping moves roof corners vertically, keeping them within the wall tops' footprint, so there are no face–face intersections and the ground truth holds (review 15). Planar families build without the option |
 | W10 | Freeze stores `T(f)` for flagged faces as a `Derived` CSR of **per-face local corner indices**, built after permute and remap, so it never enters the remap table (review 13). `read()` rebuilds it, and serialisation carries only flags and `allows_projectable` |
 | W11 | The determinism suite includes the sloped-roof family in both instantiations |
@@ -991,10 +1054,10 @@ volumes and ray tests, which are correct on planar faces (review 11).
 
 | # | Risk | Mitigation |
 |---|---|---|
-| A1-R1 | **Editing** (P3/P5). On a flagged face, `T(f)` *is* the geometry, and it isn't local: **any** loop edit changes it. That includes moving a vertex, splitting an edge (inserting a 3D-collinear vertex moves the fold) or adding a hole (review 4) | Flagged faces are identifiable. P3 must either store `T(f)` as persistent data for edited faces, or treat every loop edit on a flagged face as a geometry edit that re-snaps or re-validates. The decision is recorded for P3. Planar faces are unaffected |
+| A1-R1 | **Editing** (P3/P5). On a flagged face, `T(f)` *is* the geometry, and it isn't local: **any** loop edit changes it. That includes moving a vertex, splitting an edge (inserting a 3D-collinear vertex moves the fold) or adding a hole (review 4) | Flagged faces are identifiable. P3 must either store `T(f)` as persistent data for edited faces, or treat every loop edit on a flagged face as a geometry edit that re-snaps or re-validates. The decision is recorded for P3. Planar faces are unaffected. With a CDT, one moved vertex can flip triangles far away, so locality is worse than with ear clipping (review v3, 12) |
 | A1-R2 | A **nearly vertical** projection gives thin polygons with many exact near-degeneracies | The results stay correct, though slower. The axis order prefers the dominant axis. Generators avoid the case |
-| A1-R3 | **CDT cost and correctness** | Insertion in lexicographic order, with walking location, is near-linear for building faces. Terrain-scale use later needs a deterministic BRIO order: keyed RNG plus lexicographic order inside each round. Correctness is covered by brute-force Delaunay and uniqueness tests in both instantiations |
-| A1-R5 | **Sign rule of the perturbed `incircle`** | It is derived once and checked against a brute-force perturbation (the lift `ε^rank` with a tiny rational ε, evaluated exactly on the big-integer oracle) on degenerate cocircular inputs |
+| A1-R3 | **CDT cost and correctness** | Sorted insertion can cost Θ(n²) flips when the points lie on a convex arc (review v3, 7). Building faces are small, and a convex-arc performance test with a budget tracks the worst case. Terrain-scale use needs a deterministic BRIO order (keyed RNG plus lexicographic order within each round) on the general-location path. Correctness is covered by the global Delaunay, validity and uniqueness tests in both instantiations |
+| A1-R5 | **Sign rule of the perturbed `incircle`** | The rule is in §12.2. The review derived it and checked it exhaustively on a 5×5 grid. Tests compare against a formal-polynomial oracle |
 | A1-R4 | **Misuse as a tolerance** | Opt-in per build, persisted on the complex, counted in the report, and flagged per face. A per-face request bit (a stricter audit trail) can be added if wanted |
 
 ### 12.6 Pressure-test review (fresh-context agent, 2026-11-18)
@@ -1033,7 +1096,33 @@ volumes and ray tests, which are correct on planar faces (review 11).
 | 14 | Minor | Docs to update | W12 row |
 | 15 | Minor | Error-code precedence; generator snapping must avoid face–face intersections | §12.3 precedence; W9 snapping rule |
 
-### 12.7 Pressure-test review of v3 (CDT)
+### 12.7 Pressure-test review of v3 (CDT, fresh-context agent, 2026-11-18)
 
-_To be filled in by a fresh-context review agent before implementation._
+**What the review verified:**
+- **Uniqueness and insertion-order independence** of the rank-perturbed CDT, with
+  constraints too: constrained diagonals are forced, the other ties are generic, and no
+  vertex disappears.
+- **The domain-restricted CDT** equals the hull CDT.
+- **The sign rule** (now in §12.2), checked exhaustively on a 5×5 grid against an exact
+  evaluation at ε = 2^-70. It needs only `orient2d`.
+- **Bit budgets:** `Lattice` `incircle<26>` sums to ≤ 3·2^110, and the `double` domain
+  is fine.
+- **Cross-instantiation determinism.**
+- **Each boundary edge is in exactly one kept triangle.**
 
+**Findings and dispositions:**
+
+| # | Sev. | Finding | Disposition |
+|---|---|---|---|
+| 1 | Major | CDT triangles are counter-clockwise in projection, so on σ = −1 faces they are the opposite of the front winding | Output step: emit in front winding; W2 test of `vol3` against the face front on the mirrored family |
+| 2 | Major | The degenerate start (collinear first points) and the ghost rules weren't specified | Step 1: 1-D chain state; ghost containment, creation and extension rules; tests |
+| 3 | Major | The cavity method was underspecified; uniqueness needs the perturbed `incircle` in cavities | Step 2: Anglada's recursive cavity CDT with the perturbed `incircle` and strict `orient2d` |
+| 4 | Major | The local-Delaunay oracle isn't independent; an area sum can hide an overlap cancelled by a gap | W2: global visibility-based Delaunay test, validity checks, shuffled constraint order |
+| 5 | Minor | `ε^0 = 1` isn't infinitesimal; the sign rule wasn't written down | `ε^(rank+1)`; rule written into §12.2; formal-polynomial oracle |
+| 6 | Minor | Production location is only a hull walk; the shuffled hook needs general location | Step 1: general location implemented and tested separately |
+| 7 | Minor | "Near-linear" cost was unproven (Θ(n²) on convex arcs); the projectability check could be O(E²) | A1-R3; convex-arc performance test; projectability is the CDT call itself |
+| 8 | Minor | Checks were redundant with what the CDT detects; duplicate projected points | Step 3: orientation rule replaces parity and the separate checks; duplicates are `NotProjectable` |
+| 9 | Minor | The output index convention was ambiguous | Stored corner indices; invariance compared by vertex ID |
+| 10 | Minor | `incircle_proj` was missing; where the predicates live | `geom/predicates.h` additions; `incircle_sos` in litestl; the CDT in UberTopo `geom/cdt/` |
+| 11 | Minor | §8 sizing and the 40 KB file split | `geom/cdt/` split; §8 updated |
+| 12 | Minor | Included vertices on `T(f)` edges; P3 non-locality is worse with a CDT | W8 closed-triangle rule; A1-R1 note |
