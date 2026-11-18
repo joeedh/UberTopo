@@ -28,6 +28,7 @@ Index of everything under `docs/`. Update this file whenever a doc is added, mov
 Plans must be pressure-tested by a fresh-context agent before implementation.
 
 - [2026-11-17-p0-litestl-foundations.md](plans/2026-11-17-p0-litestl-foundations.md) — P0 (**implemented**; v2 reviewed): wide ints, exact/adaptive predicates, hash128 (SipHash-2-4-128), Philox RNG, deterministic reduce in litestl
+- [2026-11-18-p1-attribute-core.md](plans/2026-11-18-p1-attribute-core.md) — P1 (draft, pre-review): litestl `attr/` — paged COW columns, open column interface, groups with builtin slots, mixing, registry, intern pools, canonical hashing/serialization, page-size benchmark
 
 ## Research (`research/`)
 
