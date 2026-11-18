@@ -837,8 +837,8 @@ decisions are recorded in DEC-013.
 
 ## 12. Amendment A1 — opt-in projectable faces (2026-11-18)
 
-**Status:** draft. A fresh-context pressure test (§12.6) is required before
-implementation.
+**Status:** v2. It was revised after the fresh-context pressure test (§12.6) and is
+ready for implementation in P2b.
 
 ### 12.1 Motivation and owner decision
 
@@ -858,79 +858,156 @@ The owner chose this relaxation:
 
 ### 12.2 Definitions
 
-- **Projectable face.** A face `f` is projectable along an axis `k` when all of these
-  hold in the projection that drops `k` (`drop_axis`):
-  - every loop is simple;
-  - no two loops intersect or touch;
-  - exactly one loop (the outer loop, the one holding the lexicographic-minimum
-    vertex) contains all the others;
-  - the holes have the opposite exact orientation to the outer loop;
-  - no projected loop is degenerate.
+**Canonical loop order.** Everything below walks each loop starting at its
+lexicographic-minimum vertex, which is a projected lexicographic comparison where a
+projection is involved. Loops are taken in the order of their lexicographic-minimum
+vertices. A change of loop head therefore never changes the result (review 4).
 
-  It follows that the lifted surface is a height field over the projection plane, so
-  the face can't intersect itself.
-- **Projection axis.** The axis is the dominant component of the approximate Newell
-  normal (`project_axis`, ties to the smaller axis). Only that axis is tried; if the
-  face isn't projectable along it, the face is rejected.
-  - The axis is **stored**, in two bits of `.f.flags`, so later vertex edits (P3) can't
-    silently move a face's geometry to a different projection.
-- **Canonical triangulation `T(f)`:**
-  - **Method.** Ear clipping in the projection, with exact `orient2d_proj` and
-    `point_in_poly_proj` tests.
-  - **Holes** are joined to the outer loop by deterministic bridges. Each hole, taken
-    in order of its lexicographic-minimum vertex, is bridged from that vertex to the
-    nearest visible vertex of the current outer boundary. "Nearest" is an exact
-    comparison of squared projected distances, with ties broken by lexicographic
-    order and then by loop position. Visibility is an exact `segments_intersect_proj`
-    test.
-  - **Ears** are clipped in a fixed scan order, starting at the outer loop's first
-    vertex.
-  - **Result.** `T(f)` depends only on the loops as given (vertex positions and the
-    start of each loop), so it is identical across thread counts and across `double`
-    and `Lattice`.
-  - **Bridges and diagonals** are not topology. `T(f)` is a recomputable cache.
-- **Planar faces under the option.** A face that is exactly planar is built exactly as
-  today, without the flag. Any triangulation of a planar face describes the same
-  surface, so nothing downstream changes for it.
+**Projectable face.** A face is projectable along axis `k` when all of these hold
+exactly in the projection that drops `k`:
+- every loop is simple and non-degenerate;
+- no two loops intersect or touch;
+- the outer loop (the one holding the lexicographic-minimum vertex) contains every
+  other loop;
+- **no hole contains another hole** (review 3);
+- every hole has the opposite orientation to the outer loop.
 
-### 12.3 API
+The lifted surface is then a height field over the projection plane, so the face can't
+intersect itself.
 
-- **Opting in.** `BuildPolicy::allow_projectable_faces` (default `false`) is the opt-in.
-- **Rejection.** Without it, a non-planar face is still rejected with `NonPlanarFace`.
-  With it, the face must be projectable, or it is rejected with the new code
-  `NotProjectable`.
-- **Flags.** The builder sets `face_flags::Projected` on every accepted **non-planar**
-  face, and records the axis in `face_flags::AxisMask` (two bits). No other face ever
-  carries these bits.
-- **Triangulation cache.** `geom::triangulate_proj(PolyView, axis, out_triangles)`
-  computes `T(f)`, and `topo::face_triangles(complex, f, out)` returns it, from the
-  cache or computed. For an unflagged planar face, `face_triangles` returns the same
-  canonical triangulation, so every caller has a single path.
-- **Report counts.** `BuildReport` counts projected faces. That makes visible how much
-  of a model depends on the weaker form.
+**Axis choice** (review 7). The builder tries the dominant axis of the approximate
+Newell normal first, then the other two axes in index order, and uses the first along
+which the face is projectable.
+- The Newell sum follows the canonical loop order, so it doesn't depend on loop heads.
+- Only the *ranking* of the axes is approximate. The test of each axis is exact.
+- The Newell axis is identical in `double` and `Lattice` (verified by the review).
+
+**Stored axis.** The chosen axis is stored on the face (§12.3), and is the face's
+geometry from then on.
+- The validator requires the face to be projectable along its **stored** axis.
+- It does **not** require the stored axis to equal the choice rule's result. That
+  equality is checked only on freshly built complexes, in tests (review 4).
+
+**Canonical triangulation `T(f)`:**
+- **Bridges** (review 2). Holes are bridged in ascending order of their
+  lexicographic-minimum vertex `h`.
+  - **Target.** Each hole is bridged from `h` to the **lexicographically greatest
+    vertex `v` with `v < h` that is visible from `h`**.
+  - **Visibility.** The segment `h–v` must not touch any edge of any loop (the merged
+    boundary, the hole itself and every unbridged hole) except at `h` and `v`. It must
+    also enter the polygon's interior at `v` (InCone).
+  - **Copies.** A position that already appears twice (an earlier bridge end) is
+    resolved by picking the copy whose wedge `(prev, v, next)` strictly contains the
+    direction `v→h`.
+  - **Exactness.** No distances are computed, only lexicographic comparisons and
+    `orient2d`/segment tests, so the choice is identical in `double` and `Lattice`.
+  - **Existence.** A visible `v < h` always exists in this order (Eberly's left-ray
+    argument).
+- **Ears** (review 1). An ear at tip `t` with neighbours `p` and `n` is accepted when
+  **all** of these hold:
+  - `orient2d(p, t, n)` is strictly convex;
+  - the diagonal `p–n` doesn't touch, overlap or cross any boundary edge it isn't
+    incident to, so a vertex lying on the diagonal blocks it;
+  - `p–n` lies inside the cone at `p` and at `n` (InCone, which also separates the two
+    copies of a bridge vertex).
+
+  Zero-area triangles are never emitted.
+- **Scan order.** The scan starts at the outer loop's lexicographic-minimum vertex.
+  After a clip it resumes at `p`.
+- **Failure.** If no ear is found, the face is `NotProjectable`. A partial `T(f)` is
+  never returned.
+- **Result.** `T(f)` depends only on the face's vertex positions and the cyclic order of
+  its loops. It is identical across thread counts and across `double` and `Lattice`.
+  Bridges and diagonals are not topology.
+
+**Planar faces** are never flagged. They keep the P2a rules, including fans for
+volumes and ray tests, which are correct on planar faces (review 11).
+
+### 12.3 API and persistence
+
+- **Opting in.** `BuildPolicy::allow_projectable_faces` (default `false`) enables the
+  option for one build.
+- **Error codes:**
+  - without the option, a non-planar face is `NonPlanarFace`, as in P2a;
+  - with it, a non-planar face must be projectable along some axis;
+  - a projection that fails only on hole winding reports `HoleOrientation`, and any
+    other failure reports the new code `NotProjectable` (review 15).
+- **Flags** (review 9). `.f.flags` gets a two-bit field `ProjAxis` (mask `0x30`) that
+  holds `axis + 1`. `0` means "not projected", so there are no inconsistent states.
+- **Reserved bits** (review 6). The builder rejects a face whose client-supplied flags
+  set `ProjAxis` bits, with the new code `ReservedFaceFlags`.
+- **Persistent opt-in** (review 6). The complex records `allows_projectable` as a
+  global builtin. It is serialised, so it survives `read()` and is visible to P3. The
+  validator reports any face with `ProjAxis ≠ 0` when that bit is clear.
+- **Wires** (review 5). In P2, a wire included in a flagged face is rejected with the
+  new code `WireOnProjectedFace`. A straight wire leaves the surface where it crosses a
+  fold.
+- **Triangulation entry points:**
+  - `geom::triangulate_proj(PolyView, axis, out)` returns `bool`, and outputs local
+    corner indices;
+  - `topo::face_triangles(complex, f, out)` works only for flagged faces, and returns
+    `false` on failure (review 11).
+- **Radial half-planes** (review 10). `radial_order` takes a **per-coedge half-plane
+  provider** instead of a `FaceFrame` lookup. For a flagged face, the builder computes
+  `T(f)` once and records each boundary coedge's third vertex. For a `T(f)` triangle,
+  `s = +1` always, and this is asserted.
+- **Report counts.** `BuildReport` counts projected faces.
 
 ### 12.4 Changes to work items
 
 | Item | Change |
 |---|---|
-| W2 | Add `triangulate_proj`, and `is_projectable_proj` (the exact simplicity, containment and winding checks above). Tests: an oracle comparison against brute-force exact checks on random small grids; triangle-area sum equals polygon area (exact, projected); determinism under rotation of input order of *other* faces; failure cases (self-touching loop, hole outside, hole crossing outer) |
-| W5 | For a flagged face, the half-plane at edge `e` is the plane of the **triangle of `T(f)` that contains `e`**: `q` is that triangle's third vertex. An unflagged face keeps today's rule. Both rules agree on planar faces, which is a test |
-| W6 | Planarity check becomes "planar, or projectable when the policy allows it". New code `NotProjectable`. Set the flag and axis bits. Count projected faces |
-| W7 | Shell orientation volumes and `ray_winding` use `T(f)` for flagged faces, instead of the loop fans. That makes them watertight with neighbouring faces, since boundary edges are shared straight segments |
-| W8 | The embedding layer checks that a flagged face is non-planar (otherwise the flag is spurious), that it is projectable along its stored axis, and that the stored axis is the one the rule chooses. An unflagged face must still be exactly planar. The global face–face intersection test uses `T(f)`. The containment check for a vertex included in a flagged face uses the projection only (it is weaker than "on the surface"), and this is documented |
-| W9 | Add a `sloped_roof` / `rotated_wall` generator family. It snaps quads to the lattice so that some faces become non-planar, and it builds them with the option enabled. The planar families build with the option disabled |
-| W10 | Freeze stores `T(f)` for flagged faces as a `Derived` CSR cache, rebuilt after `read()`. Serialisation carries only the flags |
+| W2 | Add `is_projectable_proj` (the exact checks of §12.2) and `triangulate_proj`. **Tests:** <ul><li>brute-force exact comparisons on random small grids;</li><li>the triangle-area sum equals the polygon area, compared exactly with the big-integer oracle (Int128 or an expansion is needed, review 12);</li><li>loop-head rotation invariance;</li><li>identical `T(f)` indices across the two instantiations;</li><li>collinear and T-junction runs;</li><li>two holes bridging to the same vertex;</li><li>nested holes, a self-touching loop, a hole outside or crossing the outer loop</li></ul> |
+| W5 | A flagged face's half-plane at `e` is the plane of the `T(f)` triangle that has `e` as an edge: `q` is its third vertex and `s = +1`. Unflagged faces keep the P2a rule. **Tests:** <ul><li>both rules agree on planar faces;</li><li>a mirrored (σ = −1) flagged face;</li><li>a mixed flagged/unflagged fan, checked against `atan2`</li></ul> |
+| W6 | Planarity becomes "planar, or projectable when the policy allows it", tried on axes in the §12.2 order. Adds `NotProjectable`, `ReservedFaceFlags` and `WireOnProjectedFace`; sets `ProjAxis` and `allows_projectable`; counts projected faces |
+| W7 | Volumes and `ray_winding` use `T(f)` for flagged faces and fans for planar ones. The nesting test points of W7.3b come from `T(f)` triangles on flagged faces (review 8) |
+| W8 | **Embedding layer:** <ul><li>a flagged face must be non-planar, or the flag is spurious;</li><li>it must be projectable along its stored axis;</li><li>flagged faces are allowed only when `allows_projectable` is set;</li><li>a vertex included in a flagged face must lie exactly on `T(f)`: the projected point is located in a triangle, then `vol3 == 0` against it (review 5);</li><li>mutation tests on the axis bits.</li></ul>**Global layer:** face–face intersection uses `T(f)` |
+| W9 | A `sloped_roof` / `rotated_wall` family, built with the option enabled. Snapping moves roof corners vertically, keeping them within the wall tops' footprint, so there are no face–face intersections and the ground truth holds (review 15). Planar families build without the option |
+| W10 | Freeze stores `T(f)` for flagged faces as a `Derived` CSR of **per-face local corner indices**, built after permute and remap, so it never enters the remap table (review 13). `read()` rebuilds it, and serialisation carries only flags and `allows_projectable` |
 | W11 | The determinism suite includes the sloped-roof family in both instantiations |
+| W12 | Docs: <ul><li>design 01 §2: the `ProjAxis` flag, and the meaning of `.f.surface` NONE becomes "planar, or projected when flagged";</li><li>design 01 §4, §5 and §8;</li><li>07-topology-api;</li><li>a DEC entry for the owner rule;</li><li>`docs/index.md` (review 14)</li></ul> |
 
 ### 12.5 Risks and caveats
 
 | # | Risk | Mitigation |
 |---|---|---|
-| A1-R1 | **Editing** (P3/P5): on a flagged face, `T(f)` *is* the geometry. Splitting along a chord that isn't an edge of `T(f)`, or moving one vertex, changes the surface | The flag makes such faces identifiable. P3 operators must split flagged faces only along `T(f)` edges, or re-snap them; the rule is recorded for P3. Planar faces are unaffected |
-| A1-R2 | A **nearly vertical** projection makes the projected polygon thin, with many exact near-degeneracies | Exactness keeps the results correct, though slow. Generators avoid it. The validator recomputes the axis rule |
-| A1-R3 | **Triangulation cost** on large faces (O(n²) ear clipping plus bridging) | Building faces are small. A CDT replaces ear clipping if profiling demands it. The canonical-result contract still holds |
-| A1-R4 | **Misuse as a tolerance.** The option hides bad imports | It is opt-in per build, counted in the report, and flagged per face, so it can be audited |
+| A1-R1 | **Editing** (P3/P5). On a flagged face, `T(f)` *is* the geometry, and it isn't local: **any** loop edit changes it. That includes moving a vertex, splitting an edge (inserting a 3D-collinear vertex moves the fold) or adding a hole (review 4) | Flagged faces are identifiable. P3 must either store `T(f)` as persistent data for edited faces, or treat every loop edit on a flagged face as a geometry edit that re-snaps or re-validates. The decision is recorded for P3. Planar faces are unaffected |
+| A1-R2 | A **nearly vertical** projection gives thin polygons with many exact near-degeneracies | The results stay correct, though slower. The axis order prefers the dominant axis. Generators avoid the case |
+| A1-R3 | **Triangulation cost**: O(n²) ear clipping, plus bridging | Building faces are small, and `T(f)` is computed once per build and cached at freeze. A CDT can replace it later, under the same canonical-result contract |
+| A1-R4 | **Misuse as a tolerance** | Opt-in per build, persisted on the complex, counted in the report, and flagged per face. A per-face request bit (a stricter audit trail) can be added if wanted |
 
-### 12.6 Pressure test
+### 12.6 Pressure-test review (fresh-context agent, 2026-11-18)
 
-_To be filled in by a fresh-context review agent before implementation._
+**What the review verified:**
+- the `T(f)` half-plane rule (`s = +1` whatever σ is);
+- that FRONT and the wedge rule hold locally on a height field, hole edges included;
+- slivers;
+- mixing flagged and unflagged faces about an edge;
+- that each boundary edge belongs to exactly one triangle, given the §12.2 conditions;
+- that a height field doesn't intersect itself;
+- that `T(f)` is needed for volumes;
+- that the Newell axis is identical in both instantiations;
+- the `Lattice` budget for squared distances, which v2 no longer uses;
+- that apertures need nothing extra;
+- that the flag bits fit;
+- that bridges exist in ascending lexicographic-minimum order.
+
+**Findings and dispositions:**
+
+| # | Sev. | Finding | Disposition |
+|---|---|---|---|
+| 1 | Major | The ear test was underspecified, because `point_in_poly_proj` isn't an ear test. Collinear and T-junction vertices gave zero-area triangles and gaps | §12.2: exact diagonal test with strict convexity, touch-blocking and InCone; no zero-area triangles; resume at `p`; failure means `NotProjectable` |
+| 2 | Major | Bridges: visibility didn't cover all loops; repeated targets were ambiguous; squared distance isn't exact in `double`, which breaks cross-instantiation equality | §12.2: lexicographically greatest visible `v < h`, with visibility against every loop, a wedge test for copies, and no arithmetic |
+| 3 | Major | Nested holes weren't excluded | §12.2: no hole contains another |
+| 4 | Major | `T(f)` depended on loop heads and was non-local under edits; the validator's axis check conflicted with the stored axis | §12.2: canonical loop order; validator checks the stored axis (the rule match only on fresh builds); A1-R1 extended |
+| 5 | Major | Projection-only containment let sensors float off the surface; included wires weren't addressed | W8: exact on-`T(f)` check; §12.3: `WireOnProjectedFace` in P2 |
+| 6 | Major | Clients could set the flag bits by hand; the opt-in didn't persist | §12.3: `ReservedFaceFlags`; a persisted `allows_projectable` global, checked by the validator |
+| 7 | Minor | Dominant axis only, versus the owner's "one axis-aligned plane" | §12.2: dominant axis first, then the others in index order |
+| 8 | Minor | The W7.3b test point came from a fan triangle | W7: `T(f)` triangles on flagged faces |
+| 9 | Minor | The flag encoding allowed inconsistent states | §12.3: `axis + 1` in two bits |
+| 10 | Minor | The `radial_order` API, and recomputing `T(f)` per coedge | §12.3: per-coedge provider, precomputed per face; assert `s = +1` |
+| 11 | Minor | `face_triangles` on planar faces could fail and was expensive | §12.2/§12.3: flagged faces only, with a `bool` return; planar faces keep fans |
+| 12 | Minor | Exact area needs Int128 or an expansion; missing test cases | W2/W5/W8 test lists |
+| 13 | Minor | Freeze cache layout | W10: local corner indices, built after remap |
+| 14 | Minor | Docs to update | W12 row |
+| 15 | Minor | Error-code precedence; generator snapping must avoid face–face intersections | §12.3 precedence; W9 snapping rule |
