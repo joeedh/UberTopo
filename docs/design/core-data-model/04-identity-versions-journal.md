@@ -33,6 +33,9 @@ template <typename T> concept ElementRef = requires { T::domain; } && std::same_
 `Ref<Edge>` and `Ref<Face>` don't convert into each other, which catches whole classes of
 index bugs at compile time. Columns store raw `u32`. Accessors return `Ref<D>`.
 
+**Implementation note (P2a).** The domain enum is `ident::ElemKind`. The name avoids a
+clash with `topo::Domain<Schema>`. See [07 §4](07-topology-api.md#4-identity-ident).
+
 ## 3. Persistent IDs
 
 **Storage.** A `.id` column of type `PersistentId` exists on Vertex, Edge, Face, Loop

@@ -132,3 +132,27 @@ Entry format:
   `git diff --ignore-cr-at-eol --stat` against the original. When scripting edits to
   litestl files, open them in binary mode or preserve `newline=''`.
 
+## Undefined `litestl::platform::cpu_core_count()` when linking UberTopo tests
+- **Symptom:** a test that linked `ubertopo_topo` failed to link with an undefined
+  reference to `cpu_core_count()` from `task.cc`, although `platform` was listed among
+  the dependencies.
+- **Cause:** litestl's `platform` is an **OBJECT** library. CMake adds its objects only
+  to targets that link it directly. When a static library (`ubertopo_topo`) linked it,
+  the objects ended up inside that archive, which appears *before* `libutil.a` on the
+  link line, so the single-pass linker had already passed them when `util` needed
+  them.
+- **Fix / technique:** `ut_test()` links `platform` into every test executable. Library
+  targets don't list it. To diagnose this kind of failure, read the
+  `LINK_LIBRARIES` line in `build.ninja` for the failing target.
+
+## Builder rejects a hand-written hole as `HoleOrientation`
+- **Symptom:** radial-order fixtures with a hole failed to build, reporting
+  `HoleOrientation`.
+- **Cause:** the fixture's hole loop was counter-clockwise, the same winding as the
+  outer loop. The builder enforces opposite windings, because a hole wound like its
+  outer loop makes the wall's half-plane at the hole edge point into the hole. That
+  gives false coplanar ties and wrong regions (P2 plan review, finding 6).
+- **Fix / technique:** wind holes clockwise when seen from the face's front, so the
+  face interior is to the left of every coedge. To check a hand-written loop, compute
+  its shoelace sum in the face's own (u, w) coordinates.
+

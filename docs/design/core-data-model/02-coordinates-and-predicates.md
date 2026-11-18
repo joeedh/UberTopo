@@ -69,6 +69,15 @@ concept ExactCoord = CoordType<T> && CoordTraits<T>::is_exact;
   comparison about an axis, segment intersection classification, point-in-polygon,
   point-in-shell parity, and orientation of a point to a plane through three points.
 
+**Implementation note (P2a, [07 §2](07-topology-api.md#2-coordinates-geomcoordh)).**
+- **`Wide` is dropped**, because litestl's predicates choose their own accumulator
+  widths.
+- **Additions to the traits:**
+  - `from_int`;
+  - `orient3d_ext`, which for `Lattice` has a 30-bit range for constructed points;
+  - `from_int_pow2`, `ext_ok` and `add_exact` for exact constructions.
+- **`is_exact`** means that additions are exact, so it is true only for `Lattice`.
+
 ## 3. Instantiations
 
 | `Coord` | Point | `Wide` | Predicates | Use |

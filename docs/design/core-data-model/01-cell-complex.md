@@ -74,6 +74,15 @@ topology (authoritative); `D` means derived (rebuildable from the `T` columns).
 | Region | `.r.shell` | u32 | D | First shell |
 | | `.r.flags` | u8 | T | `unbounded` (index 0 only), `virtual` (outside the tile, beyond the world box) |
 
+**Implementation note (P2a, [07 §5](07-topology-api.md#5-domains-and-schemas-toposchemah-topodomainh)).**
+- **Flags.** "D" means *recomputable from the T columns*. Every link column is stored
+  with litestl's `Topo` flag. litestl's `Derived` flag excludes a column from hashes
+  and bytes, so it is reserved for freeze caches.
+- **Bookkeeping columns.** Each domain also has `.gen` and `.live`, and `.id` where
+  design 04 §3 says so.
+- **Container hints.** Vertices and edges carry a `*.container_hint` column for region
+  hints that are resolved by `build_regions()`.
+
 `ContainerRef` is a u32 with a 2-bit kind tag (NONE, FACE, REGION) and a 30-bit index.
 Thirty bits gives about 10⁹ elements per tile, well beyond any tile budget.
 

@@ -463,6 +463,36 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
 - **Merged:** at the owner's request, litestl `master` was fast-forwarded to `26447b2`
   (from `ubertopo/attr-schema`) and UberTopo `master` to match.
 
+## DEC-013 — P2a: cell-complex core API decisions and goldens
+
+- **Date:** 2026-11-18. Implements P2a of the
+  [P2 plan](plans/2026-11-18-p2-cell-complex.md). The realised API is
+  [design 07](design/core-data-model/07-topology-api.md).
+- **Decisions:**
+  - **Link flags.** Every topology link column is `Topo`. litestl's `Derived` flag is
+    reserved for freeze caches, which are excluded from hashes and bytes.
+  - **Bookkeeping columns.** `.id`, `.gen` and `.live` have the same names in every
+    domain.
+  - **Freeing a slot** resets every column except `.gen`, then bumps `.gen`.
+  - **Region hints.** Region containers named by generator hints are stored as
+    `*.container_hint` IDs until `build_regions()` resolves them.
+  - **`ElemKind`** replaces the design's `Domain` enum name.
+  - **`Lattice`** is a strong `int64` with `+`, `-` and negation only. `Wide` is dropped
+    from `CoordTraits`. `orient3d_ext` (30-bit `Lattice` range) serves constructed
+    points: ray far points, and interior test points scaled by 4.
+  - **The builder is all-or-nothing on errors.** Its output is a function of the
+    emitted set: sorted-key dense indexing, with `vs[0]` the smaller vertex ID and disk
+    cycles in edge order. The radial cycle starts at the smallest face ID.
+- **litestl additions** (branch `ubertopo/p2-support`):
+  - `util/sort.h` (`sort_unique_keys`, which checks for ties in every build, and
+    `stable_sort`);
+  - `task::parallel_exclusive_scan`;
+  - `AttrGroup::hash_into(h, filter)` and `AttrGroup::version()`;
+  - `Vec` zero-fill with `T(0)`;
+  - `Vector::data() const`.
+- **Goldens.** The persistent-ID derivation goldens in `test_ident.cc` join the
+  determinism contract.
+
 ---
 
 ## Open questions

@@ -1,6 +1,6 @@
 # Plan P2 — Cell complex core (UberTopo `geom/`, `ident/`, `topo/`)
 
-- **Status:** v2, revised after the fresh-context pressure test (§10). Ready to implement P2a.
+- **Status:** v2, revised after the fresh-context pressure test (§10). **P2a implemented** (§11); P2b next.
 - **Date:** 2026-11-18
 - **Design:** [core-data-model/01](../design/core-data-model/01-cell-complex.md) (cell
   complex), [02](../design/core-data-model/02-coordinates-and-predicates.md) (coordinates
@@ -793,3 +793,40 @@ triangle–triangle tests (review 12), and W10 because of the remap pass.
 | 22 | Minor | Suggests answering §9.1 with an exact expansion sum | **Declined** for P2 by owner decision §9.1; noted there as the future approach |
 | 23 | Minor | `geom` shouldn't depend on `topo` types; `Domain` name clash | W2 span inputs; W3 `ElemKind` |
 | 24 | Minor | Rebuilding regions drops region attributes; freeze while `regions_dirty` | W7.6 carry-over by ID; W10 precondition |
+
+## 11. Implementation notes
+
+### P2a (2026-11-18)
+
+**Landed:**
+- W1–W6;
+- the combinatorial layer of W8;
+- builder band-count determinism, taken early from W11.
+
+The realised API is [design 07](../design/core-data-model/07-topology-api.md), and the
+decisions are recorded in DEC-013.
+
+**Deviations and additions:**
+- **`ray_winding`** takes triangle spans and an integer pre-scale (`scale_log2`). The
+  W7.3b interior points use `interior_point4`, i.e. `(a+b+2c)/4` scaled by 4, rather
+  than a barycentre scaled by 3: division by 4 is exact in `double` on dyadic grids.
+- **Point-in-polygon** reports a boundary point explicitly. It needs no
+  Simulation-of-Simplicity tie-breaking.
+- **The builder** stores region container hints in `.v.container_hint` and
+  `.e.container_hint`. Its output is all-or-nothing on errors.
+- **The validator** runs its region checks only when `regions_dirty` is clear. In P2a
+  they are tested on regions assigned by hand from geometry. Because those regions
+  come from geometry, a clean invariant W also verifies that the radial order and the
+  wedge rule agree on real models.
+- **Deferred to P2b:**
+  - the Euler–Poincaré cross-check, which needs generator ground truth;
+  - the generation-monotonicity test, which belongs with freeze.
+- **litestl additions beyond W1:** `Vector::data() const`.
+
+**Verification:**
+- **Mutation checks:**
+  - geom: radial sign, point-in-polygon rule, segment overlap, winding sign;
+  - radial: half-plane sign, reference sign;
+  - validator: wedge rule flipped, radial order reversed.
+- **The configuration matrix** results are listed below.
+
