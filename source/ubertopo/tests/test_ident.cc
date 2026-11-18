@@ -51,6 +51,7 @@ static void test_derivations()
   UT_CHECK(face_side_id(face, 0) != face_side_id(face, 1));
   UT_CHECK(region_id(va, vb) != region_id(va, va));
   UT_CHECK(region_id_from_sides(vb) != region_id(vb, vb));
+  UT_CHECK(region_id_from_hint(va) != region_id(va, kNoId) && region_id_from_hint(va) != region_id_from_hint(vb));
   /* type tags: u32 1 and u64 1 are different fields */
   UT_CHECK(derive_generator(root, "x", uint32_t(1)) != derive_generator(root, "x", uint64_t(1)));
   /* domain separation */

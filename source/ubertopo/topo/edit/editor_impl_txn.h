@@ -875,6 +875,30 @@ void Editor<C>::inclusions(FaceRef f, litestl::util::Vector<uint32_t, 16> &out) 
   });
 }
 
+template <geom::CoordType C> ident::PersistentId Editor<C>::region_winning_hint(uint32_t r) const
+{
+  /* CLAUDENOTE: O(F) scan; the hint index (P3b W4) replaces it */
+  std::map<ident::PersistentId, uint32_t> votes;
+  const auto &sh = k_.faces.sides().template get<".fs.hint">();
+  k_.faces.for_each_live([&](uint32_t f) {
+    for (uint32_t s = 0; s < 2; s++) {
+      const ident::PersistentId h = sh[2 * f + s];
+      if (k_.region(FaceRef(f), s).i == r && !(h == ident::kNoId)) {
+        votes[h]++;
+      }
+    }
+  });
+  ident::PersistentId best{};
+  uint32_t n = 0;
+  for (auto &[h, c] : votes) {
+    if (c > n) {
+      n = c;
+      best = h;
+    }
+  }
+  return best == ident::unbounded_region_id() ? ident::PersistentId{} : best;
+}
+
 template <geom::CoordType C> bool Editor<C>::hint_in_use(ident::PersistentId h) const
 {
   if (h == ident::kNoId) {

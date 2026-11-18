@@ -125,6 +125,13 @@ inline PersistentId region_id(PersistentId hint, PersistentId min_face_side)
   return derive(tag::Region, std::string_view("hint"), hint, min_face_side);
 }
 
+/** A region named by a hint that no other region wins (DEC-017): stable
+ * under edits that keep the region's winning hint. */
+inline PersistentId region_id_from_hint(PersistentId hint)
+{
+  return derive(tag::Region, std::string_view("hint_only"), hint);
+}
+
 /** A region without a hint, named by its minimal face-side ID. */
 inline PersistentId region_id_from_sides(PersistentId min_face_side)
 {

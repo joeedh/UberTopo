@@ -238,24 +238,15 @@ template <geom::CoordType C> EditCode Editor<C>::embed_impl(bool is_edge, uint32
       hint = ident::unbounded_region_id();
     }
     else {
-      /* the smallest hint on the region's face sides, if no other region carries it */
-      const auto &sh = k_.faces.sides().template get<".fs.hint">();
-      k_.faces.for_each_live([&](uint32_t f) {
-        for (uint32_t s = 0; s < 2; s++) {
-          const ident::PersistentId h = sh[2 * f + s];
-          if (k_.region(FaceRef(f), s).i == t.index && !(h == ident::kNoId) && (hint == ident::kNoId || h < hint)) {
-            hint = h;
-          }
-        }
-      });
+      /* the region's winning hint (build_regions' vote: most sides, ties to
+       * the smaller hint), if no other region wins it (P3b C4) */
+      hint = region_winning_hint(t.index);
       bool ambiguous = false;
-      k_.faces.for_each_live([&](uint32_t f) {
-        for (uint32_t s = 0; s < 2; s++) {
-          if (sh[2 * f + s] == hint && k_.region(FaceRef(f), s).i != t.index) {
-            ambiguous = true;
-          }
+      if (!(hint == ident::kNoId)) {
+        for (uint32_t r = 1; r < k_.regions.capacity() && !ambiguous; r++) {
+          ambiguous = r != t.index && k_.regions.live(r) && region_winning_hint(r) == hint;
         }
-      });
+      }
       if (hint == ident::kNoId || ambiguous) {
         return pr.fail(EditCode::UnhintedRegion, ident::ElemKind::Region, t.index);
       }

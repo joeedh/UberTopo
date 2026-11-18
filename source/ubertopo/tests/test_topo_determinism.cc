@@ -152,7 +152,9 @@ static void test_golden()
   grid(a);
   grid(b);
   const PersistentId ha = topology_hash(a), hb = topology_hash(b);
-  const PersistentId golden = {0x98c378924d246f78ULL, 0x28007637b0e58ee8ULL};
+  /* re-pinned for DEC-017 (hinted region IDs from the hint alone); only the
+   * region IDs, .f.region, .s.region and .r.shell changed (P3b C8) */
+  const PersistentId golden = {0x824b09e6bbd23a72ULL, 0xf96f12ef6fe48699ULL};
   if (getenv("LITESTL_PRINT_GOLDENS")) {
     printf("  topology golden: {0x%016" PRIx64 "ULL, 0x%016" PRIx64 "ULL}\n", ha.lo, ha.hi);
   }

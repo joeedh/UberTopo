@@ -237,6 +237,8 @@ private:
   bool live(Grp g, uint32_t i) const;
   void inclusions(FaceRef f, litestl::util::Vector<uint32_t, 16> &out) const; /* (index << 1) | is_edge */
   bool hint_in_use(ident::PersistentId h) const;
+  /** build_regions' winning hint of region @p r (kNoId if none). */
+  ident::PersistentId region_winning_hint(uint32_t r) const;
   bool hint_carried(ident::PersistentId h, uint32_t skip_side_a, uint32_t skip_side_b) const;
   uint32_t edge_slot(EdgeRef e, VertRef v) const;
   litestl::util::Vector<CoedgeRef, 8> radial_members(EdgeRef e) const;

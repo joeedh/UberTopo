@@ -444,6 +444,11 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
   preg_id.resize(PR);
   util::Vector<PersistentId> preg_hint;
   preg_hint.resize(PR);
+  util::Vector<PersistentId> preg_min;
+  preg_min.resize(PR);
+  /* hints carried by a region other than region 0 as a minority (P3b C4):
+   * hint -> provisional region, NONE if two regions carry it */
+  std::map<PersistentId, uint32_t> carrier;
   {
     util::Vector<util::Vector<uint32_t>> preg_sides;
     preg_sides.resize(PR);
@@ -479,14 +484,42 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
         report.add(RegionCode::HintConflict, r);
       }
       preg_hint[r] = (r == 0 || hint == unb) ? PersistentId{} : hint;
+      preg_min[r] = min_side;
+      if (r != 0) {
+        for (auto &[h, n] : votes) {
+          if (h == hint || h == unb) {
+            continue;
+          }
+          auto it = carrier.find(h);
+          if (it == carrier.end()) {
+            carrier[h] = r;
+          }
+          else if (it->second != r) {
+            it->second = NONE;
+          }
+        }
+      }
+    }
+    /* IDs (DEC-017): a winning hint no other region wins names the region on
+     * its own; shared winners keep the minimal side to stay unique */
+    std::map<PersistentId, uint32_t> winners;
+    for (uint32_t r = 1; r < PR; r++) {
+      if (!(preg_hint[r] == ident::kNoId)) {
+        winners[preg_hint[r]]++;
+      }
+    }
+    for (uint32_t r = 0; r < PR; r++) {
       if (r == 0) {
         preg_id[r] = unb;
       }
-      else if (!(preg_hint[r] == ident::kNoId)) {
-        preg_id[r] = ident::region_id(preg_hint[r], min_side);
+      else if (preg_hint[r] == ident::kNoId) {
+        preg_id[r] = ident::region_id_from_sides(preg_min[r]);
+      }
+      else if (winners[preg_hint[r]] == 1) {
+        preg_id[r] = ident::region_id_from_hint(preg_hint[r]);
       }
       else {
-        preg_id[r] = ident::region_id_from_sides(min_side);
+        preg_id[r] = ident::region_id(preg_hint[r], preg_min[r]);
       }
     }
   }
@@ -539,8 +572,17 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
     }
     auto it = hint_region.find(h);
     if (it == hint_region.end()) {
-      report.add(RegionCode::UnresolvedContainerHint, index);
-      return false;
+      /* no region wins the hint: a unique minority carrier (P3b C4) */
+      auto ct = carrier.find(h);
+      if (ct == carrier.end()) {
+        report.add(RegionCode::UnresolvedContainerHint, index);
+        return false;
+      }
+      if (ct->second == NONE) {
+        report.add(RegionCode::AmbiguousContainerHint, index);
+        return false;
+      }
+      return ident::ContainerRef::region(RegionRef(preg_final[ct->second]), out);
     }
     if (it->second == NONE) {
       report.add(RegionCode::AmbiguousContainerHint, index);
