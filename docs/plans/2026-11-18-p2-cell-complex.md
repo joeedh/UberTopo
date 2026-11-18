@@ -890,7 +890,7 @@ The decisions are recorded in DEC-014, and design 07 is complete.
 4. The validator catches one corruption per code, plus the planted wedge and radial
    mutations.
 5. Compile-fail tests cover cross-kind refs, implicit indices and a missing remap rule.
-6. The full matrix passes (listed above).
+6. The full matrix passes (listed below).
 7. Hygiene: no file over 40 KB and no `CLAUDENOTE:`.
 
 **Configuration matrix:**
