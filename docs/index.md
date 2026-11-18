@@ -29,7 +29,7 @@ Plans must be pressure-tested by a fresh-context agent before implementation.
 
 - [2026-11-17-p0-litestl-foundations.md](plans/2026-11-17-p0-litestl-foundations.md) — P0 (**implemented**; v2 reviewed): wide ints, exact/adaptive predicates, hash128 (SipHash-2-4-128), Philox RNG, deterministic reduce in litestl
 - [2026-11-18-p1-attribute-core.md](plans/2026-11-18-p1-attribute-core.md) — P1 (**implemented**; v3 after two reviews; intern pools deferred to P1b): litestl `attr/` — paged COW columns with partial tails, open column interface, simultaneous mixing, groups with builtin slots, locked registry, page-size-independent hashing/serialization, page-size benchmark
-- [2026-11-18-p2-cell-complex.md](plans/2026-11-18-p2-cell-complex.md) — P2 (**draft**, under review): UberTopo `geom/` (Lattice, derived exact predicates), `ident/` (persistent IDs, typed refs), `topo/` domains and `Complex<C>`, bulk builder, exact radial order, `build_regions()`, validator, freeze/thaw, determinism suite
+- [2026-11-18-p2-cell-complex.md](plans/2026-11-18-p2-cell-complex.md) — P2 (**v2**, reviewed; owner decisions recorded; lands as P2a + P2b): UberTopo `geom/` (Lattice, derived exact predicates), `ident/` (persistent IDs, typed refs), `topo/` domains and `Complex<C>`, bulk builder, exact radial order, `build_regions()`, validator, freeze/thaw, determinism suite
 
 ## Research (`research/`)
 
