@@ -319,6 +319,16 @@ The outer loop is counter-clockwise viewed from the front, and holes are clockwi
   - no column `set()` runs concurrently. The same pattern is used for every parallel
     link write in W6, W7 and W10;
   - cycles of size 1–2 are trivial.
+- **Scope of this rule.** It applies only to topology construction, where the target of
+  each write is *scattered*: the coedges of an edge aren't contiguous.
+  - **Per-element derived data,** such as face planes and vertex or face normals, is
+    written in place, in parallel, with `Column::parallel_write`. Each thread owns a
+    contiguous range of target elements. That's already supported by litestl P1 and is
+    the intended path for later geometry passes.
+  - **Scattered accumulations,** such as face normals summed into vertices, are written
+    as **gathers over a CSR** (vertex→faces, from the frozen caches) and summed in a
+    fixed order. They don't use atomics or float scatter-adds, which would be
+    nondeterministic.
 - **Wedge rule.** `side_toward_next(c) = sense(c) ? FRONT : BACK`. Invariant W is checked
   by the validator.
 - **Tests** (`test_topo_radial.cc`):
