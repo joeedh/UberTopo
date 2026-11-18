@@ -317,6 +317,12 @@ public:
 }  // namespace ubertopo::topo
 ```
 
+Each domain's builtin topology columns are declared as an `attr::Schema` of
+`attr::AttrDef`s, for example `.c.next` as
+`AttrDef<".c.next", Column<uint32_t>, ColumnFlags::Topo>`, and stored in an
+`attr::TypedGroup`. Topology code therefore writes `c.get<".c.next">()`, and a
+misspelled or mistyped link column is a compile error (DEC-012).
+
 Only `VertexDomain<C>` is templated. Every algorithm that doesn't touch positions takes
 the topology domains as non-template types, which keeps template bloat in check. Typed
 element references follow Sculptcore's `ElemRef<Domain>`, as a concept-constrained

@@ -50,6 +50,11 @@ defense systems. See `docs/requirements.md`.
 * **Use C++20 concepts** to constrain templates (DEC-007). The coordinate numeric type
   is a template parameter of the geometry core (constrained by a coord/predicate
   concept); attributes, IDs and topology columns are not templated on it.
+* **Named attributes are compile-time schemas** (DEC-012). Declare builtin attributes
+  with `attr::AttrDef` / `attr::Schema` / `attr::TypedGroup` (litestl `attr/schema.h`)
+  and access them as `group.get<"name">()`. Never index builtin slots by hand. Optional
+  attributes use `attr::ensure<Def>` / `attr::find<Def>`, so a name is never spelled
+  apart from its type.
 * **The attribute system is open:** custom attribute column classes register through a
   polymorphic column interface. Don't add central `switch`/trampoline dispatch over all
   attribute types; per-column virtual dispatch is fine, but keep per-element hot loops

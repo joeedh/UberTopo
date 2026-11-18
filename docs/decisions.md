@@ -440,6 +440,31 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
 
 ---
 
+## DEC-012 — Compile-time attribute schemas; no manual slot indexing
+
+- **Date:** 2026-11-18. The owner required that named attributes be associated with
+  their names at compile time, so that errors in attribute shapes known at compile time
+  become compile errors. Sculptcore does this with a struct of `BuiltinAttr` members.
+- **Decision.** litestl `attr/schema.h`:
+  - **`AttrDef<"name", Column<T>, Flags>`** declares an attribute once: name, column
+    type, flags and default. A custom default comes from shadowing `default_value()` in
+    a derived struct.
+  - **`Schema<Defs...>`** is an ordered list of definitions, with `extend<...>` to
+    append more.
+  - **`TypedGroup<Schema>`** registers the definitions as builtins. Access is
+    `get<"name">()`, `get<Def>()` and `slot<"name">()`, all resolved at compile time.
+  - **Optional attributes** reuse definitions through `attr::ensure<Def>(group)` and
+    `attr::find<Def>(group)`.
+- **Compile errors:** an unknown name, duplicate names, a definition not in the schema,
+  a non-column type, and a wrong column type. litestl ctests check each with a
+  compile-fail snippet that must produce the expected diagnostic.
+- **Rule:** UberTopo code declares builtin attributes through schemas and never
+  indexes builtin slots by hand (`CLAUDE.md`).
+- **Where it lives:** litestl branch `ubertopo/attr-schema` (`26447b2`). It is **not yet
+  merged to litestl `master`**; that waits for the owner's go-ahead.
+
+---
+
 ## Open questions
 
 - ~~Q-A — WASM target~~ → DEC-005 (native N-API in a Chromium shell).

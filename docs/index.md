@@ -7,7 +7,7 @@ Index of everything under `docs/`. Update this file whenever a doc is added, mov
 | Doc | Description |
 |---|---|
 | [requirements.md](requirements.md) | Project requirements |
-| [decisions.md](decisions.md) | Project decision log: DEC-001 C++20/litestl, DEC-002 no third-party libs in core, DEC-003 litestl submodule + additions in litestl, DEC-004 allowed third-party (formats/compression/LAZ), DEC-005 Chromium shell + N-API, DEC-006 NW.js / defer N-API migration & Python / SoA B-rep modelled on Sculptcore, DEC-007 coord type as template param / concepts / open attribute system, DEC-008 core data model OIs resolved / litestl push / 40 KB file rule, DEC-009 hash/tuple encoding/RNG layout, DEC-010 P1 attribute core decisions, DEC-011 litestl work merged to master; open questions |
+| [decisions.md](decisions.md) | Project decision log: DEC-001 C++20/litestl, DEC-002 no third-party libs in core, DEC-003 litestl submodule + additions in litestl, DEC-004 allowed third-party (formats/compression/LAZ), DEC-005 Chromium shell + N-API, DEC-006 NW.js / defer N-API migration & Python / SoA B-rep modelled on Sculptcore, DEC-007 coord type as template param / concepts / open attribute system, DEC-008 core data model OIs resolved / litestl push / 40 KB file rule, DEC-009 hash/tuple encoding/RNG layout, DEC-010 P1 attribute core decisions, DEC-011 litestl work merged to master, DEC-012 compile-time attribute schemas; open questions |
 | [debugging.md](debugging.md) | Running debugging guide |
 | [index.md](index.md) | This index |
 

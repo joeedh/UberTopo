@@ -16,8 +16,12 @@ pieces in litestl. Research basis:
 > - **Equality:** **bitwise** everywhere.
 > - **Defaults:** each column's default is fixed when it is constructed.
 > - **Tail page:** the last page has partial capacity.
-> - **Builtin columns** are reached by **slot index**, as `builtin<Col>(slot)`. The
->   `BuiltinColumn` members sketched in §5 are not used.
+> - **Builtin columns** are declared as compile-time **schemas** (`attr::AttrDef`,
+>   `attr::Schema`, `attr::TypedGroup`) and accessed by name, as
+>   `verts.get<"pos">()`, resolved at compile time. Unknown names, duplicates and
+>   type mismatches are compile errors. The underlying mechanism is the slot index
+>   (`builtin<Col>(slot)`). The `BuiltinColumn` members sketched in §5 are not used.
+>   See DEC-012.
 > - **Generic mixing** is `MixBatch`/`ValidatedMixBatch` with **simultaneous**
 >   (gather-then-scatter) semantics, plus `mix_from`, `Custom` with a pre-call snapshot,
 >   and claimed slots. The topology-event `PropagationEvent` of §6 is built *on top of*

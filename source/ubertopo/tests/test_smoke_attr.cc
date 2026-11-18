@@ -2,6 +2,7 @@
  * with builtin slots, snapshots, mixing, hashing and serialization. */
 
 #include "litestl/attr/group.h"
+#include "litestl/attr/schema.h"
 
 #include "ut_test.h"
 
@@ -10,8 +11,28 @@
 using namespace litestl;
 using namespace litestl::attr;
 
+/* Compile-time schema (DEC-012): names resolved at compile time. */
+using SmokePos = AttrDef<"pos", Column<math::double3>>;
+struct SmokeVertEdge : AttrDef<".v.e", Column<uint32_t>, ColumnFlags::Topo> {
+  static uint32_t default_value()
+  {
+    return 0xffffffffu;
+  }
+};
+using SmokeVertexSchema = Schema<SmokePos, SmokeVertEdge>;
+static_assert(TypedGroup<SmokeVertexSchema>::slot<".v.e">() == 1);
+
+static void run_schema()
+{
+  TypedGroup<SmokeVertexSchema> v;
+  v.resize(3);
+  v.get<"pos">().set(1, math::double3(1, 2, 3));
+  UT_CHECK(v.get<SmokeVertEdge>()[2] == 0xffffffffu && v.get<"pos">()[1][2] == 3.0);
+}
+
 static void run()
 {
+  run_schema();
   AttrGroup verts;
   verts.add_builtin<Column<math::double3>>("pos");
   verts.add_builtin<Column<uint32_t>>(".v.e", 0xffffffffu, ColumnFlags::Topo);
