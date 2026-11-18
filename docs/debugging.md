@@ -198,3 +198,27 @@ Entry format:
 - **Symptom:** in the gcc TSan configuration every test failed within 0.01 s with `FATAL: ThreadSanitizer: unexpected memory mapping 0x...`. The other configurations passed.
 - **Cause:** the WSL2 kernel (6.18) randomises mmap addresses with more bits than gcc 14's TSan runtime expects. Fixing that through `vm.mmap_rnd_bits` needs root.
 - **Fix / technique:** run the TSan tests with ASLR disabled for the process, which needs no root: `setarch $(uname -m) -R ctest ...`, or the same prefix on a single test binary.
+
+## Editor journal empties itself after a failed primitive
+- **Symptom:** after any failed primitive, the next `undo()` returned `JournalStale`, or the journal was empty.
+- **Cause:** the journal detects writes made outside the editor by comparing the complex's version stamp with the stamp after the last journaled step. A rollback restores bytes but issues *new* column version stamps, so the restored complex looked externally modified.
+- **Fix / technique:** re-sync the journal's expected version after a full rollback, and at `begin` when the journal is already consistent (`editor_impl_txn.h`).
+
+## Use-after-free on a dynamic column after undoing `rebuild_regions`
+- **Symptom:** ASan heap-use-after-free in `Column<...>::operator[]` right after `Editor::undo()` (test_edit_primitives, the pool-roots test).
+- **Cause:** undoing a barrier restores a whole-complex snapshot by move-assignment, which replaces every group's column objects. Pointers to dynamic columns taken earlier now dangle.
+- **Fix / technique:** fetch column pointers again (`group.find<...>(name)`) after undoing a barrier. Builtin columns are reached through slots and are unaffected. The same holds for `io::read`.
+
+## `validate_global` hangs and allocates without bound
+- **Symptom:** a test sat at 100% CPU with memory growing past 800 MB inside `validate_global` (in `test_edit_random`, and later in `test_edit_primitives`).
+- **Cause:** faces whose triangulation step returned early without reporting kept uninitialised `FaceMesh` bounding boxes. The uniform contact grid then iterated over astronomically many cells. The early return came from a refactor's text substitution that also matched a deeper-indented `continue`.
+- **Fix / technique:** every live face that isn't fully built gets a bounding box from its vertices. When converting a loop body to a lambda, replace `continue` only at the loop's own nesting level, and re-run the full suite before trusting the refactor.
+
+## Validator reports `NonPlanarFace` for a face that is planar
+- **Symptom:** `split_face` failed validation with `NonPlanarFace` on a planar face.
+- **Cause:** the chord ran between two vertices on one straight side (a midpoint inserted by `split_edge` lies between them), so one child's corners were all collinear. `face_is_planar` reports degenerate faces as non-planar.
+- **Fix / technique:** `split_face` now checks both children for degeneracy first and returns `DegenerateLoop`.
+
+## Bash heredocs with apostrophes fail in this environment
+- **Symptom:** `python - <<'EOF' ... EOF` in the Bash tool failed with `unexpected EOF while looking for matching '` whenever the script contained an apostrophe (for example in a comment like "doesn't"), even though the heredoc delimiter was quoted.
+- **Fix / technique:** write multi-line scripts to a file in the scratchpad with the Write tool and run them with `python <file>`. Keep heredocs for scripts without apostrophes.

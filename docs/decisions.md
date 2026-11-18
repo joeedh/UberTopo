@@ -589,6 +589,42 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
   - **Snapshot copy cost.** Copying is linear in pages, but at 10⁶ entries cache and
     TLB misses make it about 17–20× the cost at 10⁵ (plan §11).
 
+## DEC-016 — P3a editing: physical undo, derived regions, local validation
+
+- **Date:** 2026-11-18
+- **Status:** accepted (implemented in P3a; plan
+  [2026-11-18-p3-editing.md](plans/2026-11-18-p3-editing.md) v2, fresh-context review
+  recorded there).
+- **Decisions:**
+  - **Physical undo.** Undo is physical (row pre-images, allocator events, group sizes);
+    redo re-executes recorded operations. A failed or rolled-back edit is a
+    bit-identical no-op. Region rebuilds are barrier transactions with copy-on-write
+    snapshots.
+  - **Regions stay derived.** `set_region`, `make_region` and `kill_region` are
+    dropped. Face edits set `regions_dirty`, and `rebuild_regions()` is the only writer
+    of shells and regions. Side hints name regions; embedding into a region writes its
+    hint.
+  - **Canonical allocation.** `Domain::alloc` takes the lowest free slot instead of the
+    last freed one, so allocation sequences don't depend on whether a complex was
+    re-read.
+  - **Projected faces (DEC-014, A1-R1 settled).** T(f) stays derived. Edits keep the
+    projection axis and re-derive the radial cycles of every edge of an edited
+    projected face. A projected face that becomes planar drops its axis. A planar face
+    never becomes projected through an edit.
+  - **Validation.** Every primitive validates: `Full` (the oracle) or `Local` (the whole
+    combinatorial layer plus the geometric layers restricted to the touched
+    elements). The random test checks that both agree.
+  - **The journal is a pool root** (`JournalRoots`, DEC-015). Ref columns are found
+    again by recorded name and type.
+- **Goldens:** `test_edit_random` (seed 1, 600 steps, `double`) =
+  `{0x09421988ba58a022, 0x96f79940201fa554}`. The P0–P2 and P1b goldens are unchanged.
+- **Deferred to P3b:**
+  - compaction and a generation floor (the DEC-014 limit stands);
+  - `imprint`, `add_hole`, `merge_vertices`, `connect_loops`;
+  - incremental region maintenance (OI-P3-1);
+  - container hints outvoted by a region merge (OI-P3-2);
+  - wire–face crossing checks.
+
 ---
 
 ## Open questions

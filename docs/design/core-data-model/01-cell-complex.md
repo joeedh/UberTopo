@@ -257,6 +257,18 @@ records ([04 §6](04-identity-versions-journal.md#6-journal)).
 | `merge_vertices(a, b)` | `split_vertex` | Weld, used by builders and import |
 | `transfer_ids` (journal only) | — | Records persistent-ID lineage ([04](04-identity-versions-journal.md)) |
 
+**As realised in P3a** ([07 §14](07-topology-api.md#14-editing-topoedit-p3a), plan
+[P3](../../plans/2026-11-18-p3-editing.md)):
+- **Region primitives dropped.** `set_region`, `make_region` and `kill_region` are
+  gone: regions stay derived (§6), and side hints (`set_side_hint`) name them.
+- **Different arguments.** `split_edge` takes an exact point rather than a parameter,
+  and `split_face` takes two vertices of the outer loop.
+- **Fast paths deferred (OI-P3-1).** The fast paths of §6 are deferred to P3b,
+  because region IDs derive from minimum face-side IDs. Every face edit sets
+  `regions_dirty`.
+- **Still to come.** `connect_loops`, `add_hole`, `imprint` and `merge_vertices`
+  are P3b.
+
 **Booleans** are *not* primitives. They are arrangement-and-select passes (merge every
 operand into one arrangement, compute the cells, select by membership). Spike 1 covers
 them in a later design.

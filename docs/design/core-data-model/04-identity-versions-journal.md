@@ -151,6 +151,15 @@ struct JournalEntry {
 column's `visit_elem_refs` / `remap_elem_refs` hooks, so captured entries survive
 `collect` and follow `canonicalize`.
 
+**As realised in P3a** ([07 §14](07-topology-api.md#14-editing-topoedit-p3a)):
+- **Undo is physical, not by inverse primitives.** Each transaction captures the
+  pre-image of every row it writes (all columns), its allocator events and its group
+  sizes. Undo replays them in reverse and is exact.
+- **Redo re-executes** the recorded operations.
+- **Barriers** (`rebuild_regions`) keep a copy-on-write snapshot instead.
+- **Lineage** is per transaction (`forward` / `backward`).
+- **Incremental validation** uses the rows a primitive touched (`validate_local`).
+
 **When it's off.** Bulk builders and procedural evaluation usually run with the journal
 **off**, relying on snapshots for undo and caching. Lineage for procedurally generated
 elements comes from the ID derivation itself. The journal is mainly for interactive
@@ -166,6 +175,10 @@ Compaction runs at freeze, or when tombstones exceed about 25% of a domain:
 - **FaceSide:** permuted by the induced map.
 - **Handles:** invalidated by the generation bump.
 - **Persistent IDs:** unaffected.
+
+**Status:** freeze compacts (P2). A standalone tombstone compaction and the
+generation floor for re-allocated slots are P3b. Since P3a, `Domain::alloc` takes
+the lowest free slot, so allocation after `read` matches continuing in memory.
 
 ## 8. Determinism contract
 

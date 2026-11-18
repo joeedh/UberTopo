@@ -1,7 +1,8 @@
 # 07 — Topology API (as implemented)
 
 - **Status:** P2 complete 2026-11-18 (plan [P2](../../plans/2026-11-18-p2-cell-complex.md):
-  P2a, then P2b with amendment A1).
+  P2a, then P2b with amendment A1). P3a editing complete 2026-11-18 (§14; plan
+  [P3](../../plans/2026-11-18-p3-editing.md)).
 - **Scope:** the realised API of `geom/`, `ident/` and `topo/`. The design rationale
   stays in [01](01-cell-complex.md), [02](02-coordinates-and-predicates.md) and
   [04](04-identity-versions-journal.md); this file records names, contracts and the
@@ -371,3 +372,67 @@ P1b (DEC-015) delivered litestl's value pools. When P4 adds a `GeometryStore` to
 - **Projected faces** (DEC-014) whose triangulation becomes a pool entry follow the same
   rules. Their edit rules are P3's.
 
+## 14. Editing (`topo/edit/`, P3a)
+
+**The editor.** `Editor<C>(complex, journal = nullptr, rules = nullptr, options)` is
+the only writer of a complex during editing.
+- **Transactions:**
+  - `begin(label)` / `commit()` / `rollback()` group primitives into one undo unit.
+    Nested `begin` is a savepoint.
+  - Every primitive is its own savepoint, so a failure rolls back exactly that
+    primitive.
+  - A failed or rolled-back edit leaves a **bit-identical content hash**.
+- **Results.** Primitives return an `EditCode`. `report()` gives the element
+  concerned, a detail string and, for `Invalid`, the validator's report.
+- **Validation modes** (`EditorOptions::validate`):
+  - `Full`: `validate(k, Global)` after every primitive;
+  - `Local`: `validate_local` over the touched elements;
+  - `None`.
+- **Frozen complexes are refused.** Columns may not be added or removed inside a
+  transaction.
+
+**Primitives:**
+
+| Primitive | Notes |
+|---|---|
+| `make_vertex(p, id)` / `kill_vertex(v)` | Kill needs an isolated vertex |
+| `make_edge(a, b, id = edge_id)` / `kill_edge(e)` | A wire. Runs from the smaller vertex ID; kill needs a wire |
+| `set_position(v, p)` | Planar faces must stay planar. Projected faces that become planar drop their axis. Every edge of every face at `v` is re-sorted; regions go dirty |
+| `embed_vertex` / `embed_edge(x, EmbedTarget)` | Face, region (writes the region's hint; needs current regions) or none |
+| `split_edge(e, p)` / `join_edge(v)` | `p` strictly inside `e`, exactly. Halves get `derive(OpDerived, e.id, "split_edge", r)`; the vertex gets `"split_edge.v"`. The join survivor is the smaller ID |
+| `make_face(loops, id, flags, hints)` / `kill_face(f)` | Over existing edges, with no embedded vertices or wires. Classified like the builder (`face_geom.h`). Coedges are inserted by re-sorting radial cycles; a tie fails. Kill refuses faces with inclusions or the last carrier of a used hint |
+| `split_face(f, a, b)` / `join_faces(e)` | A chord between non-adjacent vertices of the outer loop. The child holding the chord coedge `a → b` keeps `f`'s slot. Children get `derive(OpDerived, f.id, "split_face", 0 or 1)`. Holes and inclusions follow by exact point tests. A join needs two coplanar faces sharing only `e`, with consistent fronts and equal flags and hints |
+| `flip_face(f)` | Reverses loops, swaps side rows and hints, toggles `Reversed`; regions go dirty |
+| `set_side_hint(f, side, h)` | Regions go dirty; refuses removing the last carrier of a used hint |
+| `set_attr(group, row, column, bytes)` | Journaled write of a non-`Topo` column (not `pos`) |
+| `rebuild_regions()` | A barrier: `build_regions`, then Embedding validation; it snapshots the complex for undo |
+
+**Regions are derived.** Only `rebuild_regions` writes region and shell columns.
+- Face edits (make, kill, split, join, flip, hints) set `regions_dirty`.
+- Wire, vertex and planar `split_edge` / `join_edge` edits keep regions.
+
+**Journal.** A `Journal<C>` holds the applied and undone transactions.
+- **Undo** is physical: the row captures, then allocator events in reverse, then group
+  sizes.
+- **Redo** re-executes the recorded ops.
+- **Lineage** is queried with `forward(id)` / `backward(id)`.
+- **Truncation.** A write outside the editor truncates the journal at the next
+  `begin`.
+- **Pool roots.** `JournalRoots<C>` registers captured bytes, barrier snapshots and
+  `SetAttr` payloads as a `PoolStore` root.
+
+**Propagation.** Per-event policies come from `propagate.h`; overrides come from
+`PropagationRules` (`conserved(group, name)` = split by measure, sum on merge).
+- `pos` is never mixed.
+- Temp and Derived columns reset.
+- Corners (coedge columns) follow loop changes.
+
+**Allocation.** `Domain::alloc` takes the **lowest free slot** (a min-heap). The
+allocation sequence therefore depends only on `.live`, both in memory and after
+`read` / `permute`.
+
+**Not in P3a:**
+- `connect_loops`, `add_hole`, `imprint`, `merge_vertices`;
+- compaction and the generation floor;
+- incremental regions;
+- wire–face crossing checks (a gap the P2 validator has too).

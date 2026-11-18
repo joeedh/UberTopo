@@ -244,6 +244,24 @@ operator able to override it per column. Policies:
 Measures (areas and lengths) are computed by the operator, which has the geometry, and
 passed in `weights`. The propagator never touches geometry.
 
+**As realised in P3a** (`topo/edit/propagate.h`):
+- **Mechanism.** Events become one simultaneous `AttrGroup::mix` per (group, event),
+  with a policy function; there is no separate `Propagator`.
+- **Event kinds:** `Split`, `Merge`, `Interp` (new elements on a segment) and
+  `Reverse`. `Create` and `Delete` need no mix, because rows start and end at their
+  defaults.
+- **Default policies:**
+  - `Split`: copy;
+  - `Merge`: a measure-weighted mean for floats, a copy otherwise, and a copy whenever
+    all sources are bitwise equal;
+  - `Interp`: the column default;
+  - `Reverse`: copy (the swap).
+- **Fixed policies.** `pos` is never mixed; Temp and Derived columns reset.
+- **Overrides.** `PropagationRules` overrides per column and event. A
+  split-by-measure rule is allowed only on float columns.
+- **Corners.** Coedge columns are corners (the data at the start vertex) and follow
+  loop edits.
+
 ## 7. Domains
 
 | Domain | Size | Notes |
