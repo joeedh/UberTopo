@@ -119,6 +119,52 @@ template <CoordType C> int project_axis(const PolyView<C> &f)
   return best;
 }
 
+/** project_axis with the Newell sum taken in canonical order (each loop
+ * from its lexicographic-minimum vertex, loops by that vertex), so the axis
+ * doesn't depend on loop heads or loop order (amendment A1 §12.2). */
+template <CoordType C> int project_axis_canonical(const PolyView<C> &f)
+{
+  struct L {
+    uint32_t loop;
+    size_t start;
+  };
+  litestl::util::Vector<L, 8> ls;
+  for (uint32_t l = 0; l < f.loop_count(); l++) {
+    const auto loop = f.loop(l);
+    size_t best = 0;
+    for (size_t i = 1; i < loop.size(); i++) {
+      if (lex_compare<C>(loop[i], loop[best]) < 0) {
+        best = i;
+      }
+    }
+    ls.append({l, best});
+  }
+  std::sort(ls.begin(), ls.end(), [&](const L &a, const L &b) {
+    return lex_compare<C>(f.loop(a.loop)[a.start], f.loop(b.loop)[b.start]) < 0;
+  });
+  double n[3] = {0, 0, 0};
+  for (const L &x : ls) {
+    const auto loop = f.loop(x.loop);
+    const size_t m = loop.size();
+    for (size_t k = 0; k < m; k++) {
+      const auto a = to_double3<C>(loop[(x.start + k) % m]);
+      const auto b = to_double3<C>(loop[(x.start + k + 1) % m]);
+      n[0] += (a[1] - b[1]) * (a[2] + b[2]);
+      n[1] += (a[2] - b[2]) * (a[0] + b[0]);
+      n[2] += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+  }
+  int best = -1;
+  double bv = 0.0;
+  for (int k = 0; k < 3; k++) {
+    if (std::fabs(n[k]) > bv) {
+      bv = std::fabs(n[k]);
+      best = k;
+    }
+  }
+  return best;
+}
+
 /** Index of the lexicographically minimal vertex of @p loop in projection. */
 template <CoordType C> size_t lex_min_proj(std::span<const Point<C>> loop, int axis)
 {

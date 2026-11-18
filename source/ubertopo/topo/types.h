@@ -33,7 +33,21 @@ namespace face_flags {
 inline constexpr uint8_t Virtual = 1;  /* tile seam or world box */
 inline constexpr uint8_t Aperture = 2; /* fills a hole of another face */
 inline constexpr uint8_t Reversed = 4; /* surface normal opposes the front side */
+/** Projected (non-planar) face, amendment A1: (axis + 1) << 4; 0 = planar.
+ * Set only by the builder under BuildPolicy::allow_projectable_faces. */
+inline constexpr uint8_t ProjAxisMask = 0x30;
+inline constexpr int ProjAxisShift = 4;
 } // namespace face_flags
+
+/** The projection axis of a projected face, or -1 for a planar face. */
+constexpr int proj_axis(uint8_t flags)
+{
+  return int((flags & face_flags::ProjAxisMask) >> face_flags::ProjAxisShift) - 1;
+}
+constexpr uint8_t with_proj_axis(uint8_t flags, int axis)
+{
+  return uint8_t((flags & ~face_flags::ProjAxisMask) | ((axis + 1) << face_flags::ProjAxisShift));
+}
 namespace region_flags {
 inline constexpr uint8_t Unbounded = 1; /* index 0 only */
 inline constexpr uint8_t Virtual = 2;

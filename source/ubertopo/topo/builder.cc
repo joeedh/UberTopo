@@ -5,6 +5,7 @@
 
 #include "litestl/util/sort.h"
 #include "litestl/util/task.h"
+#include "ubertopo/geom/cdt/cdt.h"
 #include "ubertopo/geom/predicates.h"
 #include "ubertopo/topo/radial.h"
 
@@ -53,6 +54,12 @@ const char *build_code_name(BuildCode c)
       return "DuplicateWire";
     case BuildCode::ContainerOnFaceVertex:
       return "ContainerOnFaceVertex";
+    case BuildCode::NotProjectable:
+      return "NotProjectable";
+    case BuildCode::ReservedFaceFlags:
+      return "ReservedFaceFlags";
+    case BuildCode::WireOnProjectedFace:
+      return "WireOnProjectedFace";
     case BuildCode::InternalError:
       return "InternalError";
     case BuildCode::RadialTie:
@@ -261,6 +268,9 @@ template <geom::CoordType C> bool Builder<C>::build(Complex<C> &out, BuildReport
   util::Vector<uint32_t> f_loop0, l_vert0, lv; /* face -> first loop; loop -> first vertex; loop vertices */
   for (uint32_t f = 0; f < F; f++) {
     const FIn &fi = faces_[forder[f]];
+    if (fi.flags & face_flags::ProjAxisMask) {
+      report.add(BuildCode::ReservedFaceFlags, fi.id, forder[f]);
+    }
     f_loop0.append(uint32_t(l_vert0.size()));
     uint32_t kb = fi.key_begin;
     for (uint32_t l = 0; l < fi.nloops; l++) {
@@ -290,6 +300,13 @@ template <geom::CoordType C> bool Builder<C>::build(Complex<C> &out, BuildReport
   auto vpos = [&](uint32_t v) -> const Point & { return verts_[v_rep[v]].p; };
   util::Vector<int32_t> f_err;
   f_err.resize(F);
+  util::Vector<int8_t> f_axis; /* projected faces: the projection axis; -1 = planar */
+  f_axis.resize(F);
+  for (uint32_t f = 0; f < F; f++) {
+    f_axis[f] = -1;
+  }
+  util::Vector<util::Vector<geom::Triangle>> f_tris; /* T(f) of projected faces */
+  f_tris.resize(F);
   task::parallel_for_chunks(litestl::util::IndexRange(0, int(F)), 256, [&](int, litestl::util::IndexRange r) {
     util::Vector<uint64_t, 64> vv;
     util::Vector<Point, 32> pts;
@@ -353,18 +370,42 @@ template <geom::CoordType C> bool Builder<C>::build(Complex<C> &out, BuildReport
           }
         }
       }
+      bool planar = ic >= 0;
       if (ic < 0) {
         fail(BuildCode::DegenerateLoop);
       }
       else {
-        for (size_t i = 0; i < pts.size(); i++) {
-          if (geom::vol3<C>(pts[0], pts[ib], pts[ic], pts[i]) != 0) {
-            fail(BuildCode::NonPlanarFace);
-            break;
-          }
+        for (size_t i = 0; i < pts.size() && planar; i++) {
+          planar = geom::vol3<C>(pts[0], pts[ib], pts[ic], pts[i]) == 0;
+        }
+        if (!planar && !policy.allow_projectable_faces) {
+          fail(BuildCode::NonPlanarFace);
         }
       }
-      if (err < 0) {
+      if (err < 0 && !planar) {
+        /* amendment A1: projectable along the dominant canonical Newell axis,
+         * else the others in index order; T(f) is the canonical CDT */
+        const int dom = geom::project_axis_canonical<C>(view);
+        int axes[3] = {dom, -1, -1}, na = dom >= 0 ? 1 : 0;
+        for (int k = 0; k < 3; k++) {
+          if (k != dom) {
+            axes[na++] = k;
+          }
+        }
+        bool winding = false, ok = false;
+        for (int a = 0; a < na && !ok; a++) {
+          const geom::CdtStatus st = geom::cdt_proj<C>(view, axes[a], f_tris[f]);
+          if (st == geom::CdtStatus::Ok) {
+            f_axis[f] = int8_t(axes[a]);
+            ok = true;
+          }
+          winding = winding || st == geom::CdtStatus::HoleOrientation;
+        }
+        if (!ok) {
+          fail(winding ? BuildCode::HoleOrientation : BuildCode::NotProjectable);
+        }
+      }
+      if (err < 0 && planar) {
         const int axis = geom::project_axis<C>(view);
         if (axis < 0) {
           fail(BuildCode::DegenerateLoop);
@@ -389,6 +430,9 @@ template <geom::CoordType C> bool Builder<C>::build(Complex<C> &out, BuildReport
   for (uint32_t f = 0; f < F; f++) {
     if (f_err[f] >= 0) {
       report.add(BuildCode(f_err[f]), faces_[forder[f]].id, forder[f]);
+    }
+    else if (f_axis[f] >= 0) {
+      report.projected_faces++;
     }
   }
 
@@ -491,6 +535,9 @@ template <geom::CoordType C> bool Builder<C>::build(Complex<C> &out, BuildReport
     if (wi.c.kind == ContainerHint::Kind::Face && (wi.c.face_key >= nf || key_to_f[wi.c.face_key] == NONE)) {
       report.add(BuildCode::BadFaceKey, wi.id, w);
     }
+    else if (wi.c.kind == ContainerHint::Kind::Face && f_axis[key_to_f[wi.c.face_key]] >= 0) {
+      report.add(BuildCode::WireOnProjectedFace, wi.id, w); /* a straight wire leaves a folded surface */
+    }
   }
   if (!report.ok()) {
     return false;
@@ -499,6 +546,7 @@ template <geom::CoordType C> bool Builder<C>::build(Complex<C> &out, BuildReport
   /* ---- 4. write vertices, edges, loops, coedges, faces ---- */
   out.frame = frame_;
   out.regions_dirty = true;
+  out.set_allows_projectable(policy.allow_projectable_faces);
   {
     out.verts.alloc_n(V);
     util::Vector<Point> pos;
@@ -607,7 +655,7 @@ template <geom::CoordType C> bool Builder<C>::build(Complex<C> &out, BuildReport
     for (uint32_t f = 0; f < F; f++) {
       const FIn &fi = faces_[forder[f]];
       f_l.append(f_loop0[f] < f_loop0[f + 1] ? f_loop0[f] : NONE);
-      f_flags.append(fi.flags);
+      f_flags.append(f_axis[f] >= 0 ? with_proj_axis(fi.flags, f_axis[f]) : fi.flags);
       f_id.append(fi.id);
       hints.append(fi.hint[0]);
       hints.append(fi.hint[1]);
@@ -627,6 +675,26 @@ template <geom::CoordType C> bool Builder<C>::build(Complex<C> &out, BuildReport
         frames[f] = face_frame<C>(out, FaceRef(uint32_t(f)));
       }
     });
+    /* projected faces: the third vertex of each coedge's T(f) triangle */
+    util::Vector<uint32_t> c_third;
+    c_third.resize(NC);
+    for (uint32_t c = 0; c < NC; c++) {
+      c_third[c] = NONE;
+    }
+    for (uint32_t f = 0; f < F; f++) {
+      if (f_axis[f] < 0) {
+        continue;
+      }
+      const uint32_t base = l_vert0[f_loop0[f]];
+      for (const geom::Triangle &t : f_tris[f]) {
+        for (int i = 0; i < 3; i++) {
+          const uint32_t c = base + t[i];
+          if (c_next[c] == base + t[(i + 1) % 3]) {
+            c_third[c] = lv[base + t[(i + 2) % 3]];
+          }
+        }
+      }
+    }
     util::Vector<uint32_t> cnt, start;
     cnt.resize(E);
     start.resize(E);
@@ -659,10 +727,22 @@ template <geom::CoordType C> bool Builder<C>::build(Complex<C> &out, BuildReport
           continue;
         }
         bool tie = false;
+        auto half_plane = [&](CoedgeRef c, geom::HalfPlane<C> &h) {
+          const uint32_t f = l_f[c_l[c.i]];
+          if (f_axis[f] >= 0) {
+            if (c_third[c.i] == NONE) {
+              return false;
+            }
+            h.q = vpos(c_third[c.i]);
+            h.s = 1; /* T(f) triangles lie on the interior side */
+            return true;
+          }
+          return coedge_half_plane<C>(out, c, frames[f], h);
+        };
         const bool ok = radial_order<C>(out,
                                         EdgeRef(uint32_t(e)),
                                         std::span<const uint32_t>(by_edge.data() + start[e], n),
-                                        [&](FaceRef f) { return frames[f.i]; },
+                                        half_plane,
                                         order,
                                         &tie);
         if (!ok) {

@@ -18,6 +18,7 @@
 #include <cstdint>
 
 #include "litestl/util/vector.h"
+#include "ubertopo/geom/cdt/cdt.h"
 #include "ubertopo/geom/predicates.h"
 #include "ubertopo/topo/complex.h"
 
@@ -96,14 +97,63 @@ bool coedge_half_plane(const Complex<C> &k, CoedgeRef c, FaceFrame fr, geom::Hal
   return false;
 }
 
+/** The canonical triangulation T(f) of a projected face (amendment A1), in
+ * corner indices of FacePoints order (loops from .f.l, coedges from .l.c).
+ * False for planar faces or if the face isn't projectable along its axis. */
+template <geom::CoordType C> bool face_triangles(const Complex<C> &k, FaceRef f, litestl::util::Vector<geom::Triangle> &out)
+{
+  const int axis = k.face_proj_axis(f);
+  if (axis < 0) {
+    return false;
+  }
+  FacePoints<C> fp;
+  if (!fp.gather(k, f)) {
+    return false;
+  }
+  return geom::cdt_proj<C>(fp.view(), axis, out) == geom::CdtStatus::Ok;
+}
+
+/** For each coedge of a projected face, the vertex completing its T(f)
+ * triangle (the triangle with the coedge as a front-winding edge). Appends
+ * (coedge, vertex) pairs; false if T(f) can't be formed. */
+template <geom::CoordType C>
+bool projected_third_vertices(const Complex<C> &k,
+                              FaceRef f,
+                              litestl::util::Vector<std::pair<CoedgeRef, VertRef>> &out)
+{
+  litestl::util::Vector<geom::Triangle> tris;
+  if (!face_triangles<C>(k, f, tris)) {
+    return false;
+  }
+  litestl::util::Vector<CoedgeRef, 32> corner_c;
+  litestl::util::Vector<VertRef, 32> corner_v;
+  k.for_each_loop(f, [&](LoopRef l) {
+    k.for_each_coedge(l, [&](CoedgeRef c) {
+      corner_c.append(c);
+      corner_v.append(k.start_vert(c));
+    });
+  });
+  const size_t before = out.size();
+  for (const geom::Triangle &t : tris) {
+    for (int i = 0; i < 3; i++) {
+      const CoedgeRef c = corner_c[t[i]];
+      if (k.start_vert(k.next(c)) == corner_v[t[(i + 1) % 3]] && k.next(c) == corner_c[t[(i + 1) % 3]]) {
+        out.append({c, corner_v[t[(i + 2) % 3]]});
+      }
+    }
+  }
+  return out.size() - before == corner_c.size();
+}
+
 /** Sorts the coedges of edge @p e (given in any order) counter-clockwise about
- * vs[0] -> vs[1]. @p frame_of(FaceRef) -> FaceFrame. Returns false if a
+ * vs[0] -> vs[1]. @p half_plane_of(CoedgeRef, HalfPlane &) -> bool gives each
+ * coedge's half-plane (planar rule or T(f) triangle). Returns false if a
  * half-plane can't be formed; *tie is set if two angles are exactly equal. */
-template <geom::CoordType C, typename FrameOf>
+template <geom::CoordType C, typename HalfPlaneOf>
 bool radial_order(const Complex<C> &k,
                   EdgeRef e,
                   std::span<const uint32_t> in,
-                  FrameOf &&frame_of,
+                  HalfPlaneOf &&half_plane_of,
                   litestl::util::Vector<uint32_t, 8> &out,
                   bool *tie)
 {
@@ -118,7 +168,7 @@ bool radial_order(const Complex<C> &k,
     it.c = c;
     const FaceRef f = k.face_of(CoedgeRef(c));
     it.fid = k.face_id(f);
-    if (!coedge_half_plane<C>(k, CoedgeRef(c), frame_of(f), it.h)) {
+    if (!half_plane_of(CoedgeRef(c), it.h)) {
       return false;
     }
     items.append(it);

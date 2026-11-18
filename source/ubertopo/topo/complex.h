@@ -51,8 +51,22 @@ public:
   FaceDomain faces;
   Domain<ShellSchema> shells;
   Domain<RegionSchema> regions;
-  attr::AttrGroup global;
+  attr::TypedGroup<GlobalSchema> global;
   geom::TileFrame frame;
+
+  ComplexBase()
+  {
+    global.resize(1);
+  }
+
+  bool allows_projectable() const
+  {
+    return attr::get_bool(global.get<".g.allows_projectable">(), 0);
+  }
+  void set_allows_projectable(bool v)
+  {
+    attr::set_bool(global.get<".g.allows_projectable">(), 0, v);
+  }
   /** Regions and shells don't reflect the current faces (design 01 §6). */
   bool regions_dirty = true;
 
@@ -154,6 +168,11 @@ public:
   uint8_t face_flags(FaceRef f) const
   {
     return faces.get<".f.flags">()[f.i];
+  }
+  /** Projection axis of a projected (non-planar) face, or -1 if planar. */
+  int face_proj_axis(FaceRef f) const
+  {
+    return proj_axis(face_flags(f));
   }
   ident::PersistentId face_id(FaceRef f) const
   {

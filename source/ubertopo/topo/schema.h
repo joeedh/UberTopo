@@ -132,6 +132,12 @@ using ShellSchema = Schema<Link<".s.region">, Link<".s.first">, Link<".s.next">,
 
 using RegionSchema = Schema<Link<".r.shell">, Flags8<".r.flags">, Id, Gen, Live>;
 
+/** Complex-wide values (a group of size 1). ".g.allows_projectable": the
+ * complex was built with the projectable-faces opt-in (amendment A1); the
+ * validator rejects projected faces without it. */
+using AllowsProjectable = AttrDef<".g.allows_projectable", attr::BoolColumn, ColumnFlags::Topo>;
+using GlobalSchema = Schema<AllowsProjectable>;
+
 /** Registers every UberTopo column type with litestl's registry (needed
  * before reading a stream in a process that hasn't created such columns). */
 void register_column_types();

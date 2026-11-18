@@ -2,6 +2,7 @@
  * (plan P2 W6). */
 
 #include "ubertopo/topo/builder.h"
+#include "ubertopo/topo/radial.h"
 
 #include "litestl/util/alloc.h"
 #include "litestl/util/task.h"
@@ -10,6 +11,7 @@
 #include "ut_test.h"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <vector>
 
@@ -443,6 +445,182 @@ template <geom::CoordType C> static void test_band_counts()
   }
 }
 
+/* A box [0,40]^2 x [0,20] whose roof corner (40,40) is lifted by 1 quantum:
+ * the roof quad is non-planar but projects simply along z (amendment A1). */
+template <geom::CoordType C> static void build_lifted_roof(test::GridBuilder<C> &g, int64_t lift = 1)
+{
+  const int64_t a = 40, h = 20;
+  g.face({{{0, 0, 0}, {0, a, 0}, {a, a, 0}, {a, 0, 0}}});
+  g.face({{{0, 0, h}, {a, 0, h}, {a, a, h + lift}, {0, a, h}}}); /* roof */
+  g.face({{{0, 0, 0}, {a, 0, 0}, {a, 0, h}, {0, 0, h}}});
+  g.face({{{0, a, 0}, {0, a, h}, {a, a, h + lift}, {a, a, 0}}}); /* still planar (y = a) */
+  g.face({{{0, 0, 0}, {0, 0, h}, {0, a, h}, {0, a, 0}}});
+  g.face({{{a, 0, 0}, {a, a, 0}, {a, a, h + lift}, {a, 0, h}}}); /* still planar (x = a) */
+}
+
+template <geom::CoordType C> static void test_projectable_faces()
+{
+  {
+    test::GridBuilder<C> g;
+    build_lifted_roof(g);
+    Complex<C> k;
+    BuildReport rep;
+    UT_CHECK(!g.b.build(k, rep) && rep.count(BuildCode::NonPlanarFace) == 1); /* off by default */
+  }
+  test::GridBuilder<C> g;
+  build_lifted_roof(g);
+  BuildPolicy opt;
+  opt.allow_projectable_faces = true;
+  Complex<C> k;
+  BuildReport rep;
+  UT_CHECK(g.b.build(k, rep, opt) && rep.ok() && rep.projected_faces == 1 && rep.warnings == 0);
+  UT_CHECK(k.allows_projectable());
+  uint32_t flagged = 0;
+  for (uint32_t f = 0; f < k.faces.capacity(); f++) {
+    const int ax = k.face_proj_axis(FaceRef(f));
+    if (ax >= 0) {
+      flagged++;
+      litestl::util::Vector<geom::Triangle> tris;
+      UT_CHECK(face_triangles<C>(k, FaceRef(f), tris) && tris.size() == 2);
+    }
+  }
+  UT_CHECK(flagged == 1);
+  for (uint32_t e = 0; e < k.edges.capacity(); e++) {
+    UT_CHECK(radial_size(k, EdgeRef(e)) == 2);
+  }
+  /* planar faces aren't flagged; a planar build with the option is unchanged */
+  {
+    test::GridBuilder<C> g2, g3;
+    g2.box({0, 0, 0}, {10, 10, 10});
+    g3.box({0, 0, 0}, {10, 10, 10});
+    Complex<C> k2, k3;
+    BuildReport r2, r3;
+    UT_CHECK(g2.b.build(k2, r2) && g3.b.build(k3, r3, opt) && r3.projected_faces == 0);
+    /* identical except the recorded opt-in */
+    UT_CHECK(k2.faces.group().content_hash() == k3.faces.group().content_hash());
+    UT_CHECK(!k2.allows_projectable() && k3.allows_projectable());
+  }
+  /* client-set projection bits are rejected */
+  {
+    test::GridBuilder<C> g4;
+    g4.face({{{0, 0, 0}, {10, 0, 0}, {10, 10, 0}}}, {}, {}, uint8_t(0x10));
+    Complex<C> k4;
+    BuildReport r4;
+    UT_CHECK(!g4.b.build(k4, r4, opt) && r4.count(BuildCode::ReservedFaceFlags) == 1);
+  }
+  /* a wire included in a projected face */
+  {
+    test::GridBuilder<C> g5;
+    build_lifted_roof(g5);
+    const uint32_t roof = g5.face({{{0, 0, 20}, {40, 0, 20}, {40, 40, 21}, {0, 40, 20}}});
+    const uint32_t p0 = g5.b.vertex(pid(900), pt<C>({5, 5, 20})), p1 = g5.b.vertex(pid(901), pt<C>({30, 30, 20}));
+    g5.b.wire(pid(902), p0, p1, ContainerHint::in_face(roof));
+    Complex<C> k5;
+    BuildReport r5;
+    UT_CHECK(!g5.b.build(k5, r5, opt) && r5.count(BuildCode::WireOnProjectedFace) == 1);
+  }
+  /* not projectable along any axis: a hole outside a nearly flat outer loop */
+  {
+    test::GridBuilder<C> g6;
+    g6.face({{{0, 0, 0}, {10, 0, 0}, {10, 10, 1}, {0, 10, 0}}, {{20, 2, 0}, {20, 4, 0}, {22, 4, 0}}});
+    Complex<C> k6;
+    BuildReport r6;
+    UT_CHECK(!g6.b.build(k6, r6, opt) && (r6.count(BuildCode::NotProjectable) == 1 || r6.count(BuildCode::HoleOrientation) == 1));
+  }
+  /* a wrongly wound hole on a projected face */
+  {
+    test::GridBuilder<C> g7;
+    g7.face({{{0, 0, 0}, {10, 0, 0}, {10, 10, 1}, {0, 10, 0}}, {{2, 2, 0}, {4, 2, 0}, {4, 4, 0}}});
+    Complex<C> k7;
+    BuildReport r7;
+    UT_CHECK(!g7.b.build(k7, r7, opt) && r7.count(BuildCode::HoleOrientation) == 1);
+  }
+}
+
+/* Radial order with a projected face in a fan: the projected face's half-plane
+ * is its T(f) triangle at the axis edge; compare with atan2 of that triangle's
+ * third vertex, mixed with planar faces. */
+template <geom::CoordType C> static void test_projected_fan()
+{
+  litestl::test::SplitMix64 r(77);
+  int bad = 0, built = 0, projected = 0;
+  BuildPolicy opt;
+  opt.allow_projectable_faces = true;
+  for (int it = 0; it < 200; it++) {
+    Builder<C> b;
+    const uint32_t A = b.vertex(pid(1), pt<C>({0, 0, 0})), B = b.vertex(pid(2), pt<C>({0, 0, 40}));
+    const int nf = 2 + int(r.below(5));
+    std::vector<std::pair<int64_t, int64_t>> dirs;
+    uint64_t next_id = 100;
+    for (int i = 0; i < nf; i++) {
+      int64_t dx = 0, dy = 0;
+      bool dup = true;
+      for (int guard = 0; guard < 100 && dup; guard++) {
+        dx = r.range(-30, 30);
+        dy = r.range(-30, 30);
+        dup = dx == 0 && dy == 0;
+        for (auto &d : dirs) {
+          dup = dup || (d.first * dy == d.second * dx && d.first * dx + d.second * dy > 0);
+        }
+      }
+      if (dup) {
+        continue;
+      }
+      dirs.push_back({dx, dy});
+      /* quad A, B, B + 3d (+ a lift off the plane when projected), A + 3d */
+      const bool projected = r.coin();
+      const int64_t off = projected ? 1 + int64_t(r.below(3)) : 0;
+      const uint32_t c = b.vertex(pid(next_id++), pt<C>({3 * dx - off * dy, 3 * dy + off * dx, 40}));
+      const uint32_t d = b.vertex(pid(next_id++), pt<C>({3 * dx, 3 * dy, 0}));
+      b.face(pid(500 + uint64_t(i) * 37 % 101), {{A, B, c, d}});
+    }
+    Complex<C> k;
+    BuildReport rep;
+    if (!b.build(k, rep, opt) || rep.warnings) {
+      continue; /* e.g. a lift making two faces coincide in angle */
+    }
+    built++;
+    projected += int(rep.projected_faces);
+    /* expected angle of each coedge at the axis edge, from its actual half-plane q */
+    std::vector<long double> ang;
+    k.for_each_radial(EdgeRef(0), [&](CoedgeRef cc) {
+      const FaceRef f = k.face_of(cc);
+      geom::HalfPlane<C> h;
+      bool ok;
+      if (k.face_proj_axis(f) >= 0) {
+        litestl::util::Vector<std::pair<CoedgeRef, VertRef>> th;
+        ok = projected_third_vertices<C>(k, f, th);
+        for (auto &x : th) {
+          if (x.first == cc) {
+            h.q = k.pos(x.second);
+          }
+        }
+        h.s = 1;
+      }
+      else {
+        ok = coedge_half_plane<C>(k, cc, face_frame<C>(k, f), h);
+      }
+      bad += !ok;
+      const auto q = geom::to_double3<C>(h.q);
+      ang.push_back(std::atan2((long double)q[1] * h.s, (long double)q[0] * h.s));
+    });
+    const long double two_pi = 2 * 3.14159265358979323846264338327950288L;
+    long double prev = -1;
+    for (size_t i = 0; i < ang.size(); i++) {
+      long double rel = std::fmod(ang[i] - ang[0] + 2 * two_pi, two_pi);
+      if (rel > two_pi - 1e-12L) {
+        rel = 0;
+      }
+      bad += rel + 1e-9L < prev;
+      prev = std::max(prev, rel);
+    }
+  }
+  if (bad || built < 150 || projected < 150) {
+    fprintf(stderr, "projected fan: bad %d built %d projected %d\n", bad, built, projected);
+  }
+  UT_CHECK(bad == 0 && built >= 150 && projected >= 150);
+}
+
 template <geom::CoordType C> static void run_all()
 {
   test_tetrahedron<C>();
@@ -453,6 +631,8 @@ template <geom::CoordType C> static void run_all()
   test_weld_equal_positions<C>();
   test_permutation_invariance<C>();
   test_band_counts<C>();
+  test_projectable_faces<C>();
+  test_projected_fan<C>();
 }
 
 int main()

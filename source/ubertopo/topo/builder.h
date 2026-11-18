@@ -17,7 +17,11 @@
  *
  * build() is all-or-nothing: any error leaves @p out empty and is listed in
  * the report; warnings (e.g. exactly coincident radial angles) don't stop it.
- * Regions are not built (regions_dirty stays set). */
+ * Regions are not built (regions_dirty stays set).
+ *
+ * Faces must be exactly planar unless BuildPolicy::allow_projectable_faces is
+ * set (amendment A1); projected faces carry face_flags::ProjAxisMask and the
+ * complex records the opt-in (allows_projectable). */
 
 #include <cstdint>
 #include <initializer_list>
@@ -75,6 +79,9 @@ enum class BuildCode : uint16_t {
   WireOnFaceEdge,
   DuplicateWire,
   ContainerOnFaceVertex, /* a container on a vertex that face edges use */
+  NotProjectable,        /* non-planar and not projectable (amendment A1) */
+  ReservedFaceFlags,     /* the client set the builder-owned projection bits */
+  WireOnProjectedFace,   /* a wire included in a projected (folded) face */
   InternalError,
   /* warnings */
   RadialTie, /* exactly equal angles about an edge: overlapping coplanar faces */
@@ -93,6 +100,7 @@ struct BuildReport {
   litestl::util::Vector<BuildIssue> issues;
   uint32_t errors = 0;
   uint32_t warnings = 0;
+  uint32_t projected_faces = 0; /* faces accepted under allow_projectable_faces */
 
   void add(BuildCode c, ident::PersistentId id = {}, uint32_t key = NONE)
   {
@@ -116,6 +124,10 @@ struct BuildReport {
 struct BuildPolicy {
   /** Also weld distinct IDs whose positions are bitwise equal. */
   bool weld_equal_positions = false;
+  /** Opt-in (amendment A1): accept non-planar faces that project to a simple
+   * polygon with holes along an axis; their geometry is the canonical CDT of
+   * that projection. Off by default: non-planar faces are errors. */
+  bool allow_projectable_faces = false;
 };
 
 template <geom::CoordType C> class Builder {
