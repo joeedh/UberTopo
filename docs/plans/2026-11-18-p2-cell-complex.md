@@ -493,9 +493,9 @@ W9 generators (after W6 API) ─────────────────
 W10 freeze/io/hash (after W7) ─► W11 determinism ─► W12 docs
 ```
 
-Commits are in that order, and each commit builds and passes. The work may be split into
-**P2a** (W1–W6, W8 combinatorial) and **P2b** (W7, W8 rest, W9–W11) if it is reviewed as
-two pushes.
+Commits are in that order, and each commit builds and passes. The work lands in two parts (owner decision, §9):
+**P2a** (W1–W6, W8 combinatorial) and **P2b** (W7, W8 rest, W9–W11), pushed as
+two separate commit series.
 
 ## 6. Acceptance criteria
 
@@ -552,13 +552,14 @@ two pushes.
 
 About 4.5k LOC of code and 3.5k LOC of tests. These are rough figures.
 
-## 9. Open questions for the owner
+## 9. Owner decisions (2026-11-18)
 
-1. **Fallback when a `double` shell's orientation can't be certified.** Should P2 also
-   evaluate it exactly by converting to big integers in production code (a new litestl
-   exact-sum utility), or is "report as degenerate" acceptable for P2?
-2. **Commit structure.** Should P2 land as one sequence of commits, or as P2a and P2b
-   with a pause between them?
+1. **Uncertifiable `double` shell orientation: report it.** P2 reports the shell as
+   degenerate and doesn't guess. An exact evaluation (a big-integer sum) is written later,
+   when an operation needs it, and only where computing it exactly is the right answer
+   rather than cleaning up the geometry to remove the offending face.
+2. **Two landings.** P2 lands as **P2a** (W1–W6 and the combinatorial layer of W8) and
+   **P2b** (W7, the rest of W8, and W9–W11), each as its own pushed commit series.
 
 ## 10. Pressure-test review
 
