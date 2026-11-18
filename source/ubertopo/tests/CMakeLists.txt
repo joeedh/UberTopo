@@ -8,6 +8,10 @@ function(ut_test file)
   # "source/" is the include root: #include "litestl/..." and "ubertopo/..."
   target_include_directories(${name} PRIVATE ${PROJECT_SOURCE_DIR}/source)
   add_test(NAME ${name} COMMAND ${name})
+  # litestl's suppressions for intentional process-lifetime allocations (its
+  # per-thread tracker list); litestl's own tracker remains the leak check.
+  set_tests_properties(${name} PROPERTIES ENVIRONMENT
+    "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/source/litestl/tests/lsan.supp")
 endfunction()
 
 ut_test(test_smoke_litestl.cc predicates math util platform)

@@ -166,3 +166,8 @@ Entry format:
   - free only components that are closed under edge adjacency;
   - collect elements first, then free them;
   - `build_regions()` assumes a complex that passes the combinatorial validator. Run `validate()` first when a crash shows up there.
+
+## LeakSanitizer reports `getMemList` leaks in UberTopo tests
+- **Symptom:** under gcc ASan, `test_topo_regions`, `test_topo_freeze` and `test_topo_determinism` failed with LeakSanitizer "direct leak" reports, each with `getMemList` (`litestl/util/alloc.cc`) on the stack. The P2a tests passed in the same configuration.
+- **Cause:** litestl keeps one leak-tracker list per thread and deliberately never frees it. P2b is the first UberTopo code to allocate inside pool worker threads (`parallel_for_chunks` in `build_regions`), so those lists now exist. litestl's own ctests pass `tests/lsan.supp`, but UberTopo's didn't.
+- **Fix / technique:** `ut_test()` sets `LSAN_OPTIONS=suppressions=<litestl>/tests/lsan.supp`. The real leak check is still each test's `alloc::getMemorySize() == baseline` assertion. Suppress only by the intentional-allocation function name, never by test.
