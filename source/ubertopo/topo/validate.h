@@ -56,6 +56,7 @@ enum class ValidateCode : uint16_t {
   LoopIntersection,     /* a loop self-intersects, or two loops of a face meet */
   HoleOutside,          /* a hole is not inside its face's outer loop */
   FaceIntersection,     /* two faces meet away from shared vertices and edges */
+  WireCrossesFace,      /* a wire meets a face other than at a shared endpoint (P3b C5) */
   RegionsStale,         /* stored regions differ from a fresh build_regions() */
 };
 

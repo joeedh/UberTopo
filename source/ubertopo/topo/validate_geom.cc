@@ -485,7 +485,7 @@ void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateF
       ext_sum += mesh[f].hi[i] - mesh[f].lo[i];
     }
   }
-  if (nf < 2) {
+  if (nf == 0) {
     return;
   }
   const double cell = std::max(ext_sum / (3.0 * nf), 1e-300);
@@ -614,6 +614,115 @@ void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateF
     }
     if (bad) {
       rep.add(VC::FaceIntersection, ElemKind::Face, f);
+    }
+  }
+
+  /* wires against faces (plan P3b W8, C5) */
+  {
+    const auto &ec = k.edges.template get<".e.c">();
+    const auto &econt = k.edges.template get<".e.container">();
+    const auto &vcont = k.verts.template get<".v.container">();
+    util::Vector<uint32_t, 16> cand;
+    for (uint32_t w = 0; w < k.edges.capacity(); w++) {
+      if (!k.edges.live(w) || ec[w] != NONE) {
+        continue;
+      }
+      const auto wv = k.edge_verts(EdgeRef(w));
+      const uint32_t p = wv[0].i, q = wv[1].i;
+      double lo[3], hi[3];
+      {
+        const auto a = geom::to_double3<C>(pos(p)), b = geom::to_double3<C>(pos(q));
+        for (int i = 0; i < 3; i++) {
+          lo[i] = std::min(a[i], b[i]);
+          hi[i] = std::max(a[i], b[i]);
+        }
+      }
+      /* candidate faces: the grid cells the wire's box covers */
+      cand.clear();
+      for (int64_t x = cell_of(lo[0], 0); x <= cell_of(hi[0], 0); x++) {
+        for (int64_t y = cell_of(lo[1], 1); y <= cell_of(hi[1], 1); y++) {
+          for (int64_t z = cell_of(lo[2], 2); z <= cell_of(hi[2], 2); z++) {
+            auto it = grid.find({x, y, z});
+            if (it == grid.end()) {
+              continue;
+            }
+            for (uint32_t f : it->second) {
+              cand.append(f);
+            }
+          }
+        }
+      }
+      std::sort(cand.begin(), cand.end());
+      cand.resize(int(std::unique(cand.begin(), cand.end()) - cand.begin()));
+      const ident::ContainerRef wc = econt[w];
+      for (uint32_t f : cand) {
+        if (flt && !flt->edge(w) && !flt->face(f)) {
+          continue;
+        }
+        const FaceMesh<C> &m0 = mesh[f];
+        bool overlap = true;
+        for (int d = 0; d < 3; d++) {
+          overlap = overlap && m0.lo[d] <= hi[d] && lo[d] <= m0.hi[d];
+        }
+        if (!overlap || !ensure(f, false)) {
+          continue;
+        }
+        const FaceMesh<C> &m = mesh[f];
+        bool bad = false;
+        if (wc.kind() == ident::ContainerKind::Face && wc.index() == f) {
+          /* embedded in f: inside f, touching its boundary at most at the
+           * wire's endpoints (no crossing, no overlap, no corner on the
+           * wire), with the exact midpoint strictly inside */
+          FacePoints<C> fp;
+          fp.gather(k, FaceRef(f));
+          const auto v = fp.view();
+          const int axis = face_axis<C>(k, FaceRef(f), v);
+          for (uint32_t l = 0; l < v.loop_count() && !bad; l++) {
+            const auto L = v.loop(l);
+            for (size_t i = 0; i < L.size() && !bad; i++) {
+              const P &u = L[i], &t = L[(i + 1) % L.size()];
+              const geom::SegIsect s = geom::segments_intersect_proj<C>(pos(p), pos(q), u, t, axis);
+              if (s == geom::SegIsect::Proper || s == geom::SegIsect::Overlap) {
+                bad = true;
+              }
+              if (geom::lex_compare<C>(u, pos(p)) != 0 && geom::lex_compare<C>(u, pos(q)) != 0 &&
+                  geom::orient2d_proj<C>(pos(p), pos(q), u, axis) == 0 &&
+                  geom::on_segment_collinear_proj<C>(u, pos(p), pos(q), axis))
+              {
+                bad = true; /* a corner of f on the wire */
+              }
+            }
+          }
+          if (!bad) {
+            util::Vector<P, 32> twice;
+            for (const P &x : v.pts) {
+              twice.append(P{x[0] + x[0], x[1] + x[1], x[2] + x[2]});
+            }
+            const geom::PolyView<C> v2{std::span<const P>(twice.data(), twice.size()), v.off};
+            const P mid2{pos(p)[0] + pos(q)[0], pos(p)[1] + pos(q)[1], pos(p)[2] + pos(q)[2]};
+            bad = geom::point_in_poly_proj<C>(mid2, v2, axis) != geom::PointClass::Inside;
+          }
+        }
+        else {
+          /* elsewhere: only shared endpoints, or endpoints embedded in f */
+          Shared sh;
+          for (const uint32_t e : {std::min(p, q), std::max(p, q)}) {
+            const ident::ContainerRef c = vcont[e];
+            if (std::binary_search(m.verts.begin(), m.verts.end(), e) ||
+                (c.kind() == ident::ContainerKind::Face && c.index() == f))
+            {
+              sh.verts.append(e);
+            }
+          }
+          for (uint32_t j = 0; j < m.tris.size() && !bad; j++) {
+            bad = bad_contact(p, q, false, m.tris[j], sh);
+          }
+        }
+        if (bad) {
+          rep.add(VC::WireCrossesFace, ElemKind::Edge, w);
+          break;
+        }
+      }
     }
   }
 

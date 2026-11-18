@@ -132,7 +132,7 @@ template <geom::CoordType C> EditCode Editor<C>::set_position(VertRef v, const P
 /* ---- wires ---- */
 
 template <geom::CoordType C>
-EditCode Editor<C>::make_edge(VertRef a, VertRef b, ident::PersistentId id, EdgeRef *out)
+EditCode Editor<C>::make_edge(VertRef a, VertRef b, ident::PersistentId id, EdgeRef *out, EmbedTarget in)
 {
   Prim pr(*this, OpKind::MakeEdge);
   if (pr.done) {
@@ -161,8 +161,17 @@ EditCode Editor<C>::make_edge(VertRef a, VertRef b, ident::PersistentId id, Edge
   setE<".id">(e, id);
   disk_insert(e, 0);
   disk_insert(e, 1);
+  if (in.kind != EmbedTarget::Kind::None) {
+    /* created embedded (a wire lying in a face must never be free, P3b C5) */
+    const EditCode c = embed_impl(true, e.i, in);
+    if (c != EditCode::Ok) {
+      return pr.fail(c, rep_.kind, rep_.index, rep_.detail);
+    }
+  }
   pr.op.u.append(a.i);
   pr.op.u.append(b.i);
+  pr.op.u.append(uint32_t(in.kind));
+  pr.op.u.append(in.index);
   pr.op.ids.append(id);
   if (out) {
     *out = e;

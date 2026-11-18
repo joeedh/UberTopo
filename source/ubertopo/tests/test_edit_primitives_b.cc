@@ -267,10 +267,7 @@ template <geom::CoordType C> struct Wires {
   EdgeRef edge(FaceRef f, VertRef a, VertRef b)
   {
     EdgeRef e;
-    EXPECT_EDIT(ed, ed.make_edge(a, b, ident::kNoId, &e), EditCode::Ok);
-    if (f) {
-      EXPECT_EDIT(ed, ed.embed_edge(e, EmbedTarget::face(f)), EditCode::Ok);
-    }
+    EXPECT_EDIT(ed, ed.make_edge(a, b, ident::kNoId, &e, f ? EmbedTarget::face(f) : EmbedTarget{}), EditCode::Ok);
     return e;
   }
   /* a closed square of embedded wires on the plane y = 0 */
@@ -640,6 +637,74 @@ template <geom::CoordType C> void test_weld()
   }
 }
 
+/* ---- W8: wires against faces (plan P3b §3.7, C5) ---- */
+
+template <geom::CoordType C> bool reports(const Editor<C> &ed, ValidateCode code)
+{
+  for (const auto &i : ed.report().validation.issues) {
+    if (i.code == code) {
+      return true;
+    }
+  }
+  return false;
+}
+
+template <geom::CoordType C> void test_wire_face()
+{
+  Fixture<C> fx;
+  UT_CHECK(fx.box({0, 0, 0}, {8, 8, 8}));
+  Editor<C> ed(fx.k, &fx.j);
+  Wires<C> w{fx, ed};
+  const PersistentId h0 = hk(fx.k);
+  /* a free wire piercing the wall y = 0 */
+  {
+    const VertRef a = w.vert({}, {4, -2, 4}), b = w.vert({}, {4, 2, 4});
+    EdgeRef e;
+    EXPECT_EDIT(ed, ed.make_edge(a, b, ident::kNoId, &e), EditCode::Invalid);
+    UT_CHECK(reports(ed, ValidateCode::WireCrossesFace));
+  }
+  /* a free wire through a box corner, mid-length */
+  {
+    const VertRef a = w.vert({}, {-1, -1, -1}), b = w.vert({}, {1, 1, 1});
+    EXPECT_EDIT(ed, ed.make_edge(a, b), EditCode::Invalid);
+    UT_CHECK(reports(ed, ValidateCode::WireCrossesFace));
+  }
+  /* a pole on the roof: its foot is embedded in the face, the wire is free */
+  {
+    const FaceRef roof = fx.face_with({{0, 0, 8}, {8, 0, 8}, {8, 8, 8}, {0, 8, 8}});
+    const VertRef foot = w.vert(roof, {4, 4, 8}), top = w.vert({}, {4, 4, 12});
+    EXPECT_EDIT(ed, ed.make_edge(foot, top), EditCode::Ok);
+  }
+  /* a wire embedded in the wall, across a hole, and through its corners */
+  {
+    const FaceRef wall = fx.face_with({{0, 0, 0}, {8, 0, 0}, {8, 0, 8}, {0, 0, 8}});
+    const std::vector<EdgeRef> sq = w.square(wall, 3, 5);
+    EXPECT_EDIT(ed, ed.add_hole(wall, std::span<const EdgeRef>(sq.data(), sq.size())), EditCode::Ok);
+    const VertRef a = w.vert(wall, {2, 0, 4}), b = w.vert(wall, {6, 0, 4});
+    EXPECT_EDIT(ed, ed.make_edge(a, b, ident::kNoId, nullptr, EmbedTarget::face(wall)), EditCode::Invalid);
+    UT_CHECK(reports(ed, ValidateCode::WireCrossesFace));
+    const VertRef c = w.vert(wall, {2, 0, 2}), d = w.vert(wall, {6, 0, 6});
+    EXPECT_EDIT(ed, ed.make_edge(c, d, ident::kNoId, nullptr, EmbedTarget::face(wall)), EditCode::Invalid);
+    UT_CHECK(reports(ed, ValidateCode::WireCrossesFace));
+    /* grazing one hole corner (midpoint outside the hole): only the corner rule sees it */
+    const VertRef g0 = w.vert(wall, {2, 0, 4}), g1 = w.vert(wall, {5, 0, 1});
+    EXPECT_EDIT(ed, ed.make_edge(g0, g1, ident::kNoId, nullptr, EmbedTarget::face(wall)), EditCode::Invalid);
+    UT_CHECK(reports(ed, ValidateCode::WireCrossesFace));
+    /* corner to corner across the opening: only the midpoint rule sees it */
+    EXPECT_EDIT(ed, ed.make_edge(fx.vert_at({3, 0, 3}), fx.vert_at({5, 0, 5}), ident::kNoId, nullptr, EmbedTarget::face(wall)),
+                EditCode::Invalid);
+    UT_CHECK(reports(ed, ValidateCode::WireCrossesFace));
+    /* beside the hole it is fine */
+    const VertRef p = w.vert(wall, {1, 0, 1}), q = w.vert(wall, {1, 0, 7});
+    EXPECT_EDIT(ed, ed.make_edge(p, q, ident::kNoId, nullptr, EmbedTarget::face(wall)), EditCode::Ok);
+  }
+  UT_CHECK(fx.valid());
+  while (fx.j.undo_count()) {
+    EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+  }
+  UT_CHECK(hk(fx.k) == h0);
+}
+
 } // namespace
 
 int main()
@@ -655,6 +720,8 @@ int main()
   test_holes<geom::Lattice>();
   test_weld<double>();
   test_weld<geom::Lattice>();
+  test_wire_face<double>();
+  test_wire_face<geom::Lattice>();
   UT_CHECK(litestl::alloc::getMemorySize() == baseline);
   return ut_test_end();
 }

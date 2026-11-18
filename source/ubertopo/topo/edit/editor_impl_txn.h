@@ -396,7 +396,7 @@ template <geom::CoordType C> EditCode Editor<C>::apply_op(const OpRecord<C> &op)
     case OpKind::KillVertex:
       return kill_vertex(VertRef(u[0]));
     case OpKind::MakeEdge:
-      return make_edge(VertRef(u[0]), VertRef(u[1]), op.ids[0]);
+      return make_edge(VertRef(u[0]), VertRef(u[1]), op.ids[0], nullptr, EmbedTarget{EmbedTarget::Kind(u[2]), u[3]});
     case OpKind::KillEdge:
       return kill_edge(EdgeRef(u[0]));
     case OpKind::SetPosition:

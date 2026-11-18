@@ -112,8 +112,14 @@ public:
   /* ---- primitives (P3a) ---- */
   EditCode make_vertex(const Point &p, ident::PersistentId id, VertRef *out = nullptr);
   EditCode kill_vertex(VertRef v);
-  /** A wire from @p a to @p b; @p id defaults to edge_id of the vertex IDs. */
-  EditCode make_edge(VertRef a, VertRef b, ident::PersistentId id = ident::kNoId, EdgeRef *out = nullptr);
+  /** A wire from @p a to @p b; @p id defaults to edge_id of the vertex IDs.
+   * @p in embeds it on creation: a wire lying in a face must be made
+   * embedded in it, or the validator reports WireCrossesFace. */
+  EditCode make_edge(VertRef a,
+                     VertRef b,
+                     ident::PersistentId id = ident::kNoId,
+                     EdgeRef *out = nullptr,
+                     EmbedTarget in = {});
   EditCode kill_edge(EdgeRef e);
   EditCode set_position(VertRef v, const Point &p);
   /** Embeds an isolated vertex or a wire (EmbedTarget::Kind::None unembeds). */

@@ -228,3 +228,8 @@ Entry format:
 - **Symptom:** in a matrix run, gcc-ubsan segfaulted and gcc-tsan failed in `test_edit_primitives`. The release and ASan configurations had passed, and rerunning the two configurations alone passed.
 - **Cause:** the mutation script edits the shared source files in place while it builds in `ut-clang-rel`. The sanitizer configurations, compiling in parallel, built the mutated sources.
 - **Fix / technique:** never run mutation checks while any matrix configuration is still building. Run them before or after the matrix, or in a separate worktree.
+
+## `WireCrossesFace` for a wire that is meant to lie in a face
+- **Symptom:** after P3b W8, tests that built a wire inside a face with `make_edge` followed by `embed_edge` started failing at the `make_edge` step with `Invalid`, and the report named `WireCrossesFace`.
+- **Cause:** between the two calls the wire is a free wire lying in the face's plane. The validator treats a free wire as crossing any face it touches away from a shared endpoint, so the first primitive leaves the complex invalid.
+- **Fix / technique:** create the wire already embedded, with the `in` argument: `make_edge(a, b, id, &e, EmbedTarget::face(f))`. Use the same pattern whenever an intermediate state would be invalid. Do it inside one primitive, or in a transaction validated on commit, never as two primitives each validated on its own.

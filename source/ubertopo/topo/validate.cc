@@ -50,6 +50,7 @@ const char *validate_code_name(ValidateCode c)
     UT_VC(LoopIntersection)
     UT_VC(HoleOutside)
     UT_VC(FaceIntersection)
+    UT_VC(WireCrossesFace)
     UT_VC(RegionsStale)
 #undef UT_VC
   }
