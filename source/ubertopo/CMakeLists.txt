@@ -16,6 +16,7 @@ add_library(ubertopo_topo STATIC
   topo/schema.cc
   topo/builder.cc
   topo/validate.cc
+  topo/regions.cc
 )
 target_link_libraries(ubertopo_topo PUBLIC ubertopo_geom ubertopo_ident attr util)
 
