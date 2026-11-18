@@ -417,6 +417,29 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
 
 ---
 
+## DEC-011 — litestl P0/P1 work merged to `master`
+
+- **Date:** 2026-11-18. The owner asked for the merge.
+- **What happened:** litestl `ubertopo/p1-attr`, which contains all of
+  `ubertopo/p0-foundations`, was **fast-forward merged into litestl `master`** at
+  `b11fa31` and pushed. `master` hadn't moved since the branches were cut (`765241e`).
+  The UberTopo submodule link (`source/litestl`) records `b11fa31`, which is now
+  reachable from `master`, and `.gitmodules` tracks `branch = master`.
+- **Effect on Sculptcore:** it picks up these changes when it next bumps its litestl
+  submodule:
+  - the P0 numerics;
+  - the attr module;
+  - the shared-code fixes: `Vec` trivially copyable, `~BindingBase`,
+    `Vector::remove_at`, `NewArray`, and the predicate bounds fix;
+  - the test infrastructure.
+
+  Rebuild and test once at that point, especially on the Windows clang toolchain,
+  which couldn't be tested here.
+- **Future litestl work** continues on feature branches (CLAUDE.md rule) and is merged
+  when the owner asks.
+
+---
+
 ## Open questions
 
 - ~~Q-A — WASM target~~ → DEC-005 (native N-API in a Chromium shell).
