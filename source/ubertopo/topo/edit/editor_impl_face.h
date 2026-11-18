@@ -8,6 +8,7 @@
 #include <cmath>
 #include <memory>
 
+#include "ubertopo/topo/compact.h"
 #include "ubertopo/topo/edit/editor.h"
 #include "ubertopo/topo/face_geom.h"
 #include "ubertopo/topo/radial.h"
@@ -818,45 +819,63 @@ EditCode Editor<C>::set_attr(Grp g, uint32_t row, uint32_t column, std::span<con
   return pr.finish();
 }
 
-/* ---- regions barrier (C7, C13) ---- */
+/* ---- barriers: regions (C7, C13) and compaction (P3b W2) ---- */
 
 template <geom::CoordType C> EditCode Editor<C>::rebuild_regions()
+{
+  return run_barrier(OpKind::RebuildRegions);
+}
+
+template <geom::CoordType C> EditCode Editor<C>::compact()
+{
+  return run_barrier(OpKind::Compact);
+}
+
+template <geom::CoordType C> EditCode Editor<C>::run_barrier(OpKind kind)
 {
   rep_ = EditReport{};
   if (!sp_.empty()) {
     rep_.code = EditCode::OpenTransaction;
     return rep_.code;
   }
-  EditCode c = begin_internal("rebuild_regions");
+  if (kind == OpKind::Compact && !k_.frozen() && !has_tombstones(k_)) {
+    return EditCode::Ok; /* nothing to drop: no transaction */
+  }
+  EditCode c = begin_internal(kind == OpKind::Compact ? "compact" : "rebuild_regions");
   if (c != EditCode::Ok) {
     rep_.code = c;
     return c;
   }
   barrier_snapshot_ = std::make_unique<Complex<C>>(k_);
-  RegionReport rr;
-  if (!build_regions(k_, rr)) {
-    rep_.code = EditCode::RegionsFailed;
-    for (const RegionIssue &i : rr.issues) {
-      if (region_code_is_error(i.code)) {
-        rep_.region_code = int(i.code);
-        rep_.index = i.index;
-        break;
-      }
-    }
-    rollback();
-    return EditCode::RegionsFailed;
+  if (kind == OpKind::Compact) {
+    topo::compact(k_);
   }
-  if (opt_.validate != ValidateMode::None) {
-    ValidationReport r = validate(k_, ValidateLevel::Embedding);
-    if (!r.ok()) {
-      rep_.validation = r;
-      rep_.code = EditCode::Invalid;
+  else {
+    RegionReport rr;
+    if (!build_regions(k_, rr)) {
+      rep_.code = EditCode::RegionsFailed;
+      for (const RegionIssue &i : rr.issues) {
+        if (region_code_is_error(i.code)) {
+          rep_.region_code = int(i.code);
+          rep_.index = i.index;
+          break;
+        }
+      }
       rollback();
-      return EditCode::Invalid;
+      return EditCode::RegionsFailed;
+    }
+    if (opt_.validate != ValidateMode::None) {
+      ValidationReport r = validate(k_, ValidateLevel::Embedding);
+      if (!r.ok()) {
+        rep_.validation = r;
+        rep_.code = EditCode::Invalid;
+        rollback();
+        return EditCode::Invalid;
+      }
     }
   }
   OpRecord<C> op;
-  op.kind = OpKind::RebuildRegions;
+  op.kind = kind;
   ops_.push_back(std::move(op));
   c = commit_internal(redoing_);
   for (IdIndex &x : ids_) {

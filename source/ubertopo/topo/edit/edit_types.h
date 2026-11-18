@@ -97,6 +97,7 @@ enum class OpKind : uint8_t {
   SetSideHint,
   SetAttr,
   RebuildRegions,
+  Compact,
 };
 
 /** Arguments of one operation: indices, IDs, points and raw bytes. P3a

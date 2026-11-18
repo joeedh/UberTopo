@@ -18,6 +18,7 @@ add_library(ubertopo_topo STATIC
   topo/validate.cc
   topo/regions.cc
   topo/validate_geom.cc
+  topo/compact.cc
   topo/freeze.cc
   topo/io.cc
   topo/edit/editor.cc

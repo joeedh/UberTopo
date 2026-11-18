@@ -139,6 +139,10 @@ public:
   EditCode set_attr(Grp g, uint32_t row, uint32_t column, std::span<const uint8_t> bytes);
   /** Barrier: build_regions(), then validation; rolls back on failure. */
   EditCode rebuild_regions();
+  /** Barrier: drops every tombstone (compact.h); outside transactions only.
+   * Indices of every domain may change; Ok without a journal entry if there
+   * is nothing to drop. */
+  EditCode compact();
 
   /** The edge joining @p a and @p b, if any. */
   EdgeRef find_edge(VertRef a, VertRef b) const;
@@ -169,6 +173,8 @@ private:
   void restore(TxnLog &log, uint32_t rows_mark, uint32_t alloc_mark, const uint32_t *sizes, bool regions_dirty);
   void rebuild_captured();
   EditCode apply_op(const OpRecord<C> &op);
+  /** rebuild_regions() / compact(): a snapshot transaction of its own. */
+  EditCode run_barrier(OpKind kind);
   EditCode validate_now();
   void touched_filter(ValidateFilter &flt) const;
 

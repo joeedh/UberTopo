@@ -356,8 +356,8 @@ template <geom::CoordType C> EditCode Editor<C>::redo()
   journal_->undone_.pop_back();
   redoing_ = true;
   EditCode c;
-  if (t.ops.size() == 1 && t.ops[0].kind == OpKind::RebuildRegions) {
-    c = rebuild_regions();
+  if (t.ops.size() == 1 && (t.ops[0].kind == OpKind::RebuildRegions || t.ops[0].kind == OpKind::Compact)) {
+    c = run_barrier(t.ops[0].kind);
   }
   else {
     c = begin_internal(t.label);
@@ -429,6 +429,7 @@ template <geom::CoordType C> EditCode Editor<C>::apply_op(const OpRecord<C> &op)
     case OpKind::SetAttr:
       return set_attr(Grp(u[0]), u[1], u[2], std::span<const uint8_t>(op.bytes.data(), op.bytes.size()));
     case OpKind::RebuildRegions:
+    case OpKind::Compact:
       return EditCode::OpenTransaction; /* barriers are replayed on their own (redo) */
   }
   return EditCode::BadArgument;

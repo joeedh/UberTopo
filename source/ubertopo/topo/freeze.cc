@@ -5,6 +5,7 @@
 
 #include "litestl/util/sort.h"
 #include "ubertopo/geom/cdt/cdt.h"
+#include "ubertopo/topo/compact.h"
 #include "ubertopo/topo/radial.h"
 #include "ubertopo/topo/remap.h"
 
@@ -65,40 +66,6 @@ void order_map(util::Vector<Key> &keys, uint32_t old_n, util::Vector<uint32_t> &
   }
   for (uint32_t i = 0; i < keys.size(); i++) {
     map[keys[i].old] = i;
-  }
-}
-
-/* new gens: an element that moved gets max(own, slot's old) + 1 */
-void new_generations(attr::Column<uint32_t> &gen,
-                     const util::Vector<uint32_t> &before, /* gen per old index */
-                     const util::Vector<uint32_t> &map)
-{
-  for (uint32_t old = 0; old < map.size(); old++) {
-    const uint32_t n = map[old];
-    if (n == kDropped || n == old) {
-      continue;
-    }
-    const uint32_t slot_old = n < before.size() ? before[n] : 0;
-    gen.set(n, std::max(before[old], slot_old) + 1);
-  }
-}
-
-template <typename D> util::Vector<uint32_t> gens_of(const D &d)
-{
-  util::Vector<uint32_t> g;
-  for (uint32_t i = 0; i < d.capacity(); i++) {
-    g.append(d.template get<".gen">()[i]);
-  }
-  return g;
-}
-
-/* compaction that keeps live slots in index order */
-template <typename D> void identity_map(const D &d, util::Vector<uint32_t> &map, uint32_t &n)
-{
-  map.resize(d.capacity());
-  n = 0;
-  for (uint32_t i = 0; i < d.capacity(); i++) {
-    map[i] = d.live(i) ? n++ : kDropped;
   }
 }
 
@@ -294,38 +261,8 @@ template <geom::CoordType C> FreezeResult freeze(Complex<C> &k)
     maps.face_side[2 * f] = n == kDropped ? kDropped : 2 * n;
     maps.face_side[2 * f + 1] = n == kDropped ? kDropped : 2 * n + 1;
   }
-  uint32_t ns, nr;
-  identity_map(k.shells, maps.shell, ns);
-  identity_map(k.regions, maps.region, nr);
-
-  /* generations before */
-  const auto gv = gens_of(k.verts), ge = gens_of(k.edges), gc = gens_of(k.coedges), gl = gens_of(k.loops),
-             gf = gens_of(k.faces), gs = gens_of(k.shells), gr = gens_of(k.regions);
-  auto span_of = [](const util::Vector<uint32_t> &m) { return util::span<const uint32_t>(m.data(), m.size()); };
-  k.verts.permute(span_of(maps.vertex), k.verts.live_count());
-  k.edges.permute(span_of(maps.edge), k.edges.live_count());
-  k.coedges.permute(span_of(maps.coedge), k.coedges.live_count());
-  k.loops.permute(span_of(maps.loop), k.loops.live_count());
-  k.faces.permute(span_of(maps.face), k.faces.live_count());
-  k.shells.permute(span_of(maps.shell), ns);
-  k.regions.permute(span_of(maps.region), nr);
-  /* remap stored indices */
-  remap_group<VertexSchema<C>>(k.verts.typed(), maps);
-  remap_group<EdgeSchema>(k.edges.typed(), maps);
-  remap_group<CoedgeSchema>(k.coedges.typed(), maps);
-  remap_group<LoopSchema>(k.loops.typed(), maps);
-  remap_group<FaceSchema>(k.faces.typed(), maps);
-  remap_group<FaceSideSchema>(k.faces.sides(), maps);
-  remap_group<ShellSchema>(k.shells.typed(), maps);
-  remap_group<RegionSchema>(k.regions.typed(), maps);
-  /* generations after */
-  new_generations(k.verts.template get<".gen">(), gv, maps.vertex);
-  new_generations(k.edges.template get<".gen">(), ge, maps.edge);
-  new_generations(k.coedges.template get<".gen">(), gc, maps.coedge);
-  new_generations(k.loops.template get<".gen">(), gl, maps.loop);
-  new_generations(k.faces.template get<".gen">(), gf, maps.face);
-  new_generations(k.shells.template get<".gen">(), gs, maps.shell);
-  new_generations(k.regions.template get<".gen">(), gr, maps.region);
+  /* shells and regions keep build_regions' order; apply_remap fills them */
+  apply_remap(k, maps);
   build_caches(k);
   k.frozen_stamp = k.version();
   return FreezeResult::Ok;
