@@ -29,6 +29,30 @@ template <CoordType C> int orient2d_proj(const Point<C> &a, const Point<C> &b, c
   return CoordTraits<C>::orient2d(drop_axis<C>(a, axis), drop_axis<C>(b, axis), drop_axis<C>(c, axis));
 }
 
+/** incircle in projection (Shewchuk convention in the drop_axis frame). */
+template <CoordType C>
+int incircle_proj(const Point<C> &a, const Point<C> &b, const Point<C> &c, const Point<C> &d, int axis)
+{
+  return CoordTraits<C>::incircle(drop_axis<C>(a, axis), drop_axis<C>(b, axis), drop_axis<C>(c, axis),
+                                  drop_axis<C>(d, axis));
+}
+
+/** incircle_proj with cocircular ties broken by rank (litestl incircle_sos). */
+template <CoordType C>
+int incircle_sos_proj(const Point<C> &a,
+                      const Point<C> &b,
+                      const Point<C> &c,
+                      const Point<C> &d,
+                      uint64_t ra,
+                      uint64_t rb,
+                      uint64_t rc,
+                      uint64_t rd,
+                      int axis)
+{
+  return CoordTraits<C>::incircle_sos(drop_axis<C>(a, axis), drop_axis<C>(b, axis), drop_axis<C>(c, axis),
+                                      drop_axis<C>(d, axis), ra, rb, rc, rd);
+}
+
 /** sign(det[b-a, c-a, d-a]): > 0 iff d is on the side of plane (a, b, c) that
  * (b-a) x (c-a) points to. */
 template <CoordType C> int vol3(const Point<C> &a, const Point<C> &b, const Point<C> &c, const Point<C> &d)

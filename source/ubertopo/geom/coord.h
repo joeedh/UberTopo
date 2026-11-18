@@ -87,6 +87,7 @@ concept CoordType = CoordScalar<T> && requires {
   { CoordTraits<T>::orient3d(p, p, p, p) } -> std::same_as<int>;
   { CoordTraits<T>::orient3d_ext(p, p, p, p) } -> std::same_as<int>;
   { CoordTraits<T>::incircle(q, q, q, q) } -> std::same_as<int>;
+  { CoordTraits<T>::incircle_sos(q, q, q, q, uint64_t{}, uint64_t{}, uint64_t{}, uint64_t{}) } -> std::same_as<int>;
   { CoordTraits<T>::compare(p, p, int{}) } -> std::same_as<int>;
   { CoordTraits<T>::ext_ok(p) } -> std::same_as<bool>;
 } && requires(T a, T &out) {
@@ -137,6 +138,17 @@ template <> struct CoordTraits<double> {
   static int incircle(const Point2 &a, const Point2 &b, const Point2 &c, const Point2 &d)
   {
     return lmath::pred::incircle(a, b, c, d);
+  }
+  static int incircle_sos(const Point2 &a,
+                          const Point2 &b,
+                          const Point2 &c,
+                          const Point2 &d,
+                          uint64_t ra,
+                          uint64_t rb,
+                          uint64_t rc,
+                          uint64_t rd)
+  {
+    return lmath::pred::incircle_sos(a, b, c, d, ra, rb, rc, rd);
   }
   static int compare(const Point &a, const Point &b, int axis)
   {
@@ -193,6 +205,17 @@ template <> struct CoordTraits<float> {
   static int incircle(const Point2 &a, const Point2 &b, const Point2 &c, const Point2 &d)
   {
     return lmath::pred::incircle(a, b, c, d);
+  }
+  static int incircle_sos(const Point2 &a,
+                          const Point2 &b,
+                          const Point2 &c,
+                          const Point2 &d,
+                          uint64_t ra,
+                          uint64_t rb,
+                          uint64_t rc,
+                          uint64_t rd)
+  {
+    return lmath::pred::incircle_sos(a, b, c, d, ra, rb, rc, rd);
   }
   static int compare(const Point &a, const Point &b, int axis)
   {
@@ -262,6 +285,17 @@ template <> struct CoordTraits<Lattice> {
   static int incircle(const Point2 &a, const Point2 &b, const Point2 &c, const Point2 &d)
   {
     return lmath::pred::incircle<input_bits>(raw(a), raw(b), raw(c), raw(d));
+  }
+  static int incircle_sos(const Point2 &a,
+                          const Point2 &b,
+                          const Point2 &c,
+                          const Point2 &d,
+                          uint64_t ra,
+                          uint64_t rb,
+                          uint64_t rc,
+                          uint64_t rd)
+  {
+    return lmath::pred::incircle_sos<input_bits>(raw(a), raw(b), raw(c), raw(d), ra, rb, rc, rd);
   }
   static int compare(const Point &a, const Point &b, int axis)
   {
