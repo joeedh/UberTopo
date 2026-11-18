@@ -919,7 +919,7 @@ edges, not on insertion order, loop heads or loop order.
     | `c` | `+orient2d(a,b,d)` |
     | `d` | `−orient2d(a,b,c)` |
 
-    The coefficient is never zero on a tie, because three distinct cocicular points
+    The coefficient is never zero on a tie, because three distinct cocircular points
     are never collinear.
   - Ranks are lexicographic comparisons, so they are identical in `double` and
     `Lattice`.
