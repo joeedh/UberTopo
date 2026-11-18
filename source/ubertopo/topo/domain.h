@@ -10,6 +10,11 @@
  *    allocation sequence is a function of ".live" alone: continuing in memory
  *    and continuing after read() / permute() allocate identically.
  *  - alloc_n(n) appends a dense range and ignores the freelist (bulk build).
+ *  - The generation floor (plan P3b §3.1): no handle with gen >= gen_floor()
+ *    was issued for an index at or beyond capacity(). Slots appended past
+ *    the capacity start at the floor; permute() raises it over the indices
+ *    it drops off the end, and replace_rows() over replaced rows. Rollback
+ *    resizes don't touch it.
  *  - Copying a Domain is a snapshot (columns are copy-on-write). */
 
 #include <algorithm>
@@ -103,6 +108,9 @@ public:
     else {
       i = capacity();
       g_.resize(i + 1);
+      if (gen_floor_ != 0) {
+        g_.template get<".gen">().set(i, gen_floor_);
+      }
     }
     attr::set_bool(g_.template get<".live">(), i, true);
     live_count_++;
@@ -115,6 +123,9 @@ public:
     const uint32_t first = capacity();
     g_.resize(first + n);
     g_.template get<".live">().fill(first, n, uint8_t(1));
+    if (gen_floor_ != 0) {
+      g_.template get<".gen">().fill(first, n, gen_floor_);
+    }
     live_count_ += n;
     return first;
   }
@@ -187,11 +198,50 @@ public:
    * (see remap.h). */
   bool permute(litestl::util::span<const uint32_t> old_to_new, uint32_t new_size)
   {
+    uint32_t floor = gen_floor_;
+    for (uint32_t i = new_size; i < capacity(); i++) {
+      floor = std::max(floor, gen(i) + 1);
+    }
     if (!g_.group().permute(old_to_new, new_size)) {
       return false;
     }
+    gen_floor_ = floor;
     rebuild_allocator();
     return true;
+  }
+
+  uint32_t gen_floor() const
+  {
+    return gen_floor_;
+  }
+  void set_gen_floor(uint32_t f)
+  {
+    gen_floor_ = f;
+  }
+
+  /** Generations for a domain rebuilt from scratch in place of @p old (a
+   * derived domain: shells, regions). Call on the fresh domain after its
+   * rows exist. Row i keeps old's generation if same(i) says the element at
+   * i is the same one as before; otherwise it gets max(old gen + 1, floor),
+   * or the floor beyond old's capacity. Old rows past the new size raise the
+   * floor. An empty old domain leaves everything at 0. */
+  template <typename Same> void replace_generations(const Domain &old, Same &&same)
+  {
+    uint32_t floor = old.gen_floor_;
+    for (uint32_t i = capacity(); i < old.capacity(); i++) {
+      floor = std::max(floor, old.gen(i) + 1);
+    }
+    auto &gen = g_.template get<".gen">();
+    for (uint32_t i = 0; i < capacity(); i++) {
+      uint32_t g = old.gen_floor_;
+      if (i < old.capacity()) {
+        g = same(i) ? old.gen(i) : std::max(old.gen(i) + 1, old.gen_floor_);
+      }
+      if (g != gen[i]) {
+        gen.set(i, g);
+      }
+    }
+    gen_floor_ = floor;
   }
 
   /** Rebuilds the free set and the live count from ".live" (after a read or
@@ -216,6 +266,7 @@ protected:
   Group g_;
   litestl::util::Vector<uint32_t> free_; /* min-heap of free slots */
   uint32_t live_count_ = 0;
+  uint32_t gen_floor_ = 0;
 };
 
 /** The face domain owns the face-side rows (2 per face, row 2f + side), so

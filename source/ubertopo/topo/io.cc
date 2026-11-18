@@ -1,5 +1,6 @@
 #include "ubertopo/topo/io.h"
 
+#include <array>
 #include <bit>
 
 #include "ubertopo/topo/freeze.h"
@@ -28,6 +29,34 @@ template <geom::CoordType C> void hash_groups(const Complex<C> &k, ident::Hasher
   k.global.group().hash_into(h);
 }
 
+/* the generation floors in a fixed domain order (faces carry their sides) */
+template <geom::CoordType C> std::array<uint32_t, 7> floors_of(const Complex<C> &k)
+{
+  return {k.verts.gen_floor(),
+          k.edges.gen_floor(),
+          k.coedges.gen_floor(),
+          k.loops.gen_floor(),
+          k.faces.gen_floor(),
+          k.shells.gen_floor(),
+          k.regions.gen_floor()};
+}
+
+template <geom::CoordType C> void hash_floors(const Complex<C> &k, ident::Hasher128 &h)
+{
+  const auto fl = floors_of(k);
+  bool any = false;
+  for (uint32_t f : fl) {
+    any = any || f != 0;
+  }
+  if (!any) {
+    return; /* all-zero states hash as before format 2 */
+  }
+  h.u8(0xF1);
+  for (uint32_t f : fl) {
+    h.u32(f);
+  }
+}
+
 template <geom::CoordType C> void hash_frame(const Complex<C> &k, ident::Hasher128 &h)
 {
   h.str(geom::CoordTraits<C>::key);
@@ -42,6 +71,7 @@ template <geom::CoordType C> ident::PersistentId content_hash(const Complex<C> &
   hash_frame(k, h);
   h.boolean(k.regions_dirty);
   hash_groups(k, h, true);
+  hash_floors(k, h);
   return h.finish();
 }
 
@@ -51,6 +81,7 @@ template <geom::CoordType C> ident::PersistentId topology_hash(const Complex<C> 
   h.u64(k.frame.frame_id);
   h.boolean(k.regions_dirty);
   hash_groups(k, h, false);
+  hash_floors(k, h);
   return h.finish();
 }
 
@@ -66,6 +97,9 @@ template <geom::CoordType C> void write(const Complex<C> &k, litestl::io::ByteWr
   w.u64(k.frame.frame_id);
   w.u8(k.regions_dirty ? 1 : 0);
   w.u8(k.frozen() ? 1 : 0);
+  for (uint32_t f : floors_of(k)) {
+    w.u32(f);
+  }
   k.verts.group().write(w);
   k.edges.group().write(w);
   k.coedges.group().write(w);
@@ -92,7 +126,8 @@ template <geom::CoordType C> bool read(Complex<C> &k, litestl::io::ByteReader &r
   if (r.u32() != kComplexMagic || r.failed()) {
     return fail("not a complex stream");
   }
-  if (r.u32() != kComplexFormat) {
+  const uint32_t format = r.u32();
+  if (format < kComplexFormatMin || format > kComplexFormat) {
     return fail("unsupported complex format version");
   }
   if (r.str() != std::string_view(geom::CoordTraits<C>::key)) {
@@ -106,6 +141,12 @@ template <geom::CoordType C> bool read(Complex<C> &k, litestl::io::ByteReader &r
   s.frame.frame_id = r.u64();
   s.regions_dirty = r.u8() != 0;
   const bool frozen = r.u8() != 0;
+  uint32_t floors[7] = {};
+  if (format >= 2) {
+    for (uint32_t &f : floors) {
+      f = r.u32();
+    }
+  }
   if (r.failed()) {
     return fail("truncated header");
   }
@@ -121,6 +162,13 @@ template <geom::CoordType C> bool read(Complex<C> &k, litestl::io::ByteReader &r
   if (s.faces.sides().size() != 2 * s.faces.capacity() || s.global.size() != 1) {
     return fail("face side or global group size mismatch");
   }
+  s.verts.set_gen_floor(floors[0]);
+  s.edges.set_gen_floor(floors[1]);
+  s.coedges.set_gen_floor(floors[2]);
+  s.loops.set_gen_floor(floors[3]);
+  s.faces.set_gen_floor(floors[4]);
+  s.shells.set_gen_floor(floors[5]);
+  s.regions.set_gen_floor(floors[6]);
   ident::PersistentId h;
   h.lo = r.u64();
   h.hi = r.u64();

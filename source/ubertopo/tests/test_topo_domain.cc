@@ -208,10 +208,49 @@ static void test_group_round_trip()
   UT_CHECK(back.edges.get<".e.disk">()[2][3] == disk_pack(1, 1));
 }
 
+/* Generation floor (plan P3b §3.1): slots dropped off the end never revive
+ * old handles when they are appended again. */
+static void test_gen_floor()
+{
+  Domain<EdgeSchema> d;
+  d.alloc_n(6);
+  const auto h4 = d.handle(EdgeRef(4));
+  d.free(4);
+  d.free(5);
+  const auto h5 = d.handle(EdgeRef(5)); /* gen 1, of a dead slot */
+  UT_CHECK(d.gen_floor() == 0);
+  /* identity compaction to 4 rows: slots 4 and 5 are dropped off the end */
+  const uint32_t map[6] = {0, 1, 2, 3, attr::ColumnBase::kDropped, attr::ColumnBase::kDropped};
+  UT_CHECK(d.permute(litestl::util::span<const uint32_t>(map, 6), 4));
+  UT_CHECK(d.capacity() == 4 && d.gen_floor() == 2);
+  UT_CHECK(d.alloc() == 4 && d.gen(4) == 2 && d.alloc_n(2) == 5 && d.gen(5) == 2 && d.gen(6) == 2);
+  UT_CHECK(!d.resolve(h4) && !d.resolve(h5));
+  /* an in-range permutation doesn't raise the floor */
+  const uint32_t swap[7] = {1, 0, 2, 3, 4, 5, 6};
+  UT_CHECK(d.permute(litestl::util::span<const uint32_t>(swap, 7), 7) && d.gen_floor() == 2);
+  /* copies carry it */
+  const Domain<EdgeSchema> c = d;
+  UT_CHECK(c.gen_floor() == 2);
+
+  /* replace_generations: same rows keep theirs, others move past old ones */
+  Domain<EdgeSchema> old;
+  old.alloc_n(3);
+  old.free(1); /* gen 1 */
+  Domain<EdgeSchema> fresh;
+  fresh.alloc_n(2);
+  fresh.replace_generations(old, [](uint32_t i) { return i == 0; });
+  UT_CHECK(fresh.gen(0) == 0 && fresh.gen(1) == 2 && fresh.gen_floor() == 1);
+  Domain<EdgeSchema> empty, first;
+  first.alloc_n(3);
+  first.replace_generations(empty, [](uint32_t) { return false; });
+  UT_CHECK(first.gen(0) == 0 && first.gen(2) == 0 && first.gen_floor() == 0);
+}
+
 int main()
 {
   const size_t baseline = litestl::alloc::getMemorySize();
   test_alloc_free();
+  test_gen_floor();
   test_snapshot();
   test_face_sides();
   test_accessors<geom::Lattice>();

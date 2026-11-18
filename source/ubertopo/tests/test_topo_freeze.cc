@@ -231,6 +231,69 @@ template <geom::CoordType C> static void test_tombstones_and_generations()
     }
   }
   UT_CHECK(ok);
+
+  /* P3b §3.1: slots dropped off the end come back past every old handle */
+  UT_CHECK(k.faces.gen_floor() > 0 && k.verts.gen_floor() > 0);
+  Complex<C> t = thaw(k);
+  const uint32_t cap = t.faces.capacity();
+  const uint32_t extra = t.faces.alloc_n(uint32_t(fh.size()));
+  UT_CHECK(extra == cap && t.faces.gen(cap) == t.faces.gen_floor());
+  for (auto &[id, h] : fh) {
+    if (h.index >= cap) {
+      ok = ok && !t.faces.resolve(h);
+    }
+  }
+  UT_CHECK(ok);
+  /* floors survive a round trip and enter the hashes */
+  {
+    const auto b = bytes_of(t);
+    Complex<C> back;
+    litestl::io::ByteReader r(b.data(), b.size());
+    UT_CHECK(read(back, r));
+    UT_CHECK(back.faces.gen_floor() == t.faces.gen_floor() && content_hash(back) == content_hash(t));
+    Complex<C> nofloor = t;
+    nofloor.faces.set_gen_floor(0);
+    UT_CHECK(!(content_hash(nofloor) == content_hash(t)) && !(topology_hash(nofloor) == topology_hash(t)));
+  }
+}
+
+/* A format 1 stream (no floors) still reads, with zero floors, and a P2
+ * pipeline (build, regions, freeze) leaves every floor at zero. */
+template <geom::CoordType C> static void test_format1()
+{
+  Complex<C> k;
+  UT_CHECK(make_city(k, 5, 9));
+  RegionReport rr;
+  UT_CHECK(build_regions(k, rr));
+  UT_CHECK(freeze(k) == FreezeResult::Ok);
+  UT_CHECK(k.verts.gen_floor() == 0 && k.edges.gen_floor() == 0 && k.coedges.gen_floor() == 0 &&
+           k.loops.gen_floor() == 0 && k.faces.gen_floor() == 0 && k.shells.gen_floor() == 0 &&
+           k.regions.gen_floor() == 0);
+  std::vector<uint8_t> b = bytes_of(k);
+  /* the floors follow the header: magic, format, key, frame, two flags */
+  litestl::io::ByteWriter hw;
+  hw.u32(kComplexMagic);
+  hw.u32(kComplexFormat);
+  hw.str(geom::CoordTraits<C>::key);
+  for (int i = 0; i < 3; i++) {
+    hw.u64(0);
+  }
+  hw.i64(0);
+  hw.u64(0);
+  hw.u8(0);
+  hw.u8(0);
+  const size_t off = hw.size();
+  std::vector<uint8_t> v1(b.begin(), b.begin() + off);
+  v1.insert(v1.end(), b.begin() + off + 7 * 4, b.end());
+  v1[4] = 1; /* format 1 */
+  Complex<C> back;
+  litestl::io::ByteReader r(v1.data(), v1.size());
+  const char *err = nullptr;
+  UT_CHECK(read(back, r, &err));
+  if (err) {
+    fprintf(stderr, "read v1: %s\n", err);
+  }
+  UT_CHECK(content_hash(back) == content_hash(k) && bytes_of(back) == b);
 }
 
 template <geom::CoordType C> static void test_io()
@@ -306,6 +369,7 @@ template <geom::CoordType C> static void run_all()
   test_freeze_basics<C>();
   test_tombstones_and_generations<C>();
   test_io<C>();
+  test_format1<C>();
 }
 
 int main()

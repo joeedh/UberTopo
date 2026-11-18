@@ -364,7 +364,9 @@ int main()
       if (getenv("LITESTL_PRINT_GOLDENS")) {
         printf("golden: {0x%016llxull, 0x%016llxull}\n", (unsigned long long)hd.lo, (unsigned long long)hd.hi);
       }
-      const PersistentId golden{0x09421988ba58a022ull, 0x96f79940201fa554ull};
+      /* re-pinned for P3b §3.1: region rebuilds now advance the generations
+       * of shells and regions that changed */
+      const PersistentId golden{0x37c3bba3b4fa51aaull, 0xb13bfad872f1c346ull};
       UT_CHECK(hd == golden);
     }
   }

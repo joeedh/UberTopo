@@ -596,7 +596,9 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
       }
     }
   }
-  /* shells */
+  /* shells (generations: plan P3b §3.1; a shell is the same one if its
+   * first side is) */
+  const Domain<ShellSchema> old_shells = k.shells;
   k.shells = Domain<ShellSchema>();
   k.shells.alloc_n(S);
   util::Vector<uint32_t> region_first;
@@ -623,6 +625,10 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
       last[r] = sh;
     }
   }
+  k.shells.replace_generations(old_shells, [&](uint32_t sh) {
+    return old_shells.live(sh) &&
+           old_shells.template get<".s.first">()[sh] == k.shells.template get<".s.first">()[sh];
+  });
   /* regions, carrying non-Topo columns over by persistent ID */
   {
     const Domain<RegionSchema> old = k.regions;
@@ -633,6 +639,8 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
       k.regions.template get<".r.shell">().set(r, region_first[r]);
     }
     k.regions.template get<".r.flags">().set(0, region_flags::Unbounded);
+    k.regions.replace_generations(
+        old, [&](uint32_t r) { return old.live(r) && old.template get<".id">()[r] == reg_id[r]; });
     std::map<PersistentId, uint32_t> old_by_id;
     for (uint32_t r = 0; r < old.capacity(); r++) {
       if (old.live(r)) {
