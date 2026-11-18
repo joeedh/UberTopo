@@ -577,6 +577,9 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
 - **Goldens:** `test_attr_pool_digest` =
   `{0x73283dc9b10b45d0, 0x7a0914cd7544d6fa}`, identical at slot page shifts 2 and 10.
   The P0, P1 and P2 goldens are unchanged.
+- **Merged:** on 2026-11-18, at the owner's request, litestl `master` was fast-forwarded
+  to `608afca` (from `ubertopo/p1b-pools`) and UberTopo `master` to `cf999cf` (from
+  `session/p1b-value-pools`), after the full matrix passed.
 - **Also in litestl:** `util/memory.h` gained its missing `#pragma once`;
   `hash::DomainTag::PoolEntry`; `AttrGroup::canonical_order()` is public; and the
   test-only `ReadLimits::verify_hash`.
