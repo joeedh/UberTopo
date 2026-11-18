@@ -95,8 +95,9 @@ Those are later designs that build on this one.
    - Generational handle: external, detects stale references.
    - 128-bit persistent ID: derived from provenance and stable across re-evaluation.
 9. **Analytic geometry lives in shared pools**, referenced by `GeomRef` columns. This is
-   the Sculptcore `DeformPool` pattern. Exact and transcendental definitions sit above
-   certified B-spline caches, which sit above tessellation.
+   the Sculptcore `DeformPool` pattern, except that liveness is mark-and-sweep from the
+   owner's roots rather than refcounts (P1b, DEC-015). Exact and transcendental
+   definitions sit above certified B-spline caches, which sit above tessellation.
 10. **Determinism is part of the contract.** The same inputs give bit-identical topology,
     IDs and serialisation, regardless of thread count.
 

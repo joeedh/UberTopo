@@ -32,7 +32,9 @@ pieces in litestl. Research basis:
 > - **Serialisation:** run-encoded and canonical, with a builtin layout check and a
 >   trailing hash.
 > - **`BoolColumn`** uses one byte per element.
-> - **Value pools** (`InternPool`) are deferred to **P1b**.
+> - **Value pools** (`InternPool`, `PoolStore`, `Column<PoolRef>`) were delivered in
+>   **P1b**, with mark-and-sweep liveness rather than refcounts (DEC-015; see
+>   [05](05-geometry-pools.md) and litestl `documentation/attributes.md`).
 
 ## 1. Goals and the change from Sculptcore
 
@@ -64,7 +66,7 @@ litestl::attr  (generic, reusable; DEC-003)
   BoolColumn            bit-packed bools
   ColumnTypeRegistry    type key -> factory + binding descriptor
   AttrGroup             named set of columns for one domain (+ builtin members)
-  InternPool<T>         interned, refcounted side table
+  InternPool<T>         interned side table in a PoolStore (P1b; mark-and-sweep)
 
 ubertopo::attr  (domain-specific)
   Domain enum           Vertex, Edge, Coedge, Loop, Face, FaceSide, Shell, Region, Complex

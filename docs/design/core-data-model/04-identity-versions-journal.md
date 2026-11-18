@@ -146,6 +146,11 @@ struct JournalEntry {
   re-export of dirty tiles.
 - **Deterministic replay** of a failing run.
 
+**Pool refs in the journal (P1b, DEC-015).** A journal is a `PoolStore` root (a
+`RefRoot`). It visits and remaps the refs inside its captured bytes through the
+column's `visit_elem_refs` / `remap_elem_refs` hooks, so captured entries survive
+`collect` and follow `canonicalize`.
+
 **When it's off.** Bulk builders and procedural evaluation usually run with the journal
 **off**, relying on snapshots for undo and caching. Lineage for procedurally generated
 elements comes from the ID derivation itself. The journal is mainly for interactive
@@ -177,7 +182,8 @@ These are testable requirements for every operation in the core:
 3. **Parallel reductions affecting output use fixed-chunk ordering.** This means a
    deterministic `parallel_reduce` added to `litestl::task` with chunking that doesn't
    depend on worker count.
-4. **Interned pools assign slots in canonical order.** They do this either
+4. **Interned pools assign slots in canonical order.** (P1b: `PoolStore::canonicalize`
+   renumbers by first reference before every owner write; DEC-015.) They do this either
    single-threaded or with a renumbering pass before freeze or serialise. This
    addresses Sculptcore's sharded-pool nondeterminism ([05](05-geometry-pools.md)).
 5. **Serialisation is canonical:** insertion-ordered columns, canonical encodings and

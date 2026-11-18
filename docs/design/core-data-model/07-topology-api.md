@@ -331,3 +331,43 @@ and the tests require the computed partition to equal the labelling exactly.
 - vertices are keyed by grid position, and shared walls are emitted once;
 - coordinates are integers: `Lattice` uses them directly, and `double` uses them times
   2^-8, with a tile frame quantum of 2^-8.
+
+## 13. Pool owner contract (for P4)
+
+P1b (DEC-015) delivered litestl's value pools. When P4 adds a `GeometryStore` to
+`Complex`, the complex must follow this contract, which `test_smoke_pools` exercises:
+
+**Holding the store and refs:**
+- **Store by value.** `Complex` holds a `PoolStore` by value. Kinds are registered in
+  the constructor in a fixed order, and new kinds are appended. Copy and move stay
+  defaulted, because nothing points into the store.
+- **Ref columns** are `AttrDef<..., attr::Column<attr::PoolRef>>` schema entries, for
+  example `.e.curve`, `.c.pcurve` and `.f.surface`. A custom column holding refs must
+  override the six `ColumnBase` ref hooks.
+
+**Roots and collection:**
+- **Roots.** All domain groups go in schema order, plus the journal and any weak cache
+  maps (`RefRoot`, with `prune`). `Roots::accept` enforces kinds per column, for
+  example curve kinds only on `.e.curve`.
+- **Collect points** must be deterministic: the end of a primitive or a batch, a
+  threshold on `taken_since_collect()`, and before freeze, canonicalisation or write.
+  Never hold a `PoolRef` outside a root across a collect.
+- **Approximation caches** live in Derived columns, in entries that reference their
+  source through an inner ref, or in a pruned weak map. An external memo keyed by
+  `PoolRef` must check `PoolStore::version()`.
+
+**Freeze and I/O:**
+- **Freeze** canonicalises the store after the permutes, as design 04 §8.4 requires.
+- **Write and hashes.** `write` canonicalises a copy and then writes the store before
+  the groups. `content_hash` includes the canonical store hash, because a group hash
+  alone hashes slot numbers.
+- **Read** is strict: a fresh complex, then `store.read`, the group reads,
+  `audit(require_reachable)`, and a `canonicalize` that must report no change; then
+  move-assign. Once pools join the complex, its stream gets a new format version.
+
+**Other owners and projected faces:**
+- **Merging or importing from another complex** goes through `import` and
+  `import_rows`, never through raw ref copies.
+- **Projected faces** (DEC-014) whose triangulation becomes a pool entry follow the same
+  rules. Their edit rules are P3's.
+

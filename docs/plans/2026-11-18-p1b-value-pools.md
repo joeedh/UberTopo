@@ -1,6 +1,6 @@
 # Plan P1b — litestl value pools (`attr/` pools, pool store, ref columns)
 
-- **Status:** **v3** (v2 + the normative §10c amendments, after the v2 re-review in §10b said "ready with changes"). v2 was rewritten after the v1 review (§10) said "needs rework". The owner
+- **Status:** **implemented** (see §11). Plan **v3** (v2 + the normative §10c amendments, after the v2 re-review in §10b said "ready with changes"). v2 was rewritten after the v1 review (§10) said "needs rework". The owner
   chose **mark-and-sweep collection over refcounts** (2026-11-18), reversing design
   05's refcount funnel.
 - **Date:** 2026-11-18
@@ -677,6 +677,60 @@ without a new virtual.
 - Pool ids stay registration-ordered with appended kinds (deferred, §2). The reviewer's
   key-remap suggestion is noted for when plugins exist.
 
-## 11. Implementation notes and deviations
+## 11. Implementation notes and deviations (2026-11-18)
 
-*Pending.*
+The code is on litestl `ubertopo/p1b-pools` (`c0047b1`, `608afca`, from `ccf0386`).
+The UberTopo side is on `session/p1b-value-pools`: the submodule bump,
+`test_smoke_pools`, the docs, and DEC-015.
+
+| Item | Deviation or note |
+|---|---|
+| W1 | As planned (B13). Also two litestl fixes: **`util/memory.h` had no `#pragma once`**, which broke the first translation unit that included it twice; and `hash::DomainTag::PoolEntry`. The P1 digest is unchanged. |
+| W2 | Split as planned into `pool_slots.h` (slot pages and the index) and `pool.h`. **Index refinement of B2:** while the base is shared, removals are *lazy*. A stale record is harmless, because every lookup verifies the candidate against the current slot word, the node's full hash and `equal`. So index layout never affects results. Stale records count toward the materialisation threshold. One consequence: "index entry not removed on sweep" is not a bug, so mutation check 4 became "lookup trusts records" (below). |
+| W3 | As planned, with B1, B4–B7, B10 and B15. `canonical(roots)` compares the store stamp and every root group's `version()`. `read` hashes only the stream's pools, so a store with appended kinds reads older streams. |
+| W4 | `Column<PoolRef>` implements the ref hooks through `if constexpr`. `Column<std::array<PoolRef, N>>` is a `static_assert` (B8). `"ref"` is registered among the builtins. |
+| W5 | Files: `test_attr_pool` (unit, with structural fuzz past both hashes), `test_attr_pool_model` (long, 4 × 8000 steps, slot page shifts 2 and 10 × column shifts 2 and 12), `test_attr_pool_threads` (TSan stress, with a `getMemorySize` baseline), `test_attr_pool_digest` (pinned `{0x73283dc9b10b45d0, 0x7a0914cd7544d6fa}`, byte-identical at slot shifts 2 and 10), and `tests/pool_test_types.h` (`Polyline`, `RefPairColumn`, `JournalRoot`, test owner). The structural fuzz accepts about 7% of mutated streams as valid, and all of them pass `audit`. |
+| W6 | Results are in the table below. **The slot page default stays at 2¹⁰.** The P1 rule (within 10% of the best intern hit, then the least copy-on-write) would pick 2⁸, but 2⁸ makes the snapshot copy about 3–7× slower (16.7 µs vs 2.3 µs at 10⁵) to save about 6 KB per 1% edit, and intern-hit timings between the sizes are within run-to-run noise. **Deviation: copy at 10⁶ is about 17–20× the copy at 10⁵, against the 15× bound.** Copying is linear in pages (977 slot pages plus 245 column pages at 10⁶), but at that size each page-header increment is a cache or TLB miss. An O(1) copy would need a shared page directory, which is deferred until a real workload needs it. |
+| W7 | `test_smoke_pools`: `TypedGroup<Schema<AttrDef<".e.curve", Column<PoolRef>>, ...>>` plus a `PoolStore` by value, defaulted copy and move, kind checks through `Roots::accept`, strict owner read, and `import`. Design 07 §13 records the owner contract for P4. |
+| W8 | As planned. **Also `.gitattributes` in litestl** (`tests/lsan.supp eol=lf`): a Windows checkout gives a CRLF copy that LeakSanitizer can't parse when the tests run under WSL ("failed to parse suppressions", seen only in tests whose suppressions are consulted). |
+| Process | The v1 plan was rejected by its review, and the owner chose mark-and-sweep. v2 was "ready with changes", and all v2 findings were adopted as B1–B15. |
+
+**Benchmark** (`bench_attr_pool`, clang 19 Release, WSL, `uint64` entries, slot pages
+2¹⁰):
+
+| Entries | Intern miss (ns) | Intern hit (ns) | Find miss (ns) | Copy owner (µs) | Copy, then 1% edits: slot pages / index (KB) | Collect, 10% garbage (ms) | Canonicalize (ms) |
+|---|---|---|---|---|---|---|---|
+| 10³ | 110 | 31 | 34 | 0.2 | 8.0 / 0.5 | 0.01 | 0.04 |
+| 10⁴ | 104 | 33 | 37 | 0.3 | 8.0 / 2.5 | 0.14 | 0.78 |
+| 10⁵ | 144 | 37 | 41 | 2.3 | 16.0 / 42.5 | 1.40 | 4.8 |
+| 10⁶ | 200 | 120 | 84 | 47 | 88 / 170 | 20.5 | 73 |
+
+**W6 acceptance:**
+- intern hit at 10⁵ is 1.2× the time at 10³ (bound 3×): met;
+- `collect` at 10⁶ takes 20.5 ms (bound 50 ms): met;
+- index bytes copied are within the B2 bound at every size: met;
+- copy at 10⁶ is 17–20× the copy at 10⁵ (bound 15×): **missed**, see W6 above.
+
+**Mutation checks** (a scratchpad script; clang Release and gcc ASan; each reverted):
+
+| # | Planted bug | Caught by |
+|---|---|---|
+| 1 | mark skips inner refs | unit (3 asserts plus abort in `get`), model, digest |
+| 2 | no copy-on-write before freeing a slot in a shared page | model (30 failures, segfault; ASan), threads |
+| 3 | no `holders` increment on page copy | unit and model (asserts; ASan use-after-free), threads |
+| 4 | index lookup trusts records (replaces "index not cleared", see W2) | model (24 failures) |
+| 5 | canonicalize visits Temp before the hashed closure | unit (canonical-form asserts), model (59), digest |
+| 6 | `Column<PoolRef>::remap_refs` ignores Constant pages | model (19 failures, segfault; ASan) |
+| 7 | canonicalize skips remapping extra roots | unit (journal test; it initially passed because the captured slot didn't move, so the test now interns the captured entry first) |
+| 8 | `read` skips the inner-ref range check | unit (crafted dangling stream: crash/abort) |
+| 9 | no `holders` decrement on freeing a slot in a unique page | every test's memory baseline |
+| 10 | `canonical()` ignores group versions (B1) | unit (the B1 regression) |
+
+**Configuration matrix (final, 2026-11-18):** WSL Debian 13, clang 19 and gcc 14.
+- **litestl** (`608afca`): 44/44 tests pass in all 7 configurations: clang Release,
+  gcc Release, clang `-march=x86-64-v3`, clang `LITESTL_NO_INT128`, gcc Debug+ASan,
+  gcc Debug+UBSan, and gcc RelWithDebInfo+TSan with `LITESTL_ATTR_CHECKS=1`.
+- **UberTopo:** 18/18 tests pass in all 6 configurations.
+- The sanitizer runs use `LITESTL_TEST_SCALE_DIV=4`.
+- The P0, P1, P2 and pool digests reproduce everywhere.
+- TSan runs under `setarch -R`; see `docs/debugging.md`.

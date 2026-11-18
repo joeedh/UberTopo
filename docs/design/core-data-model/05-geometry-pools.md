@@ -7,15 +7,23 @@ Part of the [core data model design](README.md). Research basis:
 [attributes-and-queries/embedded-geometry-attributes](../../research/attributes-and-queries/embedded-geometry-attributes.md).
 The pool pattern is taken from Sculptcore's `DeformPool`.
 
-> **Status (2026-11-18):** the generic pool machinery (`InternPool`, refcounted
-> slot columns) was **deferred from P1 to P1b** (P1 plan §2). P1b is planned after P2,
-> and must provide:
-> - a refcount funnel invoked by every structural column operation;
-> - variable-size immutable entries (curve segment lists, knots, polylines, meshes);
-> - pools owned by a `GeometryStore` above any single group, with one `GeomRef` column
->   referencing several pool kinds;
-> - `audit(roots…)` including references inside pools and from the journal;
-> - a copy-on-write deduplication index that scales to ≥ 10⁵ entries.
+> **Status (2026-11-18): the generic pool machinery is done (P1b, DEC-015)** in litestl
+> `attr/` (`pool.h`, `pool_store.h`; guide in litestl `documentation/attributes.md`).
+> **It supersedes the refcount design in §2.** The changes:
+> - **Liveness is mark-and-sweep, not a refcount funnel.** `PoolStore::collect(roots)`
+>   frees entries that aren't reachable from the owner's ref columns, from `RefRoot`
+>   extras (the journal) and from inner refs. Ref columns are plain `Column<PoolRef>`.
+> - **`GeomRef` is `attr::PoolRef { pool, slot }`** (8 bytes; `pool == 0` means none).
+>   `pool` is the kind id, which is the store's registration order.
+> - **The `GeometryStore` (P4) is a `PoolStore` with one `InternPool<T>` per kind.** It is a
+>   value type: copying it is O(pages), and nodes are shared between snapshots.
+> - **Every add interns**, which covers design §2's "optional interning".
+> - **Variable-size entries**, refs inside entries (approximation caches → source),
+>   `audit(roots)`, three-phase canonical renumbering, `import` between stores and a
+>   two-level copy-on-write index (≥ 10⁵ entries benchmarked) are all provided.
+> - **Not yet:** curve and surface kinds, `GeomRef` columns on the complex, and the
+>   choice of collect points in the primitives. Those are P4 (see
+>   [07 §13](07-topology-api.md#13-pool-owner-contract-for-p4)).
 
 ## 1. Attachment points
 

@@ -171,3 +171,30 @@ Entry format:
 - **Symptom:** under gcc ASan, `test_topo_regions`, `test_topo_freeze` and `test_topo_determinism` failed with LeakSanitizer "direct leak" reports, each with `getMemList` (`litestl/util/alloc.cc`) on the stack. The P2a tests passed in the same configuration.
 - **Cause:** litestl keeps one leak-tracker list per thread and deliberately never frees it. P2b is the first UberTopo code to allocate inside pool worker threads (`parallel_for_chunks` in `build_regions`), so those lists now exist. litestl's own ctests pass `tests/lsan.supp`, but UberTopo's didn't.
 - **Fix / technique:** `ut_test()` sets `LSAN_OPTIONS=suppressions=<litestl>/tests/lsan.supp`. The real leak check is still each test's `alloc::getMemorySize() == baseline` assertion. Suppress only by the intentional-allocation function name, never by test.
+
+## "Redefinition of `UniquePtr`" when a header includes `util/memory.h` twice
+- **Symptom:** clang reported redefinitions of `shared_ptr`, `weak_ptr`, `UniquePtr` and `make_unique` from `util/memory.h` as soon as a second header (`attr/pool.h`) included it.
+- **Cause:** litestl's `util/memory.h` had no `#pragma once`. Earlier code happened to include it only once per translation unit.
+- **Fix / technique:** add the guard (done in P1b). When a litestl header produces redefinition errors, check its first line before suspecting include paths.
+
+## A `function_ref` bound to a lambda temporary
+- **Symptom:** in `test_attr_pool`, a `collect` with `Roots::accept` set failed on a column that held no offending refs; the same call had passed earlier in the test.
+- **Cause:** `PoolStore::AcceptFn acc = [&](...) {...};` binds a `util::function_ref` to a lambda temporary that dies at the end of the statement, so later calls read a dangling object.
+- **Fix / technique:** name the lambda first (`auto f = [&](...) {...}; AcceptFn acc = f;`). The same applies to `AttrGroup::PolicyFn` and `ColumnFilter`, which are also `function_ref`s.
+
+## Dynamic Temp columns vanish after an `AttrGroup` round trip
+- **Symptom:** the pool model test failed after a write/read round trip, and later `remove("dyn")` failed, for a dynamic column created with `ColumnFlags::Temp`.
+- **Cause:** `AttrGroup::write` skips dynamic Temp and Derived columns entirely, not just their data. Builtin Temp columns keep their slot and come back with default values.
+- **Fix / technique:** after reading, treat a dynamic Temp or Derived column as absent, and `ensure` it again if needed.
+
+## Building the configuration matrix on the Windows workstation
+- **Symptom:** the matrix needs Linux gcc and clang with ASan, UBSan and TSan, but the Windows host has only MSVC and clang-cl.
+- **Fix / technique:**
+  - Use WSL Debian, with `clang gcc g++ cmake ninja-build git` installed from apt.
+  - Point the sources at `/mnt/c/dev/UberTopo` and put the build directories under the WSL home (`~/b/<proj>-<cfg>`); that is much faster than building on `/mnt/c`.
+  - Working copies on Windows are CRLF (`core.autocrlf=true`), so scripts that patch files must preserve each file's line endings.
+
+## TSan: "FATAL: ThreadSanitizer: unexpected memory mapping" under WSL
+- **Symptom:** in the gcc TSan configuration every test failed within 0.01 s with `FATAL: ThreadSanitizer: unexpected memory mapping 0x...`. The other configurations passed.
+- **Cause:** the WSL2 kernel (6.18) randomises mmap addresses with more bits than gcc 14's TSan runtime expects. Fixing that through `vm.mmap_rnd_bits` needs root.
+- **Fix / technique:** run the TSan tests with ASLR disabled for the process, which needs no root: `setarch $(uname -m) -R ctest ...`, or the same prefix on a single test binary.

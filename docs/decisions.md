@@ -536,6 +536,56 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
   - **Edit rules** for projected faces wait for P3. On those faces the triangulation is
     the geometry, so any loop edit changes it.
 
+## DEC-015 — P1b: value pools with mark-and-sweep liveness
+
+- **Date:** 2026-11-18. Implements the [P1b plan](plans/2026-11-18-p1b-value-pools.md)
+  (v3, after two fresh-context reviews). The code is in litestl `attr/`: `pool_ref.h`,
+  `pool_slots.h`, `pool.h` and `pool_store.{h,cc}`. The guide is litestl
+  `documentation/attributes.md` ("Value pools").
+- **Owner decision: mark-and-sweep, not refcounts.** This reverses design 05's
+  refcount funnel. The first review showed that per-snapshot refcounts plus column→store
+  binding caused three blockers and six majors: read into an owner, group assignment,
+  snapshots inheriting journal counts, unbound columns, and parallel permute.
+- **Decisions:**
+  - **Refs are plain values.** A ref column is an ordinary `Column<PoolRef>`
+    (8 bytes, `pool == 0` means none, key `"ref"`). The `ColumnBase` structural API is
+    unchanged. Custom columns holding refs override six ref hooks, a per-column virtual
+    as DEC-007 requires.
+  - **`collect(roots)`.** Liveness is decided only by `collect(roots)`. The roots are
+    the ref columns of the given groups, the `RefRoot` extras (the P3 journal is one)
+    and the inner refs of reachable entries. Owners collect at deterministic points.
+    Validation (dangling, malformed or refused refs; non-`kNoRef` defaults) runs while
+    marking, and a failure changes nothing.
+  - **Every add interns.** Ref equality is value equality within a pool.
+  - **Snapshots.** `PoolStore` is a value type. Copying it is O(slot pages): slot pages
+    and a two-level (base plus delta) dedup index are copy-on-write, and entry nodes are
+    shared through an atomic `holders` count. Owners keep defaulted copy and move.
+  - **Canonical form.** Three-phase first-reference renumbering: hashed columns, then
+    Temp and Derived, then extras, each with its own inner-ref closure. Bytes and hashes
+    cover only the hashed closure. `write` and `hash_into` require
+    `canonical(roots)`, meaning neither the store nor any root group changed since
+    `canonicalize`.
+  - **Owner I/O.** Owner write canonicalises a copy. Owner read is strict: a fresh
+    owner, then audit, and `canonicalize` must report no change.
+  - **Pool ids** are the owner's registration order, and new kinds are appended.
+    Remapping by key is deferred until a plugin system exists. P4's `GeomRef.kind` is
+    the pool id.
+  - **Between stores.** `import` and `import_rows` re-intern deeply between stores. A
+    raw ref copied across stores is meaningless, and that rule is documented.
+  - **Weak roots.** `RefRoot::prune` runs between mark and sweep. `PoolStore::version()`
+    changes whenever slots may have been reused.
+- **Goldens:** `test_attr_pool_digest` =
+  `{0x73283dc9b10b45d0, 0x7a0914cd7544d6fa}`, identical at slot page shifts 2 and 10.
+  The P0, P1 and P2 goldens are unchanged.
+- **Also in litestl:** `util/memory.h` gained its missing `#pragma once`;
+  `hash::DomainTag::PoolEntry`; `AttrGroup::canonical_order()` is public; and the
+  test-only `ReadLimits::verify_hash`.
+- **Known limits:**
+  - **Forgotten roots** are detectable only before their slot is reused, or under the
+    test quarantine.
+  - **Snapshot copy cost.** Copying is linear in pages, but at 10⁶ entries cache and
+    TLB misses make it about 17–20× the cost at 10⁵ (plan §11).
+
 ---
 
 ## Open questions
