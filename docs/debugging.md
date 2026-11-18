@@ -77,12 +77,20 @@ Entry format:
   virtual `~BindingBase()`. To reproduce outside ctest, set
   `LSAN_OPTIONS=suppressions=<litestl>/tests/lsan.supp`.
 
-## Known issue (not yet fixed): `alloc::NewArray` constructs one element repeatedly
-- **Symptom:** none observed yet. Found while reading `util/alloc.h` during P1.
-- **Cause:** `NewArray` placement-constructs into `elem` without advancing it, so only
-  the first element is constructed, `size` times.
-- **Fix / technique:** advance the pointer (`new (elem + i) T(...)`). This is left for
-  the owner, because it changes shared litestl behaviour Sculptcore may depend on.
+## `alloc::NewArray` constructed only its first element (fixed)
+- **Symptom:** none observed in practice (no callers in litestl or Sculptcore). Found
+  while reading `util/alloc.h` during P1.
+- **Cause:** two bugs.
+  - `new (elem) T(...)` never advanced the pointer, so slot 0 was constructed `size`
+    times and slots 1 onwards were never constructed.
+  - The by-value arguments were `std::forward`ed inside the loop, so movable arguments
+    were moved from on the first iteration and later elements would have got
+    moved-from values.
+- **Fix / technique:** construct `elems + i` from lvalue copies of the arguments, with
+  `size_t` indices (in `DeleteArray` too). The regression test `tests/test_alloc.cc`
+  checks each slot's self-pointer and a heap-allocated string argument; it fails on the
+  old code (23 asserts) and passes now. A placement-new loop must advance its target,
+  and arguments must not be forwarded more than once.
 
 ## Attribute model suite diverges only in Release: NaN payloads
 - **Symptom:** `test_attr_model` passed in Debug, under all sanitizers, and with gcc,

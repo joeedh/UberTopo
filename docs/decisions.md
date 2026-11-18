@@ -409,6 +409,8 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
   - An LSan suppression file covers intentional process-lifetime allocations.
   - **`util::Vector::remove_at`** no longer move-assigns into a destroyed element. That
     was undefined behaviour and double-freed owning element types; TSan found it.
+  - **`alloc::NewArray`** now constructs every element, from unmoved arguments
+    (owner-requested fix; there are no existing callers).
 - **Intern pools are deferred to P1b.** Their requirements are recorded in design 05.
 - **New pinned golden:** `test_attr_digest` (`eb4c52c53316afaf23dbdc3cd35d0630`). It
   is separate from the P0 digest, which is unchanged.
