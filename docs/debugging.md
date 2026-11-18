@@ -222,3 +222,8 @@ Entry format:
 ## Bash heredocs with apostrophes fail in this environment
 - **Symptom:** `python - <<'EOF' ... EOF` in the Bash tool failed with `unexpected EOF while looking for matching '` whenever the script contained an apostrophe (for example in a comment like "doesn't"), even though the heredoc delimiter was quoted.
 - **Fix / technique:** write multi-line scripts to a file in the scratchpad with the Write tool and run them with `python <file>`. Keep heredocs for scripts without apostrophes.
+
+## Sanitizer configurations fail only when mutation checks run at the same time
+- **Symptom:** in a matrix run, gcc-ubsan segfaulted and gcc-tsan failed in `test_edit_primitives`. The release and ASan configurations had passed, and rerunning the two configurations alone passed.
+- **Cause:** the mutation script edits the shared source files in place while it builds in `ut-clang-rel`. The sanitizer configurations, compiling in parallel, built the mutated sources.
+- **Fix / technique:** never run mutation checks while any matrix configuration is still building. Run them before or after the matrix, or in a separate worktree.
