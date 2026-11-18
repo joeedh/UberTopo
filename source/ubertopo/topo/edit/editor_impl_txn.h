@@ -187,7 +187,15 @@ template <geom::CoordType C> EditCode Editor<C>::commit_internal(bool from_redo)
     }
     t.snapshot = std::move(barrier_snapshot_);
     for (uint32_t g = 0; g < kGroupCount; g++) {
-      t.schema_ver[g] = group_of(k_, Grp(g)).schema_version();
+      const litestl::attr::AttrGroup &gr = group_of(k_, Grp(g));
+      t.schema_ver[g] = gr.schema_version();
+      uint32_t off = 0;
+      for (uint32_t c = 0; c < gr.column_count(); c++) {
+        if (gr.column(c).holds_refs()) {
+          t.ref_cols[g].push_back(RefCol{c, off, std::string(gr.name(c)), &gr.column(c).type()});
+        }
+        off += gr.column(c).elem_size();
+      }
     }
     journal_->done_.push_back(std::move(t));
     if (!from_redo) {
@@ -316,6 +324,9 @@ template <geom::CoordType C> EditCode Editor<C>::undo()
   Txn<C> u;
   u.label = std::move(t.label);
   u.ops = std::move(t.ops);
+  for (uint32_t g = 0; g < kGroupCount; g++) {
+    u.ref_cols[g] = std::move(t.ref_cols[g]); /* SetAttr payloads stay roots */
+  }
   journal_->done_.pop_back();
   journal_->undone_.push_back(std::move(u));
   journal_->expected_version_ = k_.version();
@@ -504,9 +515,76 @@ template <geom::CoordType C> EditCode Editor<C>::Prim::finish()
   return c;
 }
 
+template <geom::CoordType C> void Editor<C>::touched_filter(ValidateFilter &flt) const
+{
+  /* the elements this primitive wrote, plus (C14) the edges of touched faces
+   * and coedges, and the inclusions of touched faces (C3) */
+  auto add = [](litestl::util::Vector<uint32_t> &v, uint32_t i) { v.append(i); };
+  auto face_ok = [&](uint32_t f) { return f < k_.faces.capacity() && k_.faces.live(f); };
+  for (uint32_t f : touched_[uint32_t(Grp::Faces)]) {
+    if (face_ok(f)) {
+      add(flt.faces, f);
+    }
+  }
+  for (uint32_t r : touched_[uint32_t(Grp::Sides)]) {
+    if (face_ok(r / 2)) {
+      add(flt.faces, r / 2);
+    }
+  }
+  for (uint32_t l : touched_[uint32_t(Grp::Loops)]) {
+    if (l < k_.loops.capacity() && k_.loops.live(l)) {
+      add(flt.faces, k_.face_of(LoopRef(l)).i);
+    }
+  }
+  for (uint32_t c : touched_[uint32_t(Grp::Coedges)]) {
+    if (c < k_.coedges.capacity() && k_.coedges.live(c)) {
+      add(flt.faces, k_.face_of(CoedgeRef(c)).i);
+      add(flt.edges, k_.edge_of(CoedgeRef(c)).i);
+    }
+  }
+  for (uint32_t e : touched_[uint32_t(Grp::Edges)]) {
+    if (e < k_.edges.capacity() && k_.edges.live(e)) {
+      add(flt.edges, e);
+    }
+  }
+  for (uint32_t v : touched_[uint32_t(Grp::Verts)]) {
+    if (v < k_.verts.capacity() && k_.verts.live(v)) {
+      add(flt.verts, v);
+      /* a moved vertex: its edges' radial orders and wires' containers */
+      k_.for_each_edge_at(VertRef(v), [&](EdgeRef e) { add(flt.edges, e.i); });
+    }
+  }
+  auto uniq = [](litestl::util::Vector<uint32_t> &v) {
+    std::sort(v.begin(), v.end());
+    v.resize(int(std::unique(v.begin(), v.end()) - v.begin()));
+  };
+  uniq(flt.faces);
+  for (uint32_t f : flt.faces) {
+    k_.for_each_loop(FaceRef(f), [&](LoopRef l) {
+      k_.for_each_coedge(l, [&](CoedgeRef c) { add(flt.edges, k_.edge_of(c).i); });
+    });
+    litestl::util::Vector<uint32_t, 16> incl;
+    inclusions(FaceRef(f), incl);
+    for (uint32_t x : incl) {
+      add((x & 1) ? flt.edges : flt.verts, x >> 1);
+    }
+  }
+  uniq(flt.edges);
+  uniq(flt.verts);
+  flt.regions = false; /* regions are dirty, or the primitive kept them by construction */
+}
+
 template <geom::CoordType C> EditCode Editor<C>::validate_now()
 {
-  ValidationReport r = validate(k_, ValidateLevel::Global);
+  ValidationReport r;
+  if (opt_.validate == ValidateMode::Local) {
+    ValidateFilter flt;
+    touched_filter(flt);
+    r = validate_local(k_, flt);
+  }
+  else {
+    r = validate(k_, ValidateLevel::Global);
+  }
   if (r.ok()) {
     return EditCode::Ok;
   }

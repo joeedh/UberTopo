@@ -241,11 +241,11 @@ template <geom::CoordType C> struct Run {
   }
 
   /** The whole run; returns the final content hash. */
-  PersistentId run(uint64_t seed, uint32_t steps, PersistentId *topo)
+  PersistentId run(uint64_t seed, uint32_t steps, PersistentId *topo, ValidateMode mode)
   {
     UT_CHECK(build_model(k));
     const PersistentId h0 = content_hash(k);
-    Editor<C> ed(k, &j);
+    Editor<C> ed(k, &j, nullptr, EditorOptions{mode});
     litestl::test::SplitMix64 r(seed);
     for (uint32_t n = 0; n < steps; n++) {
       const PersistentId pre = content_hash(k);
@@ -270,7 +270,8 @@ template <geom::CoordType C> struct Run {
           return {};
         }
       }
-      if (n % 40 == 39) {
+      /* Local mode: the full validator must agree after every commit */
+      if (n % 40 == 39 || (mode == ValidateMode::Local && c == EditCode::Ok)) {
         const ValidationReport rep = validate(k, ValidateLevel::Global);
         UT_CHECK(rep.ok());
         if (!rep.ok()) {
@@ -316,10 +317,11 @@ uint32_t scaled(uint32_t n)
   return div > 1 ? n / uint32_t(div) : n;
 }
 
-template <geom::CoordType C> PersistentId run_one(uint64_t seed, uint32_t steps, PersistentId *topo, bool print)
+template <geom::CoordType C>
+PersistentId run_one(uint64_t seed, uint32_t steps, PersistentId *topo, bool print, ValidateMode mode = ValidateMode::Full)
 {
   Run<C> run;
-  const PersistentId h = run.run(seed, steps, topo);
+  const PersistentId h = run.run(seed, steps, topo, mode);
   if (print) {
     printf("edit_random (%s, seed %llu): %u steps, %u committed;", geom::CoordTraits<C>::key,
            (unsigned long long)seed, run.st.steps, run.st.ok);
@@ -351,6 +353,12 @@ int main()
       litestl::task::ScopedBandCount scope(4);
       PersistentId t4;
       UT_CHECK(run_one<double>(seed, steps, &t4, false) == hd);
+    }
+    {
+      /* local validation accepts exactly what full validation accepts on this
+       * sequence: the same final state, and full validity after each commit */
+      PersistentId tloc;
+      UT_CHECK(run_one<double>(seed, steps, &tloc, false, ValidateMode::Local) == hd);
     }
     if (seed == 1 && steps == 600) {
       if (getenv("LITESTL_PRINT_GOLDENS")) {

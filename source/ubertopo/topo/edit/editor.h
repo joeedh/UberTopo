@@ -20,6 +20,9 @@
  * through rebuild_regions() (a barrier transaction). Edits that change faces
  * set regions_dirty.
  *
+ * Undoing a barrier (rebuild_regions) restores a snapshot of the whole
+ * complex: pointers to dynamic columns taken before it must be fetched again.
+ *
  * Writes from outside the editor are allowed between transactions, but they
  * truncate the journal (undo can't cross them). A frozen complex is refused;
  * thaw it first. Columns may not be added or removed inside a transaction. */
@@ -167,6 +170,7 @@ private:
   void rebuild_captured();
   EditCode apply_op(const OpRecord<C> &op);
   EditCode validate_now();
+  void touched_filter(ValidateFilter &flt) const;
 
   /* ---- write helpers: capture first, then write (editor.cc) ---- */
   void touch(Grp g, uint32_t row);

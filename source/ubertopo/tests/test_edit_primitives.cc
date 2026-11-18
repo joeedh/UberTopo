@@ -7,6 +7,8 @@
 #include "ubertopo/topo/validate.h"
 
 #include "litestl/util/alloc.h"
+#include "gen/buildings.h"
+#include "litestl/attr/pool_store.h"
 #include "support/topo_fixtures.h"
 #include "ut_test.h"
 
@@ -430,6 +432,122 @@ template <geom::CoordType C> void test_ids()
   UT_CHECK(content_hash(fx.k) == content_hash(fy.k));
 }
 
+/* ---- projected faces (A1-R1, C5) ---- */
+template <geom::CoordType C> void test_projected()
+{
+  using test::gen::gpt;
+  test::gen::Model<C> m(ident::derive(ident::tag::TestOnly, std::string_view("roof")));
+  test::gen::sloped_roof(m, {0, 0, 0}, 4, 1);
+  Complex<C> k;
+  BuildReport br;
+  RegionReport rr;
+  UT_CHECK(m.b.build(k, br, m.policy) && build_regions(k, rr));
+  FaceRef roof;
+  k.faces.for_each_live([&](uint32_t f) {
+    if (k.face_proj_axis(FaceRef(f)) >= 0) {
+      roof = FaceRef(f);
+    }
+  });
+  UT_CHECK(bool(roof));
+  Journal<C> j;
+  Editor<C> ed(k, &j);
+  const PersistentId h0 = content_hash(k);
+  auto vert_at = [&](const I3 &p) {
+    VertRef out;
+    k.verts.for_each_live([&](uint32_t v) {
+      if (geom::lex_compare<C>(k.pos(VertRef(v)), gpt<C>(p)) == 0) {
+        out = VertRef(v);
+      }
+    });
+    return out;
+  };
+  /* the roof corners: (0,0,300) (500,0,300) (500,500,304) (0,500,300) */
+  const VertRef q000 = vert_at({0, 0, 300}), q110 = vert_at({500, 500, 304}), q100 = vert_at({500, 0, 300});
+  /* a diagonal split leaves two planar triangles: both drop the axis */
+  FaceRef other;
+  EXPECT_EDIT(ed, ed.split_face(roof, q000, q110, &other), EditCode::Ok);
+  UT_CHECK(k.face_proj_axis(roof) < 0 && k.face_proj_axis(other) < 0);
+  UT_CHECK(validate(k, ValidateLevel::Global).ok());
+  EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+  UT_CHECK(content_hash(k) == h0 && k.face_proj_axis(roof) >= 0);
+  /* splitting a roof edge changes T(f): regions go dirty, cycles are re-derived */
+  UT_CHECK(!k.regions_dirty);
+  VertRef mid;
+  EXPECT_EDIT(ed, ed.split_edge(ed.find_edge(q000, q100), gpt<C>({250, 0, 300}), &mid), EditCode::Ok);
+  UT_CHECK(k.regions_dirty && k.face_proj_axis(roof) >= 0);
+  UT_CHECK(validate(k, ValidateLevel::Global).ok());
+  /* a split between the new vertex and the lifted corner leaves a projected
+   * quad (still non-planar) and a planar triangle */
+  EXPECT_EDIT(ed, ed.split_face(roof, mid, q110, &other), EditCode::Ok);
+  UT_CHECK((k.face_proj_axis(roof) >= 0) != (k.face_proj_axis(other) >= 0));
+  UT_CHECK(validate(k, ValidateLevel::Global).ok());
+  EXPECT_EDIT(ed, ed.rebuild_regions(), EditCode::Ok);
+  /* flipping a projected face keeps T(f) and its radial positions */
+  const FaceRef proj = k.face_proj_axis(roof) >= 0 ? roof : other;
+  EXPECT_EDIT(ed, ed.flip_face(proj), EditCode::Ok);
+  UT_CHECK(validate(k, ValidateLevel::Global).ok());
+  while (j.undo_count()) {
+    EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+  }
+  UT_CHECK(content_hash(k) == h0);
+}
+
+/* ---- the journal as a pool root (C9) ---- */
+void test_pool_roots()
+{
+  using litestl::attr::Column;
+  using litestl::attr::PoolRef;
+  using litestl::attr::PoolStore;
+  using Names = litestl::attr::InternPool<litestl::util::string>;
+  Fixture<double> fx;
+  UT_CHECK(fx.box());
+  PoolStore store;
+  const uint32_t names = store.add_pool<Names>("ut.name");
+  auto *col = fx.k.faces.group().ensure<Column<PoolRef>>("name");
+  UT_CHECK(col != nullptr);
+  const uint32_t ci = uint32_t(fx.k.faces.group().index_of("name"));
+  const PoolRef a = store.intern<Names>(names, litestl::util::string("brick"));
+  col->set(0, a);
+  Editor<double> ed(fx.k, &fx.j);
+  auto roots = [&](JournalRoots<double> *jr) {
+    static const litestl::attr::AttrGroup *gs[kGroupCount];
+    for (uint32_t g = 0; g < kGroupCount; g++) {
+      gs[g] = &group_of(fx.k, Grp(g));
+    }
+    static litestl::attr::RefRoot *ex[1];
+    ex[0] = jr;
+    return PoolStore::Roots{litestl::util::span<const litestl::attr::AttrGroup *const>(gs, kGroupCount),
+                            litestl::util::span<litestl::attr::RefRoot *const>(ex, jr ? 1 : 0),
+                            nullptr};
+  };
+  /* overwrite face 0's name through the editor: only the journal still holds "brick" */
+  const PoolRef b = store.intern<Names>(names, litestl::util::string("glass"));
+  uint8_t bytes[sizeof(PoolRef)];
+  memcpy(bytes, &b, sizeof(b));
+  EXPECT_EDIT(ed, ed.set_attr(Grp::Faces, 0, ci, bytes), EditCode::Ok);
+  /* a barrier keeps a snapshot that holds "glass" */
+  EXPECT_EDIT(ed, ed.rebuild_regions(), EditCode::Ok);
+  const PoolRef c = store.intern<Names>(names, litestl::util::string("steel"));
+  memcpy(bytes, &c, sizeof(c));
+  EXPECT_EDIT(ed, ed.set_attr(Grp::Faces, 0, ci, bytes), EditCode::Ok);
+  JournalRoots<double> jr(fx.j, fx.k);
+  UT_CHECK(store.collect(roots(&jr)));
+  UT_CHECK(store.live(a) && store.live(b) && store.live(c));
+  UT_CHECK(store.audit(roots(&jr), true));
+  /* undo through the barrier: the restored refs are live (undoing a barrier
+   * replaces the groups, so column pointers are fetched again) */
+  while (fx.j.undo_count()) {
+    EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+  }
+  col = fx.k.faces.group().find<Column<PoolRef>>("name");
+  UT_CHECK((*col)[0] == a && store.get<Names>((*col)[0]) == litestl::util::string("brick"));
+  /* without the journal root, collect frees what only the journal holds */
+  fx.j.clear();
+  col->set(0, c);
+  UT_CHECK(store.collect(roots(nullptr)));
+  UT_CHECK(!store.live(a) && !store.live(b) && store.live(c));
+}
+
 } // namespace
 
 int main()
@@ -445,6 +563,9 @@ int main()
   test_make_kill_face<geom::Lattice>();
   test_ids<double>();
   test_ids<geom::Lattice>();
+  test_projected<double>();
+  test_projected<geom::Lattice>();
+  test_pool_roots();
   UT_CHECK(litestl::alloc::getMemorySize() == baseline);
   return ut_test_end();
 }

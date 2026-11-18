@@ -8,6 +8,7 @@
  * (!regions_dirty). The embedding and global layers, and the Euler-Poincare
  * cross-check, land in P2b. */
 
+#include <algorithm>
 #include <cstdint>
 
 #include "litestl/util/vector.h"
@@ -109,10 +110,39 @@ struct VertexTopoView {
 /** Combinatorial layer over the coordinate-independent domains. */
 void validate_combinatorial(const ComplexBase &k, const VertexTopoView &v, ValidationReport &rep);
 
+/** Restricts the embedding and global layers to some elements (sorted,
+ * unique index lists; plan P3 §3.6). Face-face contact is checked for every
+ * pair with at least one listed face; containers for listed vertices and
+ * edges; radial order for listed edges. RegionsStale runs only if
+ * @p regions is set. */
+struct ValidateFilter {
+  litestl::util::Vector<uint32_t> faces, edges, verts;
+  bool regions = false;
+
+  static bool has(const litestl::util::Vector<uint32_t> &v, uint32_t i)
+  {
+    return std::binary_search(v.begin(), v.end(), i);
+  }
+  bool face(uint32_t f) const
+  {
+    return has(faces, f);
+  }
+  bool edge(uint32_t e) const
+  {
+    return has(edges, e);
+  }
+  bool vert(uint32_t v) const
+  {
+    return has(verts, v);
+  }
+};
+
 /** Embedding and global layers (validate_geom.cc); run only on complexes
- * that pass the combinatorial layer. */
-template <geom::CoordType C> void validate_embedding(const Complex<C> &k, ValidationReport &rep);
-template <geom::CoordType C> void validate_global(const Complex<C> &k, ValidationReport &rep);
+ * that pass the combinatorial layer. A null filter checks everything. */
+template <geom::CoordType C>
+void validate_embedding(const Complex<C> &k, ValidationReport &rep, const ValidateFilter *filter = nullptr);
+template <geom::CoordType C>
+void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateFilter *filter = nullptr);
 
 template <geom::CoordType C> ValidationReport validate(const Complex<C> &k, ValidateLevel level = ValidateLevel::Combinatorial)
 {
@@ -132,11 +162,31 @@ template <geom::CoordType C> ValidationReport validate(const Complex<C> &k, Vali
   return rep;
 }
 
-extern template void validate_embedding<double>(const Complex<double> &, ValidationReport &);
-extern template void validate_embedding<float>(const Complex<float> &, ValidationReport &);
-extern template void validate_embedding<geom::Lattice>(const Complex<geom::Lattice> &, ValidationReport &);
-extern template void validate_global<double>(const Complex<double> &, ValidationReport &);
-extern template void validate_global<float>(const Complex<float> &, ValidationReport &);
-extern template void validate_global<geom::Lattice>(const Complex<geom::Lattice> &, ValidationReport &);
+/** Local validation (plan P3 §3.6, C14): the whole combinatorial layer (linear
+ * and cheap), then the embedding and global layers restricted to @p filter. */
+template <geom::CoordType C> ValidationReport validate_local(const Complex<C> &k, const ValidateFilter &filter)
+{
+  ValidationReport rep;
+  const VertexTopoView v{k.verts.template get<".v.e">(),
+                         k.verts.template get<".v.container">(),
+                         k.verts.template get<".id">(),
+                         k.verts.template get<".live">(),
+                         k.verts.capacity()};
+  validate_combinatorial(k, v, rep);
+  if (rep.ok()) {
+    validate_embedding(k, rep, &filter);
+  }
+  if (rep.ok()) {
+    validate_global(k, rep, &filter);
+  }
+  return rep;
+}
+
+extern template void validate_embedding<double>(const Complex<double> &, ValidationReport &, const ValidateFilter *);
+extern template void validate_embedding<float>(const Complex<float> &, ValidationReport &, const ValidateFilter *);
+extern template void validate_embedding<geom::Lattice>(const Complex<geom::Lattice> &, ValidationReport &, const ValidateFilter *);
+extern template void validate_global<double>(const Complex<double> &, ValidationReport &, const ValidateFilter *);
+extern template void validate_global<float>(const Complex<float> &, ValidationReport &, const ValidateFilter *);
+extern template void validate_global<geom::Lattice>(const Complex<geom::Lattice> &, ValidationReport &, const ValidateFilter *);
 
 } // namespace ubertopo::topo

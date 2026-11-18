@@ -132,13 +132,19 @@ bool in_closed_triangle(const geom::Point<C> &p, const geom::Point<C> &a, const 
 
 } // namespace
 
-template <geom::CoordType C> void validate_embedding(const Complex<C> &k, ValidationReport &rep)
+template <geom::CoordType C>
+void validate_embedding(const Complex<C> &k, ValidationReport &rep, const ValidateFilter *flt)
 {
   const uint32_t F = k.faces.capacity();
   util::Vector<FaceFrame> frames;
+  util::Vector<uint8_t> frame_done;
   frames.resize(F);
+  frame_done.resize(F);
   for (uint32_t f = 0; f < F; f++) {
-    if (!k.faces.live(f)) {
+    frame_done[f] = 0;
+  }
+  for (uint32_t f = 0; f < F; f++) {
+    if (!k.faces.live(f) || (flt && !flt->face(f))) {
       continue;
     }
     const FaceRef fr(f);
@@ -165,6 +171,7 @@ template <geom::CoordType C> void validate_embedding(const Complex<C> &k, Valida
         continue;
       }
       frames[f] = face_frame<C>(v);
+      frame_done[f] = 1;
       const int axis = frames[f].axis;
       if (axis >= 0) {
         const uint32_t outer = geom::outer_loop_proj<C>(v, axis);
@@ -180,20 +187,33 @@ template <geom::CoordType C> void validate_embedding(const Complex<C> &k, Valida
   if (!rep.ok()) {
     return;
   }
+  /* planar frames and T(f) third vertices, computed on first use (a filter
+   * needs them only for the faces around the listed edges and containers) */
+  auto frame_of = [&](uint32_t f) -> const FaceFrame & {
+    if (!frame_done[f]) {
+      frames[f] = face_frame<C>(k, FaceRef(f));
+      frame_done[f] = 1;
+    }
+    return frames[f];
+  };
   /* radial order: re-derive from geometry */
   std::unordered_map<uint32_t, uint32_t> third; /* coedge -> T(f) third vertex (projected faces) */
+  util::Vector<uint8_t> third_done;
+  third_done.resize(F);
   for (uint32_t f = 0; f < F; f++) {
-    if (k.faces.live(f) && k.face_proj_axis(FaceRef(f)) >= 0) {
-      util::Vector<std::pair<CoedgeRef, VertRef>> th;
-      projected_third_vertices<C>(k, FaceRef(f), th);
-      for (auto &x : th) {
-        third[x.first.i] = x.second.i;
-      }
-    }
+    third_done[f] = 0;
   }
   auto half_plane = [&](CoedgeRef c, geom::HalfPlane<C> &h) {
     const FaceRef f = k.face_of(c);
     if (k.face_proj_axis(f) >= 0) {
+      if (!third_done[f.i]) {
+        third_done[f.i] = 1;
+        util::Vector<std::pair<CoedgeRef, VertRef>> th;
+        projected_third_vertices<C>(k, f, th);
+        for (auto &x : th) {
+          third[x.first.i] = x.second.i;
+        }
+      }
       auto it = third.find(c.i);
       if (it == third.end()) {
         return false;
@@ -202,11 +222,11 @@ template <geom::CoordType C> void validate_embedding(const Complex<C> &k, Valida
       h.s = 1;
       return true;
     }
-    return coedge_half_plane<C>(k, c, frames[f.i], h);
+    return coedge_half_plane<C>(k, c, frame_of(f.i), h);
   };
   util::Vector<uint32_t, 8> in, order;
   for (uint32_t e = 0; e < k.edges.capacity(); e++) {
-    if (!k.edges.live(e) || !k.edge_coedge(EdgeRef(e))) {
+    if (!k.edges.live(e) || !k.edge_coedge(EdgeRef(e)) || (flt && !flt->edge(e))) {
       continue;
     }
     in.clear();
@@ -230,9 +250,7 @@ template <geom::CoordType C> void validate_embedding(const Complex<C> &k, Valida
   /* containers: geometry */
   const bool regions_ok = !k.regions_dirty;
   util::Vector<util::Vector<geom::Point<C>>> ftri;
-  if (regions_ok) {
-    ftri = face_fans<C>(k);
-  }
+  bool ftri_done = false;
   auto point_in_container = [&](const geom::Point<C> &p, ident::ContainerRef cr) {
     if (cr.kind() == ident::ContainerKind::Face) {
       const FaceRef f = cr.as_face();
@@ -260,9 +278,13 @@ template <geom::CoordType C> void validate_embedding(const Complex<C> &k, Valida
           return false;
         }
       }
-      return geom::point_in_poly_proj<C>(p, v, frames[f.i].axis) != geom::PointClass::Outside;
+      return geom::point_in_poly_proj<C>(p, v, frame_of(f.i).axis) != geom::PointClass::Outside;
     }
     if (cr.kind() == ident::ContainerKind::Region && regions_ok) {
+      if (!ftri_done) {
+        ftri = face_fans<C>(k);
+        ftri_done = true;
+      }
       const geom::RayResult rr = region_winding<C>(k, cr.as_region(), p, ftri);
       return rr.status == geom::RayStatus::Ok && rr.winding == (cr.as_region().i == 0 ? 0 : 1);
     }
@@ -270,13 +292,16 @@ template <geom::CoordType C> void validate_embedding(const Complex<C> &k, Valida
   };
   for (uint32_t v = 0; v < k.verts.capacity(); v++) {
     const ident::ContainerRef cr = k.vert_container(VertRef(v));
+    if (flt && !flt->vert(v)) {
+      continue;
+    }
     if (k.verts.live(v) && !cr.is_none() && !point_in_container(k.pos(VertRef(v)), cr)) {
       rep.add(VC::ContainerGeometry, ElemKind::Vertex, v);
     }
   }
   for (uint32_t e = 0; e < k.edges.capacity(); e++) {
     const ident::ContainerRef cr = k.edges.template get<".e.container">()[e];
-    if (!k.edges.live(e) || cr.is_none()) {
+    if (!k.edges.live(e) || cr.is_none() || (flt && !flt->edge(e))) {
       continue;
     }
     const auto vs = k.edge_verts(EdgeRef(e));
@@ -314,95 +339,136 @@ template <geom::CoordType C> struct FaceMesh {
 
 } // namespace
 
-template <geom::CoordType C> void validate_global(const Complex<C> &k, ValidationReport &rep)
+template <geom::CoordType C>
+void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateFilter *flt)
 {
   using P = geom::Point<C>;
   const uint32_t F = k.faces.capacity();
   util::Vector<FaceMesh<C>> mesh;
+  util::Vector<uint8_t> built; /* 0: not yet, 1: built, 2: failed */
   mesh.resize(F);
+  built.resize(F);
   for (uint32_t f = 0; f < F; f++) {
-    if (!k.faces.live(f)) {
-      continue;
-    }
-    FacePoints<C> fp;
-    fp.gather(k, FaceRef(f));
-    const auto v = fp.view();
-    const int axis = face_axis<C>(k, FaceRef(f), v);
-    /* loops: simple, disjoint, holes inside the outer loop */
-    const uint32_t outer = geom::outer_loop_proj<C>(v, axis);
-    bool loops_ok = true;
-    for (uint32_t l = 0; l < v.loop_count() && loops_ok; l++) {
-      const auto L1 = v.loop(l);
-      for (uint32_t m = l; m < v.loop_count() && loops_ok; m++) {
-        const auto L2 = v.loop(m);
-        for (size_t i = 0; i < L1.size() && loops_ok; i++) {
-          for (size_t j = (l == m ? i + 1 : 0); j < L2.size() && loops_ok; j++) {
-            const bool adjacent = l == m && (j == i + 1 || (i == 0 && j == L1.size() - 1));
-            const geom::SegIsect s = geom::segments_intersect_proj<C>(L1[i], L1[(i + 1) % L1.size()], L2[j],
-                                                                      L2[(j + 1) % L2.size()], axis);
-            if (adjacent ? (s == geom::SegIsect::Overlap || s == geom::SegIsect::Proper) : s != geom::SegIsect::None) {
-              loops_ok = false;
+    built[f] = 0;
+  }
+  /* loop checks (with checks set) and the triangulation of face f */
+  auto build = [&](uint32_t f, bool checks) -> bool {
+      FacePoints<C> fp;
+      fp.gather(k, FaceRef(f));
+      const auto v = fp.view();
+      const int axis = face_axis<C>(k, FaceRef(f), v);
+      /* loops: simple, disjoint, holes inside the outer loop */
+      if (checks) {
+      const uint32_t outer = geom::outer_loop_proj<C>(v, axis);
+      bool loops_ok = true;
+      for (uint32_t l = 0; l < v.loop_count() && loops_ok; l++) {
+        const auto L1 = v.loop(l);
+        for (uint32_t m = l; m < v.loop_count() && loops_ok; m++) {
+          const auto L2 = v.loop(m);
+          for (size_t i = 0; i < L1.size() && loops_ok; i++) {
+            for (size_t j = (l == m ? i + 1 : 0); j < L2.size() && loops_ok; j++) {
+              const bool adjacent = l == m && (j == i + 1 || (i == 0 && j == L1.size() - 1));
+              const geom::SegIsect s = geom::segments_intersect_proj<C>(L1[i], L1[(i + 1) % L1.size()], L2[j],
+                                                                        L2[(j + 1) % L2.size()], axis);
+              if (adjacent ? (s == geom::SegIsect::Overlap || s == geom::SegIsect::Proper) : s != geom::SegIsect::None) {
+                loops_ok = false;
+              }
             }
           }
         }
       }
-    }
-    if (!loops_ok) {
-      rep.add(VC::LoopIntersection, ElemKind::Face, f);
-      continue;
-    }
-    for (uint32_t l = 0; l < v.loop_count(); l++) {
-      if (l == outer) {
-        continue;
+      if (!loops_ok) {
+        rep.add(VC::LoopIntersection, ElemKind::Face, f);
+        return false;
       }
-      util::Vector<uint32_t, 2> off;
-      off.append(0);
-      off.append(uint32_t(v.loop(outer).size()));
-      const geom::PolyView<C> ov2{v.loop(outer), std::span<const uint32_t>(off.data(), off.size())};
-      if (geom::point_in_poly_proj<C>(v.loop(l)[0], ov2, axis) != geom::PointClass::Inside) {
-        rep.add(VC::HoleOutside, ElemKind::Face, f);
+      for (uint32_t l = 0; l < v.loop_count(); l++) {
+        if (l == outer) {
+          continue;
+        }
+        util::Vector<uint32_t, 2> off;
+        off.append(0);
+        off.append(uint32_t(v.loop(outer).size()));
+        const geom::PolyView<C> ov2{v.loop(outer), std::span<const uint32_t>(off.data(), off.size())};
+        if (geom::point_in_poly_proj<C>(v.loop(l)[0], ov2, axis) != geom::PointClass::Inside) {
+          rep.add(VC::HoleOutside, ElemKind::Face, f);
+        }
       }
-    }
-    /* triangulation for the face-face test */
-    util::Vector<geom::Triangle> t;
-    if (geom::cdt_proj<C>(v, axis, t) != geom::CdtStatus::Ok) {
-      rep.add(VC::LoopIntersection, ElemKind::Face, f);
-      continue;
-    }
-    util::Vector<uint32_t, 32> corner_v;
-    k.for_each_loop(FaceRef(f), [&](LoopRef l) {
-      k.for_each_coedge(l, [&](CoedgeRef c) { corner_v.append(k.start_vert(c).i); });
-    });
-    FaceMesh<C> &fm = mesh[f];
-    for (auto &x : t) {
-      fm.tris.append({corner_v[x[0]], corner_v[x[1]], corner_v[x[2]]});
-    }
-    for (uint32_t cv : corner_v) {
-      fm.verts.append(cv);
-    }
-    std::sort(fm.verts.begin(), fm.verts.end());
-    for (uint32_t l = 0; l + 1 < fp.off.size(); l++) {
-      const uint32_t b = fp.off[l], m = fp.off[l + 1] - b;
-      for (uint32_t j = 0; j < m; j++) {
-        const uint32_t a = corner_v[b + j], c = corner_v[b + (j + 1) % m];
-        fm.edges.append({std::min(a, c), std::max(a, c)});
       }
-    }
-    std::sort(fm.edges.begin(), fm.edges.end());
-    for (int i = 0; i < 3; i++) {
-      fm.lo[i] = INFINITY;
-      fm.hi[i] = -INFINITY;
-    }
-    for (uint32_t cv : corner_v) {
-      const auto d = geom::to_double3<C>(k.pos(VertRef(cv)));
+      /* triangulation for the face-face test */
+      util::Vector<geom::Triangle> t;
+      if (geom::cdt_proj<C>(v, axis, t) != geom::CdtStatus::Ok) {
+        if (checks) {
+          rep.add(VC::LoopIntersection, ElemKind::Face, f);
+        }
+        return false;
+      }
+      util::Vector<uint32_t, 32> corner_v;
+      k.for_each_loop(FaceRef(f), [&](LoopRef l) {
+        k.for_each_coedge(l, [&](CoedgeRef c) { corner_v.append(k.start_vert(c).i); });
+      });
+      FaceMesh<C> &fm = mesh[f];
+      for (auto &x : t) {
+        fm.tris.append({corner_v[x[0]], corner_v[x[1]], corner_v[x[2]]});
+      }
+      for (uint32_t cv : corner_v) {
+        fm.verts.append(cv);
+      }
+      std::sort(fm.verts.begin(), fm.verts.end());
+      for (uint32_t l = 0; l + 1 < fp.off.size(); l++) {
+        const uint32_t b = fp.off[l], m = fp.off[l + 1] - b;
+        for (uint32_t j = 0; j < m; j++) {
+          const uint32_t a = corner_v[b + j], c = corner_v[b + (j + 1) % m];
+          fm.edges.append({std::min(a, c), std::max(a, c)});
+        }
+      }
+      std::sort(fm.edges.begin(), fm.edges.end());
       for (int i = 0; i < 3; i++) {
-        fm.lo[i] = std::min(fm.lo[i], d[i]);
-        fm.hi[i] = std::max(fm.hi[i], d[i]);
+        fm.lo[i] = INFINITY;
+        fm.hi[i] = -INFINITY;
       }
+      for (uint32_t cv : corner_v) {
+        const auto d = geom::to_double3<C>(k.pos(VertRef(cv)));
+        for (int i = 0; i < 3; i++) {
+          fm.lo[i] = std::min(fm.lo[i], d[i]);
+          fm.hi[i] = std::max(fm.hi[i], d[i]);
+        }
+      }
+    return true;
+  };
+  auto ensure = [&](uint32_t f, bool checks) {
+    if (!built[f]) {
+      built[f] = build(f, checks) ? 1 : 2;
+    }
+    return built[f] == 1;
+  };
+  for (uint32_t f = 0; f < F; f++) {
+    if (k.faces.live(f) && (!flt || flt->face(f))) {
+      ensure(f, true);
     }
   }
   if (!rep.ok()) {
     return;
+  }
+  /* bounding boxes of the other faces: a filter triangulates them only when
+   * a listed face comes near */
+  for (uint32_t f = 0; f < F; f++) {
+    if (!k.faces.live(f) || built[f] == 1) {
+      continue;
+    }
+    FaceMesh<C> &fm = mesh[f];
+    for (int i = 0; i < 3; i++) {
+      fm.lo[i] = INFINITY;
+      fm.hi[i] = -INFINITY;
+    }
+    k.for_each_loop(FaceRef(f), [&](LoopRef l) {
+      k.for_each_coedge(l, [&](CoedgeRef c) {
+        const auto d = geom::to_double3<C>(k.pos(k.start_vert(c)));
+        for (int i = 0; i < 3; i++) {
+          fm.lo[i] = std::min(fm.lo[i], d[i]);
+          fm.hi[i] = std::max(fm.hi[i], d[i]);
+        }
+      });
+    });
   }
 
   /* candidate pairs: uniform grid over face bounding boxes */
@@ -447,7 +513,7 @@ template <geom::CoordType C> void validate_global(const Complex<C> &k, Validatio
         for (int d = 0; d < 3; d++) {
           overlap = overlap && a.lo[d] <= b.hi[d] && b.lo[d] <= a.hi[d];
         }
-        if (overlap) {
+        if (overlap && (!flt || flt->face(fs[i]) || flt->face(fs[j]))) {
           pairs.append({std::min(fs[i], fs[j]), std::max(fs[i], fs[j])});
         }
       }
@@ -517,6 +583,9 @@ template <geom::CoordType C> void validate_global(const Complex<C> &k, Validatio
   };
 
   for (auto &[f, g] : pairs) {
+    if (!ensure(f, false) || !ensure(g, false)) {
+      continue; /* an unlisted face that doesn't triangulate isn't this edit's problem */
+    }
     const FaceMesh<C> &a = mesh[f], &b = mesh[g];
     Shared sh;
     for (uint32_t v : a.verts) {
@@ -549,7 +618,7 @@ template <geom::CoordType C> void validate_global(const Complex<C> &k, Validatio
   }
 
   /* stored regions agree with a fresh build */
-  if (!k.regions_dirty) {
+  if (!k.regions_dirty && (!flt || flt->regions)) {
     Complex<C> copy = k;
     RegionReport rr;
     if (!build_regions(copy, rr)) {
@@ -574,11 +643,11 @@ template <geom::CoordType C> void validate_global(const Complex<C> &k, Validatio
   }
 }
 
-template void validate_embedding<double>(const Complex<double> &, ValidationReport &);
-template void validate_embedding<float>(const Complex<float> &, ValidationReport &);
-template void validate_embedding<geom::Lattice>(const Complex<geom::Lattice> &, ValidationReport &);
-template void validate_global<double>(const Complex<double> &, ValidationReport &);
-template void validate_global<float>(const Complex<float> &, ValidationReport &);
-template void validate_global<geom::Lattice>(const Complex<geom::Lattice> &, ValidationReport &);
+template void validate_embedding<double>(const Complex<double> &, ValidationReport &, const ValidateFilter *);
+template void validate_embedding<float>(const Complex<float> &, ValidationReport &, const ValidateFilter *);
+template void validate_embedding<geom::Lattice>(const Complex<geom::Lattice> &, ValidationReport &, const ValidateFilter *);
+template void validate_global<double>(const Complex<double> &, ValidationReport &, const ValidateFilter *);
+template void validate_global<float>(const Complex<float> &, ValidationReport &, const ValidateFilter *);
+template void validate_global<geom::Lattice>(const Complex<geom::Lattice> &, ValidationReport &, const ValidateFilter *);
 
 } // namespace ubertopo::topo

@@ -56,6 +56,16 @@ struct TxnLog {
   bool regions_dirty = true;
 };
 
+/** A column that holds PoolRefs, in the row layout of a transaction's
+ * captures: found again by name and type when the journal is visited (a
+ * barrier may have replaced the group object since, C9). */
+struct RefCol {
+  uint32_t index;  /* column index at commit */
+  uint32_t offset; /* byte offset in a captured row */
+  std::string name;
+  const litestl::attr::ColumnType *type;
+};
+
 template <geom::CoordType C> struct Txn {
   std::string label;
   std::vector<OpRecord<C>> ops;
@@ -63,6 +73,7 @@ template <geom::CoordType C> struct Txn {
   TxnLog log;
   std::unique_ptr<Complex<C>> snapshot; /* barrier: the complex before */
   uint64_t schema_ver[kGroupCount] = {}; /* column sets after the transaction */
+  std::vector<RefCol> ref_cols[kGroupCount];
 };
 
 template <geom::CoordType C> class Journal {
@@ -153,10 +164,9 @@ template <geom::CoordType C> inline const litestl::attr::AttrGroup &group_of(con
 }
 
 /** PoolStore root over a journal's captured bytes, barrier snapshots and
- * SetAttr payloads (plan P3 C9). Captured bytes are interpreted with the
- * columns of @p k, which the journal's schema check keeps compatible;
- * transactions whose recorded column sets no longer match are skipped (they
- * can't be undone either). */
+ * SetAttr payloads (plan P3 C9). Captured bytes are interpreted through the
+ * ref-holding columns each transaction recorded at commit, found again in
+ * @p k by name and type; a column removed since is skipped. */
 template <geom::CoordType C> class JournalRoots final : public litestl::attr::RefRoot {
 public:
   JournalRoots(Journal<C> &j, Complex<C> &k) : j_(j), k_(k) {}
@@ -173,29 +183,32 @@ public:
   }
 
 private:
+  /* the current column for a recorded one (same name and type), or null */
+  const litestl::attr::ColumnBase *column(uint32_t g, const RefCol &rc) const
+  {
+    const litestl::attr::ColumnBase *c = group_of(k_, Grp(g)).find_any(rc.name);
+    return c && &c->type() == rc.type ? c : nullptr;
+  }
+
   template <typename ElemFn, typename ColFn> void each(ElemFn &&elem, ColFn &&whole) const
   {
     for (auto *list : {&j_.done_, &j_.undone_}) {
       for (Txn<C> &t : *list) {
-        if (!compatible(t)) {
-          continue;
-        }
         for (const RowCapture &rc : t.log.rows) {
-          litestl::attr::AttrGroup &g = group_of(k_, Grp(rc.g));
-          uint8_t *p = t.log.bytes.data() + rc.off;
-          for (uint32_t c = 0; c < g.column_count(); c++) {
-            const litestl::attr::ColumnBase &col = g.column(c);
-            if (col.holds_refs()) {
-              elem(col, p);
+          for (const RefCol &r : t.ref_cols[rc.g]) {
+            if (const litestl::attr::ColumnBase *col = column(rc.g, r)) {
+              elem(*col, t.log.bytes.data() + rc.off + r.offset);
             }
-            p += col.elem_size();
           }
         }
         for (OpRecord<C> &op : t.ops) {
-          if (op.kind == OpKind::SetAttr && op.u.size() >= 3) {
-            const litestl::attr::ColumnBase &col = group_of(k_, Grp(op.u[0])).column(op.u[2]);
-            if (col.holds_refs() && op.bytes.size() == col.elem_size()) {
-              elem(col, op.bytes.data());
+          if (op.kind != OpKind::SetAttr || op.u.size() < 3 || op.u[0] >= kGroupCount) {
+            continue;
+          }
+          for (const RefCol &r : t.ref_cols[op.u[0]]) {
+            const litestl::attr::ColumnBase *col = r.index == op.u[2] ? column(op.u[0], r) : nullptr;
+            if (col && op.bytes.size() == col->elem_size()) {
+              elem(*col, op.bytes.data());
             }
           }
         }
@@ -211,15 +224,6 @@ private:
         }
       }
     }
-  }
-  bool compatible(const Txn<C> &t) const
-  {
-    for (uint32_t gi = 0; gi < kGroupCount; gi++) {
-      if (t.schema_ver[gi] != group_of(k_, Grp(gi)).schema_version()) {
-        return false;
-      }
-    }
-    return true;
   }
 
   Journal<C> &j_;
