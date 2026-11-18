@@ -6,6 +6,11 @@ add_library(ubertopo_geom INTERFACE)
 target_include_directories(ubertopo_geom INTERFACE ${PROJECT_SOURCE_DIR}/source)
 target_link_libraries(ubertopo_geom INTERFACE predicates math util platform)
 
+# ident/: persistent IDs, typed references (header-only).
+add_library(ubertopo_ident INTERFACE)
+target_include_directories(ubertopo_ident INTERFACE ${PROJECT_SOURCE_DIR}/source)
+target_link_libraries(ubertopo_ident INTERFACE util platform)
+
 if (BUILD_TESTING)
   add_subdirectory(tests)
 endif()
