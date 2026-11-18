@@ -1,9 +1,10 @@
 # Plan P1 — litestl attribute core (`attr/`)
 
-- **Status:** **v3**. The v1 review (§10) said "needs rework". The v2 re-review (§10b)
-  said "ready with changes", and those changes are the normative amendments in **§4b**.
+- **Status:** **implemented** on litestl branch `ubertopo/p1-attr`; see **§11**. The
+  plan is v3: the v1 review (§10) said "needs rework", the v2 re-review (§10b) said
+  "ready with changes", and those changes are the normative amendments in **§4b**.
   Where §4b conflicts with the W-item text, **§4b wins**. Intern pools are moved to
-  **P1b**. Ready for implementation.
+  **P1b**.
 - **Date:** 2026-11-18
 - **Design:** [core-data-model/03](../design/core-data-model/03-attributes.md), plus the
   snapshot and determinism parts of
@@ -806,3 +807,33 @@ the amendments below.
 | 22 | Nit | `attr` → `io` drags in bindings and lz4 | A22 |
 | 23 | Nit | W0 wording; size assertion | A23 |
 | 24 | Nit | Split `column.h` early; string type and registry API inconsistencies | A24 |
+
+## 11. Implementation notes and deviations (2026-11-18)
+
+Implemented on litestl `ubertopo/p1-attr` (from `8473fba` to `14d57b1`). The UberTopo
+side has the submodule bump, `test_smoke_attr`, design 03/05/06 status notes, DEC-010
+and the debugging-guide entries.
+
+| Item | Deviation or note |
+|---|---|
+| W0 | As planned. **ASan also found an out-of-bounds read** in `fast_expansion_sum_zeroelim`, inherited from Shewchuk's code. It is fixed in the port generator, and outputs are unchanged. LSan suppressions cover binding descriptors as well as the tracker list. `alloc::NewArray` constructs only its first element; this is recorded in the debugging guide for the owner and not changed. |
+| W1/W2 | As planned. `io/bytes.h` is header-only and uses a `const_cast` because `util::Vector` has no `const data()`. |
+| W3 | `PagedStore`'s page shift is a runtime setting (A6). Version stamps are minted **lazily**: mutations set a dirty bit and `version()` takes a fresh global stamp. Per-element writes therefore cost nothing extra and stamps stay unique. The A1 checksum is verified on copy-on-write of a shared page, on releasing a shared page via a uniform fill, and in the destructor. |
+| W4 | **`BoolColumn` stores one byte per element** (`Column<uint8_t, BoolOps>`, key `"bool"`). That makes parallel span writes race-free and paging identical to other columns, so the A16 bit-paging rules don't apply. Packing is a later memory optimisation. **NaN results of arithmetic mixes are canonicalised**, found by a Release-only divergence (see `docs/debugging.md`). Column virtuals take `ValidatedMixBatch` (A5). |
+| W5 | As planned with A4/A8/A13/A17/A18. `permute` is serial; callers flatten with `validate_permutation` plus per-column permutes. |
+| W6 | As planned with A10–A12. **`kRunMin = 8`.** The header is flags, size and default; then the run count; then the runs. |
+| W7 | `test_attr_model`: 7 value types at shifts 2/4/12 (bool 2/6/8), 20k steps each. **Planted bugs** (no copy-on-write, no tail reset, sequential mix) were each caught, with 74–172 failures. Every 16th step also checks page-shift independence of the bytes. |
+| W8 | The registry is in `registry.cc`, with builtins registered on first use. The open-extension test is `TestPairColumn` in `test_attr_group.cc`, a full `ColumnBase` over `std::vector` with a claimed-slot Custom mix. The **A1 death test** forks a child that writes through a stale reference and must abort. The A21 threaded stress test runs under TSan. **Page-size benchmark** (clang Release, median of 5 runs, see the table below): shifts 12 and 14 are both within 10% of the best on read speed, and 12 has the least copy-on-write amplification, so **the default stays at 4096** (closes OI-3). `test_attr_digest` is pinned to `eb4c52c53316afaf23dbdc3cd35d0630`. The `_fma` probe (built with `-ffp-contract=fast`) and builds with clang and gcc `-march=x86-64-v3` all reproduce it. |
+| W9 | `documentation/attributes.md`, `Readme.MD`, litestl `CLAUDE.md`. `LITESTL_TEST_SCALE_DIV` was added to the harness for sanitizer runs (A20), and the predicate stage-coverage minimum scales with it. |
+
+**Page-size benchmark** (W8):
+
+| Page shift | Sequential read (ns/elem) | Random gather (ns/elem) | Bytes copied per scattered edit |
+|---|---|---|---|
+| 10 | 0.88 | 5.4 | 3.6 KB |
+| 12 | 0.67 | 4.3 | 10.4 KB |
+| 14 | 0.69 | 4.3 | 16.5 KB |
+
+**Configuration matrix:** see the run recorded below. It is filled in when the
+configuration run completes.
+

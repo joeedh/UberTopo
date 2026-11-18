@@ -7,6 +7,16 @@ Part of the [core data model design](README.md). Research basis:
 [attributes-and-queries/embedded-geometry-attributes](../../research/attributes-and-queries/embedded-geometry-attributes.md).
 The pool pattern is taken from Sculptcore's `DeformPool`.
 
+> **Status (2026-11-18):** the generic pool machinery (`InternPool`, refcounted
+> slot columns) was **deferred from P1 to P1b** (P1 plan §2). P1b is planned after P2,
+> and must provide:
+> - a refcount funnel invoked by every structural column operation;
+> - variable-size immutable entries (curve segment lists, knots, polylines, meshes);
+> - pools owned by a `GeometryStore` above any single group, with one `GeomRef` column
+>   referencing several pool kinds;
+> - `audit(roots…)` including references inside pools and from the journal;
+> - a copy-on-write deduplication index that scales to ≥ 10⁵ entries.
+
 ## 1. Attachment points
 
 | Element | Column | Carries | Default when NONE |

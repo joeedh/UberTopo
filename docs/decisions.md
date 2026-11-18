@@ -381,6 +381,38 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
 
 ---
 
+## DEC-010 — P1 attribute core: API decisions, shared-code fixes, pools to P1b, page size
+
+- **Date:** 2026-11-18, from the [P1 plan](plans/2026-11-18-p1-attribute-core.md)
+  (v3 with §4b amendments) and its implementation.
+- **API decisions** (see litestl `documentation/attributes.md`):
+  - The page size is a runtime per-store setting. **The default is 4096 elements**: in
+    the W8 benchmark, 12 and 14 tied on read speed and 12 copied about 40% fewer bytes
+    per scattered copy-on-write edit. This closes OI-3.
+  - Equality is bitwise.
+  - Defaults are fixed at construction.
+  - The last page has partial capacity.
+  - Builtin columns are reached by slot index.
+  - Mixing is simultaneous, with validated batches, `mix_from`, `Custom` with a
+    pre-call snapshot, and claimed slots. Topo columns are never group-mixed.
+  - Version stamps come from a process-wide counter.
+  - The registry is explicit and locked.
+  - The canonical hash and run-encoded bytes are independent of page size,
+    representation and `ensure`/`remove` history. Temp and Derived columns are excluded.
+  - `BoolColumn` uses one byte per element; bit packing is a later optimisation.
+- **Fixes to shared litestl code**, which Sculptcore should rebuild against once when it
+  bumps litestl:
+  - `math::Vec` has a defaulted copy constructor and is now trivially copyable.
+  - `BindingBase` has a virtual destructor.
+  - An out-of-bounds read inherited from Shewchuk's `fast_expansion_sum_zeroelim` is
+    bounded; ASan found it.
+  - An LSan suppression file covers intentional process-lifetime allocations.
+- **Intern pools are deferred to P1b.** Their requirements are recorded in design 05.
+- **New pinned golden:** `test_attr_digest` (`eb4c52c53316afaf23dbdc3cd35d0630`). It
+  is separate from the P0 digest, which is unchanged.
+
+---
+
 ## Open questions
 
 - ~~Q-A — WASM target~~ → DEC-005 (native N-API in a Chromium shell).

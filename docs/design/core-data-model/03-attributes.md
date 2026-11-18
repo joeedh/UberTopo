@@ -7,6 +7,29 @@ pieces in litestl. Research basis:
 [attribute-propagation](../../research/attributes-and-queries/attribute-propagation.md),
 [Sculptcore reference](../../research/sculptcore-brep-reference.md).
 
+> **Realised in P1 (2026-11-18).** The litestl `attr/` module implements this design.
+> The authoritative API reference is litestl
+> [`documentation/attributes.md`](../../../source/litestl/documentation/attributes.md).
+> Where it differs from the sketches below, the implementation (and DEC-010) wins:
+> - **Page size:** a **runtime** per-store setting, default 4096 elements, chosen by
+>   benchmark (OI-3).
+> - **Equality:** **bitwise** everywhere.
+> - **Defaults:** each column's default is fixed when it is constructed.
+> - **Tail page:** the last page has partial capacity.
+> - **Builtin columns** are reached by **slot index**, as `builtin<Col>(slot)`. The
+>   `BuiltinColumn` members sketched in §5 are not used.
+> - **Generic mixing** is `MixBatch`/`ValidatedMixBatch` with **simultaneous**
+>   (gather-then-scatter) semantics, plus `mix_from`, `Custom` with a pre-call snapshot,
+>   and claimed slots. The topology-event `PropagationEvent` of §6 is built *on top of*
+>   it in P3.
+> - **Registration is explicit and locked.** There are **no static registrars** (§5).
+> - **No page-hash cache.** Content hashes are computed on demand over the element
+>   stream, independent of page size.
+> - **Serialisation:** run-encoded and canonical, with a builtin layout check and a
+>   trailing hash.
+> - **`BoolColumn`** uses one byte per element.
+> - **Value pools** (`InternPool`) are deferred to **P1b**.
+
 ## 1. Goals and the change from Sculptcore
 
 Sculptcore's attributes come from a closed `AttrType` bitmask (float/int vectors, bool,

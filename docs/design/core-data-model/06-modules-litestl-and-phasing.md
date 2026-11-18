@@ -43,8 +43,8 @@ CMakeLists.txt             C++20; clang required (Sculptcore toolchain conventio
 | Counter-based RNG (Philox4x32-10, `litestl::rng`) | `util/rng.h` | 04 | Replaces the use of `util/rand.h`; leave the old one for Sculptcore compatibility |
 | Deterministic exclusive scan; standard-library-independent deterministic sort | `util/task.h`, `util/sort.h` | P2 bulk builder (04 §8.2) | Deferred from P0 by its review |
 | Deterministic `parallel_reduce` / ordered `parallel_for` chunks | `util/task.h` | 04 §8 | Chunking independent of worker count |
-| Paged copy-on-write store, `ColumnBase`, `Column<T>`, `BoolColumn`, `AttrGroup`, `ColumnTypeRegistry` | `attr/` (new module) | 03 | OI-5; new design modelled on Sculptcore (DEC-007) |
-| `InternPool<T>` (refcounted, canonical renumbering) | `attr/intern_pool.h` | 05 | Generalised `DeformPool` |
+| Paged copy-on-write store, `ColumnBase`, `Column<T>`, `BoolColumn`, `AttrGroup`, `ColumnTypeRegistry` | `attr/` (new module) | 03 | **Done (P1)**; see litestl `documentation/attributes.md` |
+| `InternPool<T>` (refcounted, canonical renumbering) | `attr/intern_pool.h` | 05 | **Deferred to P1b** |
 | `UniquePtr` | `util/memory.h` | 03 | Missing: litestl has only `shared_ptr`/`weak_ptr` |
 | io `Writer`/`Reader` interface for columns | `io/` | 03 | Build on `binfile` |
 
@@ -58,8 +58,9 @@ They replace the four spikes listed in the [research synthesis](../../research/R
 
 | Phase | Scope | Exit criteria |
 |---|---|---|
-| **P0 — Foundations (litestl)** | Wide ints, predicates, hash128, Philox RNG, deterministic reduce | Predicate test suite against an independent big-rational oracle; golden hashes; thread-count invariance of the reduce |
-| **P1 — Attribute core (litestl `attr/`)** | Paged copy-on-write store, column interface, registry, AttrGroup, packed bools, InternPool | Copy-on-write snapshot tests; open-extension test with a test-only column class; serialise round trip; page-size measurements (OI-3) |
+| **P0 — Foundations (litestl)** — *done 2026-11-17* | Wide ints, predicates, hash128, Philox RNG, deterministic reduce | Predicate test suite against an independent big-rational oracle; golden hashes; thread-count invariance of the reduce |
+| **P1 — Attribute core (litestl `attr/`)** — *done 2026-11-18* | Paged copy-on-write store, column interface, registry, AttrGroup, BoolColumn (byte per element; InternPool moved to P1b) | Met: model-based suite, open-extension test, canonical round trips, page size 4096 (OI-3), 7-configuration matrix |
+| **P1b — Value pools (litestl `attr/`)** | InternPool / refcounted slot columns / variable-size entries / store-level ownership (see 05 status note); planned after P2 fixes ownership | Pool model tests with diverging snapshots; audit with explicit roots; ≥ 10⁵-entry index benchmark |
 | **P2 — Complex core (UberTopo `topo/`)** | `Complex<C>` for `double` and `Lattice`; domains and builtin columns; bulk builder; radial sort; `build_regions()`; validator; freeze and thaw; persistent IDs | Generated buildings with shared walls, window holes, aperture faces and rooms produce the correct regions and pass all validation layers, bit-identically at 1 and N threads and in both instantiations |
 | **P3 — Primitives, propagation and journal** | The primitives from 01 §7; Propagator with schema policies; journal; compaction | Randomised edit sequences: validation passes; undo through the journal restores page-hash equality; propagation invariants hold |
 | **P4 — Curves and pools** | GeometryStore, CurvatureLawCurve, OffsetCurve, Catenary, B-splines, RoadSurface | Certified-bound tests; oracle comparison; a road imprinted on terrain sheets |
