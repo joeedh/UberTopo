@@ -460,8 +460,8 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
   compile-fail snippet that must produce the expected diagnostic.
 - **Rule:** UberTopo code declares builtin attributes through schemas and never
   indexes builtin slots by hand (`CLAUDE.md`).
-- **Where it lives:** litestl branch `ubertopo/attr-schema` (`26447b2`). It is **not yet
-  merged to litestl `master`**; that waits for the owner's go-ahead.
+- **Merged:** at the owner's request, litestl `master` was fast-forwarded to `26447b2`
+  (from `ubertopo/attr-schema`) and UberTopo `master` to match.
 
 ---
 
