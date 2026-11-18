@@ -270,6 +270,12 @@ template <geom::CoordType C> struct Run {
           return {};
         }
       }
+      /* the editor's dirty-row index equals a rebuilt one (P3b W4) */
+      if (!ed.index_consistent()) {
+        UT_CHECK(false);
+        fprintf(stderr, "  step %u: editor index diverged after %s\n", n, edit_code_name(c));
+        return {};
+      }
       /* Local mode: the full validator must agree after every commit */
       if (n % 40 == 39 || (mode == ValidateMode::Local && c == EditCode::Ok)) {
         const ValidationReport rep = validate(k, ValidateLevel::Global);
@@ -287,6 +293,7 @@ template <geom::CoordType C> struct Run {
       UT_CHECK(ed.undo() == EditCode::Ok);
     }
     UT_CHECK(content_hash(k) == h0);
+    UT_CHECK(ed.index_consistent());
     const uint32_t redos = j.redo_count();
     for (uint32_t i = 0; i < redos; i++) {
       const EditCode c = ed.redo();

@@ -99,6 +99,7 @@ template <geom::CoordType C> EditCode Editor<C>::begin_internal(std::string_view
     if (k_.frozen()) {
       return EditCode::Frozen;
     }
+    check_index_stamp();
     /* writes outside the editor since the last journaled step: the journal
      * can no longer undo exactly across them */
     if (journal_ && (!journal_->done_.empty() || !journal_->undone_.empty()) &&
@@ -210,6 +211,7 @@ template <geom::CoordType C> EditCode Editor<C>::commit_internal(bool from_redo)
   lineage_.clear();
   captured_.clear();
   barrier_snapshot_.reset();
+  sync_index_stamp();
   return EditCode::Ok;
 }
 
@@ -228,6 +230,8 @@ template <geom::CoordType C> EditCode Editor<C>::rollback()
     if (barrier_snapshot_) {
       k_ = std::move(*barrier_snapshot_);
       barrier_snapshot_.reset();
+      idx_.invalidate();
+      idx_.flush(k_); /* eagerly, inside the barrier (C13) */
     }
     log_ = TxnLog{};
     captured_.clear();
@@ -239,9 +243,7 @@ template <geom::CoordType C> EditCode Editor<C>::rollback()
   else {
     rebuild_captured();
   }
-  for (IdIndex &x : ids_) {
-    x.valid = false;
-  }
+  sync_index_stamp();
   return EditCode::Ok;
 }
 
@@ -251,6 +253,7 @@ void Editor<C>::restore(TxnLog &log, uint32_t rows_mark, uint32_t alloc_mark, co
   for (uint32_t i = uint32_t(log.rows.size()); i-- > rows_mark;) {
     const RowCapture &rc = log.rows[int(i)];
     litestl::attr::AttrGroup &g = group_of(k_, Grp(rc.g));
+    idx_.mark(Grp(rc.g), rc.row);
     const uint8_t *p = log.bytes.data() + rc.off;
     for (uint32_t c = 0; c < g.column_count(); c++) {
       litestl::attr::ColumnBase &col = g.column(c);
@@ -271,6 +274,9 @@ void Editor<C>::restore(TxnLog &log, uint32_t rows_mark, uint32_t alloc_mark, co
   }
   for (uint32_t g = 0; g < kGroupCount; g++) {
     litestl::attr::AttrGroup &gr = group_of(k_, Grp(g));
+    for (uint32_t r = sizes[g]; r < gr.size(); r++) {
+      idx_.mark(Grp(g), r); /* appended rows, dropped */
+    }
     if (gr.size() != sizes[g]) {
       gr.resize(sizes[g]);
     }
@@ -315,8 +321,11 @@ template <geom::CoordType C> EditCode Editor<C>::undo()
     journal_->clear();
     return ret(EditCode::JournalStale);
   }
+  check_index_stamp();
   if (t.snapshot) {
     k_ = std::move(*t.snapshot);
+    idx_.invalidate();
+    idx_.flush(k_);
   }
   else {
     restore(t.log, 0, 0, t.log.start_size, t.log.regions_dirty);
@@ -330,9 +339,7 @@ template <geom::CoordType C> EditCode Editor<C>::undo()
   journal_->done_.pop_back();
   journal_->undone_.push_back(std::move(u));
   journal_->expected_version_ = k_.version();
-  for (IdIndex &x : ids_) {
-    x.valid = false;
-  }
+  sync_index_stamp();
   return EditCode::Ok;
 }
 
@@ -457,11 +464,7 @@ template <geom::CoordType C> Editor<C>::Prim::Prim(Editor &e, OpKind kind) : ed(
     for (auto &t : ed.touched_) {
       t.clear();
     }
-    if (ed.k_.version() != ed.ids_stamp_) {
-      for (IdIndex &x : ed.ids_) {
-        x.valid = false;
-      }
-    }
+    (void)0; /* the index stamp is checked by begin_internal at depth 0 */
   }
 }
 
@@ -510,7 +513,7 @@ template <geom::CoordType C> EditCode Editor<C>::Prim::finish()
     ed.in_prim_ = false;
   }
   if (c == EditCode::Ok) {
-    ed.ids_stamp_ = ed.k_.version();
+    ed.sync_index_stamp();
   }
   code = c;
   return c;
@@ -609,6 +612,7 @@ template <geom::CoordType C> void Editor<C>::touch(Grp g, uint32_t row)
     abort();
   }
   touched_[uint32_t(g)].append(row);
+  idx_.mark(g, row);
   const Savepoint &s = sp_.back();
   if (row >= s.size[uint32_t(g)]) {
     return; /* appended inside this savepoint: dropped by rollback */
@@ -647,6 +651,7 @@ template <geom::CoordType C> uint32_t Editor<C>::alloc(Grp g)
     }
     else {
       touched_[uint32_t(g)].append(i);
+      idx_.mark(g, i);
     }
     out = d.alloc();
     log_.alloc.append(AllocEvent{out, uint8_t(g), from_free ? AllocKind::FromFree : AllocKind::Append});
@@ -790,42 +795,8 @@ template <geom::CoordType C> bool Editor<C>::live(Grp g, uint32_t i) const
 
 template <geom::CoordType C> bool Editor<C>::id_used(Grp g, ident::PersistentId id)
 {
-  const int s = edit_detail::id_slot(g);
-  IdIndex &x = ids_[s];
-  if (!x.valid) {
-    x.m.clear();
-    auto add = [&](const auto &dom) {
-      const auto &col = dom.template get<".id">();
-      dom.for_each_live([&](uint32_t i) { x.m[col[i]] = i; });
-    };
-    if (g == Grp::Verts) {
-      add(k_.verts);
-    }
-    else if (g == Grp::Edges) {
-      add(k_.edges);
-    }
-    else {
-      add(k_.faces);
-    }
-    x.valid = true;
-  }
-  return x.m.count(id) != 0;
-}
-
-template <geom::CoordType C> void Editor<C>::id_add(Grp g, ident::PersistentId id, uint32_t index)
-{
-  IdIndex &x = ids_[edit_detail::id_slot(g)];
-  if (x.valid) {
-    x.m[id] = index;
-  }
-}
-
-template <geom::CoordType C> void Editor<C>::id_remove(Grp g, ident::PersistentId id)
-{
-  IdIndex &x = ids_[edit_detail::id_slot(g)];
-  if (x.valid) {
-    x.m.erase(id);
-  }
+  idx_.flush(k_);
+  return idx_.id_count(uint32_t(edit_detail::id_slot(g)), id) != 0;
 }
 
 template <geom::CoordType C> EdgeRef Editor<C>::find_edge(VertRef a, VertRef b) const
@@ -861,42 +832,14 @@ void Editor<C>::inclusions(FaceRef f, litestl::util::Vector<uint32_t, 16> &out) 
   if (!ident::ContainerRef::face(f, target)) {
     return;
   }
-  const auto &vc = k_.verts.template get<".v.container">();
-  k_.verts.for_each_live([&](uint32_t v) {
-    if (vc[v] == target) {
-      out.append(v << 1);
-    }
-  });
-  const auto &ec = k_.edges.template get<".e.container">();
-  k_.edges.for_each_live([&](uint32_t e) {
-    if (ec[e] == target) {
-      out.append((e << 1) | 1);
-    }
-  });
+  idx_.flush(k_);
+  idx_.inclusions(target, out);
 }
 
 template <geom::CoordType C> ident::PersistentId Editor<C>::region_winning_hint(uint32_t r) const
 {
-  /* CLAUDENOTE: O(F) scan; the hint index (P3b W4) replaces it */
-  std::map<ident::PersistentId, uint32_t> votes;
-  const auto &sh = k_.faces.sides().template get<".fs.hint">();
-  k_.faces.for_each_live([&](uint32_t f) {
-    for (uint32_t s = 0; s < 2; s++) {
-      const ident::PersistentId h = sh[2 * f + s];
-      if (k_.region(FaceRef(f), s).i == r && !(h == ident::kNoId)) {
-        votes[h]++;
-      }
-    }
-  });
-  ident::PersistentId best{};
-  uint32_t n = 0;
-  for (auto &[h, c] : votes) {
-    if (c > n) {
-      n = c;
-      best = h;
-    }
-  }
-  return best == ident::unbounded_region_id() ? ident::PersistentId{} : best;
+  idx_.flush(k_);
+  return idx_.winning_hint(r);
 }
 
 template <geom::CoordType C> bool Editor<C>::hint_in_use(ident::PersistentId h) const
@@ -904,28 +847,26 @@ template <geom::CoordType C> bool Editor<C>::hint_in_use(ident::PersistentId h) 
   if (h == ident::kNoId) {
     return false;
   }
-  bool used = false;
-  const auto &vh = k_.verts.template get<".v.container_hint">();
-  k_.verts.for_each_live([&](uint32_t v) { used = used || vh[v] == h; });
-  const auto &eh = k_.edges.template get<".e.container_hint">();
-  k_.edges.for_each_live([&](uint32_t e) { used = used || eh[e] == h; });
-  return used;
+  idx_.flush(k_);
+  return idx_.hint_in_use(h);
 }
 
 template <geom::CoordType C>
 bool Editor<C>::hint_carried(ident::PersistentId h, uint32_t skip_side_a, uint32_t skip_side_b) const
 {
+  idx_.flush(k_);
+  uint32_t n = idx_.carriers(h);
   const auto &sh = k_.faces.sides().template get<".fs.hint">();
-  bool found = false;
-  k_.faces.for_each_live([&](uint32_t f) {
-    for (uint32_t s = 0; s < 2; s++) {
-      const uint32_t row = 2 * f + s;
-      if (row != skip_side_a && row != skip_side_b && sh[row] == h) {
-        found = true;
-      }
+  auto skip = [&](uint32_t row) {
+    if (row != NONE && row < sh.size() && k_.faces.live(row / 2) && sh[row] == h && n > 0) {
+      n--;
     }
-  });
-  return found;
+  };
+  skip(skip_side_a);
+  if (skip_side_b != skip_side_a) {
+    skip(skip_side_b);
+  }
+  return n > 0;
 }
 
 } // namespace ubertopo::topo

@@ -60,7 +60,6 @@ template <geom::CoordType C> EditCode Editor<C>::make_vertex(const Point &p, ide
   const VertRef v(alloc(Grp::Verts));
   setV<"pos">(v, p);
   setV<".id">(v, id);
-  id_add(Grp::Verts, id, v.i);
   pr.op.pts.append(p);
   pr.op.ids.append(id);
   if (out) {
@@ -81,7 +80,6 @@ template <geom::CoordType C> EditCode Editor<C>::kill_vertex(VertRef v)
   if (k_.vert_edge(v)) {
     return pr.fail(EditCode::NotIsolated, ident::ElemKind::Vertex, v.i);
   }
-  id_remove(Grp::Verts, k_.vert_id(v));
   free(Grp::Verts, v.i);
   pr.op.u.append(v.i);
   return pr.finish();
@@ -163,7 +161,6 @@ EditCode Editor<C>::make_edge(VertRef a, VertRef b, ident::PersistentId id, Edge
   setE<".id">(e, id);
   disk_insert(e, 0);
   disk_insert(e, 1);
-  id_add(Grp::Edges, id, e.i);
   pr.op.u.append(a.i);
   pr.op.u.append(b.i);
   pr.op.ids.append(id);
@@ -187,7 +184,6 @@ template <geom::CoordType C> EditCode Editor<C>::kill_edge(EdgeRef e)
   }
   disk_remove(e, 0);
   disk_remove(e, 1);
-  id_remove(Grp::Edges, k_.edge_id(e));
   free(Grp::Edges, e.i);
   pr.op.u.append(e.i);
   return pr.finish();
@@ -241,12 +237,7 @@ template <geom::CoordType C> EditCode Editor<C>::embed_impl(bool is_edge, uint32
       /* the region's winning hint (build_regions' vote: most sides, ties to
        * the smaller hint), if no other region wins it (P3b C4) */
       hint = region_winning_hint(t.index);
-      bool ambiguous = false;
-      if (!(hint == ident::kNoId)) {
-        for (uint32_t r = 1; r < k_.regions.capacity() && !ambiguous; r++) {
-          ambiguous = r != t.index && k_.regions.live(r) && region_winning_hint(r) == hint;
-        }
-      }
+      const bool ambiguous = !(hint == ident::kNoId) && idx_.other_winner(t.index, hint);
       if (hint == ident::kNoId || ambiguous) {
         return pr.fail(EditCode::UnhintedRegion, ident::ElemKind::Region, t.index);
       }
@@ -382,10 +373,6 @@ EditCode Editor<C>::split_edge(EdgeRef e, const Point &p, VertRef *v_out, EdgeRe
     return pr.fail(EditCode::PropagationFailed, ident::ElemKind::Edge, e.i);
   }
 
-  id_remove(Grp::Edges, eid);
-  id_add(Grp::Edges, id_e, e.i);
-  id_add(Grp::Edges, id_e2, e2.i);
-  id_add(Grp::Verts, id_v, v.i);
   lineage_.push_back({eid, id_e, ident::ElemKind::Edge, LineageKind::Split});
   lineage_.push_back({eid, id_e2, ident::ElemKind::Edge, LineageKind::Split});
   lineage_.push_back({eid, id_v, ident::ElemKind::Vertex, LineageKind::Split});
@@ -514,8 +501,6 @@ template <geom::CoordType C> EditCode Editor<C>::join_edge(VertRef v, EdgeRef *s
       }
     }
   }
-  id_remove(Grp::Edges, id2);
-  id_remove(Grp::Verts, idv);
   lineage_.push_back({id2, id1, ident::ElemKind::Edge, LineageKind::Merge});
   lineage_.push_back({id1, id1, ident::ElemKind::Edge, LineageKind::Merge});
   pr.op.u.append(v.i);

@@ -6,7 +6,8 @@
  *  - Slots are live or free (".live"). free(i) resets every column of slot i
  *    to its default *except ".gen"*, then bumps ".gen" and adds i to the
  *    free set, so a stale Handle never resolves to a reused slot.
- *  - alloc() takes the *lowest* free slot (a min-heap; plan P3 C15), so the
+ *  - alloc() takes the *lowest* free slot (an ordered set; plan P3 C15 and
+ *    P3b §3.4: insert, erase and min in O(log n)), so the
  *    allocation sequence is a function of ".live" alone: continuing in memory
  *    and continuing after read() / permute() allocate identically.
  *  - alloc_n(n) appends a dense range and ignores the freelist (bulk build).
@@ -20,6 +21,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <set>
 
 #include "litestl/attr/schema.h"
 #include "litestl/util/span.h"
@@ -94,16 +96,16 @@ public:
   /** The slot the next alloc() returns: the lowest free one, else capacity(). */
   uint32_t peek_alloc() const
   {
-    return free_.size() > 0 ? free_[0] : capacity();
+    return free_.empty() ? capacity() : *free_.begin();
   }
 
   /** One slot: the lowest free one, else a new one at the end. */
   uint32_t alloc()
   {
     uint32_t i;
-    if (free_.size() > 0) {
-      std::pop_heap(free_.begin(), free_.end(), std::greater<uint32_t>());
-      i = free_.pop_back();
+    if (!free_.empty()) {
+      i = *free_.begin();
+      free_.erase(free_.begin());
     }
     else {
       i = capacity();
@@ -143,8 +145,7 @@ public:
     }
     auto &gen = g_.template get<".gen">();
     gen.set(i, gen[i] + 1);
-    free_.append(i);
-    std::push_heap(free_.begin(), free_.end(), std::greater<uint32_t>());
+    free_.insert(i);
     live_count_--;
   }
 
@@ -154,21 +155,13 @@ public:
   void undo_alloc(uint32_t i, bool from_free)
   {
     if (from_free) {
-      free_.append(i);
-      std::push_heap(free_.begin(), free_.end(), std::greater<uint32_t>());
+      free_.insert(i);
     }
     live_count_--;
   }
   void undo_free(uint32_t i)
   {
-    for (int k = 0; k < free_.size(); k++) {
-      if (free_[k] == i) {
-        free_[k] = free_.last();
-        free_.pop_back();
-        std::make_heap(free_.begin(), free_.end(), std::greater<uint32_t>());
-        break;
-      }
-    }
+    free_.erase(i);
     live_count_++;
   }
 
@@ -256,15 +249,14 @@ public:
         live_count_++;
       }
       else {
-        free_.append(i);
+        free_.insert(i);
       }
     }
-    std::make_heap(free_.begin(), free_.end(), std::greater<uint32_t>());
   }
 
 protected:
   Group g_;
-  litestl::util::Vector<uint32_t> free_; /* min-heap of free slots */
+  std::set<uint32_t> free_; /* free slots, ordered */
   uint32_t live_count_ = 0;
   uint32_t gen_floor_ = 0;
 };

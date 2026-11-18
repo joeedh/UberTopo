@@ -227,7 +227,6 @@ EditCode Editor<C>::make_face(std::span<const VertRef> verts,
     }
   }
   set_dirty();
-  id_add(Grp::Faces, id, f.i);
   pr.op.u.append(flags);
   pr.op.u.append(uint32_t(loop_sizes.size()));
   for (uint32_t m : loop_sizes) {
@@ -279,7 +278,6 @@ template <geom::CoordType C> EditCode Editor<C>::kill_face(FaceRef f)
   for (uint32_t l : ls) {
     free(Grp::Loops, l);
   }
-  id_remove(Grp::Faces, k_.face_id(f));
   free(Grp::Faces, f.i);
   set_dirty();
   pr.op.u.append(f.i);
@@ -529,10 +527,6 @@ EditCode Editor<C>::split_face(FaceRef f, VertRef a, VertRef b, FaceRef *other, 
   {
     return pr.fail(EditCode::PropagationFailed, ElemKind::Face, f.i);
   }
-  id_remove(Grp::Faces, fid);
-  id_add(Grp::Faces, id_l, f.i);
-  id_add(Grp::Faces, id_r, fr.i);
-  id_add(Grp::Edges, id_e, e.i);
   lineage_.push_back({fid, id_l, ElemKind::Face, LineageKind::Split});
   lineage_.push_back({fid, id_r, ElemKind::Face, LineageKind::Split});
   pr.op.u.append(f.i);
@@ -702,8 +696,6 @@ template <geom::CoordType C> EditCode Editor<C>::join_faces(EdgeRef e, FaceRef *
     k_.for_each_loop(fs, [&](LoopRef l) { k_.for_each_coedge(l, [&](CoedgeRef c) { refresh_ec(k_.edge_of(c)); }); });
   }
   set_dirty();
-  id_remove(Grp::Faces, ida);
-  id_remove(Grp::Edges, ide);
   lineage_.push_back({ida, ids, ElemKind::Face, LineageKind::Merge});
   lineage_.push_back({ids, ids, ElemKind::Face, LineageKind::Merge});
   pr.op.u.append(e.i);
@@ -878,9 +870,9 @@ template <geom::CoordType C> EditCode Editor<C>::run_barrier(OpKind kind)
   op.kind = kind;
   ops_.push_back(std::move(op));
   c = commit_internal(redoing_);
-  for (IdIndex &x : ids_) {
-    x.valid = false;
-  }
+  idx_.invalidate();
+  idx_.flush(k_); /* eagerly, inside the barrier (C13) */
+  sync_index_stamp();
   return c;
 }
 

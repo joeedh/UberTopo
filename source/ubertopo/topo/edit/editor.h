@@ -38,6 +38,7 @@
 #include "litestl/util/vector.h"
 #include "ubertopo/topo/complex.h"
 #include "ubertopo/topo/edit/edit_types.h"
+#include "ubertopo/topo/edit/editor_index.h"
 #include "ubertopo/topo/edit/journal.h"
 #include "ubertopo/topo/edit/propagate.h"
 
@@ -144,6 +145,14 @@ public:
    * is nothing to drop. */
   EditCode compact();
 
+  /** Test hook: the maintained index equals one rebuilt from scratch. */
+  bool index_consistent() const
+  {
+    EditIndex<C> fresh;
+    fresh.flush(k_);
+    idx_.flush(k_);
+    return !idx_.valid() || idx_.same_as(fresh);
+  }
   /** The edge joining @p a and @p b, if any. */
   EdgeRef find_edge(VertRef a, VertRef b) const;
 
@@ -232,8 +241,6 @@ private:
 
   /* ---- queries (editor.cc) ---- */
   bool id_used(Grp g, ident::PersistentId id);
-  void id_add(Grp g, ident::PersistentId id, uint32_t index);
-  void id_remove(Grp g, ident::PersistentId id);
   bool live(Grp g, uint32_t i) const;
   void inclusions(FaceRef f, litestl::util::Vector<uint32_t, 16> &out) const; /* (index << 1) | is_edge */
   bool hint_in_use(ident::PersistentId h) const;
@@ -267,13 +274,23 @@ private:
   /* rows written or allocated by the current outer primitive (local validation) */
   litestl::util::Vector<uint32_t> touched_[kGroupCount];
 
-  /* persistent-ID indices of vertices, edges and faces (built lazily) */
-  struct IdIndex {
-    std::map<ident::PersistentId, uint32_t> m;
-    bool valid = false;
-  };
-  IdIndex ids_[3];
-  uint64_t ids_stamp_ = 0;
+  /* derived indices (editor_index.h); idx_stamp_ is the complex version
+   * they were last consistent with, apart from rows marked dirty */
+  mutable EditIndex<C> idx_;
+  uint64_t idx_stamp_ = 0;
+  /** Marks the index consistent with the current version (after any editor
+   * operation; plan P3b C10). */
+  void sync_index_stamp()
+  {
+    idx_stamp_ = k_.version();
+  }
+  /** Invalidates the index if something wrote outside the editor. */
+  void check_index_stamp()
+  {
+    if (k_.version() != idx_stamp_) {
+      idx_.invalidate();
+    }
+  }
 };
 
 extern template class Editor<double>;
