@@ -79,13 +79,21 @@ using Live = AttrDef<".live", attr::BoolColumn, ColumnFlags::Topo>;
 
 template <geom::CoordType C> using Pos = AttrDef<"pos", attr::Column<geom::Point<C>>>;
 
+/** A region container named by a generator hint, resolved into ".v.container"
+ * / ".e.container" by build_regions() (region indices don't exist at build
+ * time; plan P2 W6). kNoId when there is none. */
+template <litestl::util::StrLiteral Name>
+struct ContainerHintId : AttrDef<Name, attr::Column<ident::PersistentId>, ColumnFlags::Topo> {};
+
 template <geom::CoordType C>
-using VertexSchema = Schema<Pos<C>, Link<".v.e">, Container<".v.container">, Id, Gen, Live>;
+using VertexSchema =
+    Schema<Pos<C>, Link<".v.e">, Container<".v.container">, ContainerHintId<".v.container_hint">, Id, Gen, Live>;
 
 using EdgeSchema = Schema<Link2<".e.vs">,
                           Link4<".e.disk">,
                           Link<".e.c">,
                           Container<".e.container">,
+                          ContainerHintId<".e.container_hint">,
                           Geom<".e.curve">,
                           Id,
                           Gen,

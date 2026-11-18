@@ -4,18 +4,19 @@
 # geom/: coordinate types, tile frames, derived exact predicates (header-only).
 add_library(ubertopo_geom INTERFACE)
 target_include_directories(ubertopo_geom INTERFACE ${PROJECT_SOURCE_DIR}/source)
-target_link_libraries(ubertopo_geom INTERFACE predicates math util platform)
+target_link_libraries(ubertopo_geom INTERFACE predicates math util)
 
 # ident/: persistent IDs, typed references (header-only).
 add_library(ubertopo_ident INTERFACE)
 target_include_directories(ubertopo_ident INTERFACE ${PROJECT_SOURCE_DIR}/source)
-target_link_libraries(ubertopo_ident INTERFACE util platform)
+target_link_libraries(ubertopo_ident INTERFACE util)
 
 # topo/: domains, schemas, Complex<C>, builder, regions, validator.
 add_library(ubertopo_topo STATIC
   topo/schema.cc
+  topo/builder.cc
 )
-target_link_libraries(ubertopo_topo PUBLIC ubertopo_geom ubertopo_ident attr)
+target_link_libraries(ubertopo_topo PUBLIC ubertopo_geom ubertopo_ident attr util)
 
 if (BUILD_TESTING)
   add_subdirectory(tests)

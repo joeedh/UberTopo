@@ -2,7 +2,9 @@
 function(ut_test file)
   get_filename_component(name ${file} NAME_WE)
   add_executable(${name} ${file})
-  target_link_libraries(${name} PRIVATE ${ARGN})
+  # platform is a litestl OBJECT library: its objects must be linked into the
+  # executable itself (static archives listed before util can't supply them).
+  target_link_libraries(${name} PRIVATE ${ARGN} platform)
   # "source/" is the include root: #include "litestl/..." and "ubertopo/..."
   target_include_directories(${name} PRIVATE ${PROJECT_SOURCE_DIR}/source)
   add_test(NAME ${name} COMMAND ${name})
@@ -32,3 +34,5 @@ if (NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
   ut_compile_fail(ref_implicit_index "conversion from|no viable conversion|cannot convert|copy-initialization")
 endif()
 ut_test(test_topo_domain.cc ubertopo_topo)
+ut_test(test_topo_builder.cc ubertopo_topo)
+ut_test(test_topo_radial.cc ubertopo_topo)
