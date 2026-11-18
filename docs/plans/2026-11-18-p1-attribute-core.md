@@ -834,6 +834,20 @@ and the debugging-guide entries.
 | 12 | 0.67 | 4.3 | 10.4 KB |
 | 14 | 0.69 | 4.3 | 16.5 KB |
 
-**Configuration matrix:** see the run recorded below. It is filled in when the
-configuration run completes.
+**Configuration matrix (final, 2026-11-18, litestl `f0b8f2c`):** all **30/30** tests
+pass in **all 7 configurations**:
+- clang Release;
+- gcc Release;
+- clang `-march=x86-64-v3`;
+- clang `LITESTL_NO_INT128`;
+- gcc RelWithDebInfo + TSan (`LITESTL_ATTR_CHECKS=1`);
+- gcc Debug + UBSan;
+- gcc Debug + ASan.
+
+The sanitizer runs used `LITESTL_TEST_SCALE_DIV=4`. The P0 digest and the new attr
+digest match everywhere.
+
+Earlier matrix runs found two real problems, both fixed:
+- NaN-payload nondeterminism in clang Release;
+- the `Vector::remove_at` use-after-free under TSan.
 
