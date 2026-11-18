@@ -4,12 +4,17 @@
  * allocator (after Sculptcore's ElemData; plan P2 W4).
  *
  *  - Slots are live or free (".live"). free(i) resets every column of slot i
- *    to its default *except ".gen"*, then bumps ".gen" and pushes i on a LIFO
- *    freelist, so a stale Handle never resolves to a reused slot.
+ *    to its default *except ".gen"*, then bumps ".gen" and adds i to the
+ *    free set, so a stale Handle never resolves to a reused slot.
+ *  - alloc() takes the *lowest* free slot (a min-heap; plan P3 C15), so the
+ *    allocation sequence is a function of ".live" alone: continuing in memory
+ *    and continuing after read() / permute() allocate identically.
  *  - alloc_n(n) appends a dense range and ignores the freelist (bulk build).
  *  - Copying a Domain is a snapshot (columns are copy-on-write). */
 
+#include <algorithm>
 #include <cstdint>
+#include <functional>
 
 #include "litestl/attr/schema.h"
 #include "litestl/util/span.h"
@@ -81,11 +86,18 @@ public:
     return g_.template get<".gen">()[i];
   }
 
-  /** One slot: the most recently freed, else a new one at the end. */
+  /** The slot the next alloc() returns: the lowest free one, else capacity(). */
+  uint32_t peek_alloc() const
+  {
+    return free_.size() > 0 ? free_[0] : capacity();
+  }
+
+  /** One slot: the lowest free one, else a new one at the end. */
   uint32_t alloc()
   {
     uint32_t i;
     if (free_.size() > 0) {
+      std::pop_heap(free_.begin(), free_.end(), std::greater<uint32_t>());
       i = free_.pop_back();
     }
     else {
@@ -121,7 +133,32 @@ public:
     auto &gen = g_.template get<".gen">();
     gen.set(i, gen[i] + 1);
     free_.append(i);
+    std::push_heap(free_.begin(), free_.end(), std::greater<uint32_t>());
     live_count_--;
+  }
+
+  /* Undo hooks for the editor's rollback (topo/edit): each reverses the
+   * allocator bookkeeping of one alloc() / free(); the rows themselves are
+   * restored by the caller, and appended rows are dropped by resizing. */
+  void undo_alloc(uint32_t i, bool from_free)
+  {
+    if (from_free) {
+      free_.append(i);
+      std::push_heap(free_.begin(), free_.end(), std::greater<uint32_t>());
+    }
+    live_count_--;
+  }
+  void undo_free(uint32_t i)
+  {
+    for (int k = 0; k < free_.size(); k++) {
+      if (free_[k] == i) {
+        free_[k] = free_.last();
+        free_.pop_back();
+        std::make_heap(free_.begin(), free_.end(), std::greater<uint32_t>());
+        break;
+      }
+    }
+    live_count_++;
   }
 
   /** f(index) for every live slot, in index order. */
@@ -157,9 +194,8 @@ public:
     return true;
   }
 
-  /** Drops the freelist and recomputes the live count from ".live" (after a
-   * read or a permutation). The freelist is rebuilt in descending index
-   * order, so the next alloc() reuses the lowest free slot. */
+  /** Rebuilds the free set and the live count from ".live" (after a read or
+   * a permutation). */
   void rebuild_allocator()
   {
     free_.clear();
@@ -173,11 +209,12 @@ public:
         free_.append(i);
       }
     }
+    std::make_heap(free_.begin(), free_.end(), std::greater<uint32_t>());
   }
 
 protected:
   Group g_;
-  litestl::util::Vector<uint32_t> free_;
+  litestl::util::Vector<uint32_t> free_; /* min-heap of free slots */
   uint32_t live_count_ = 0;
 };
 

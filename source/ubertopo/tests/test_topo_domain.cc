@@ -32,8 +32,8 @@ static void test_alloc_free()
   UT_CHECK(d.get<".e.vs">()[4] == (U32x2{4, 5}));
   UT_CHECK(!d.resolve(h2) && !d.resolve(h3));
 
-  /* LIFO reuse; generations never go back */
-  UT_CHECK(d.alloc() == 3 && d.alloc() == 2 && d.alloc() == 5);
+  /* lowest free slot first (P3 C15); generations never go back */
+  UT_CHECK(d.peek_alloc() == 2 && d.alloc() == 2 && d.alloc() == 3 && d.peek_alloc() == 5 && d.alloc() == 5);
   UT_CHECK(d.gen(3) == 1 && d.gen(2) == 1 && d.gen(5) == 0);
   UT_CHECK(!d.resolve(h3)); /* stale handle does not match the reused slot */
   d.free(3);
@@ -52,6 +52,22 @@ static void test_alloc_free()
   d.free(4);
   d.rebuild_allocator();
   UT_CHECK(d.live_count() == 4 && d.free_count() == 2 && d.alloc() == 1 && d.alloc() == 4);
+
+  /* the order is a function of the free set: free in any order, alloc ascending */
+  for (uint32_t i : {5u, 1u, 3u}) {
+    d.free(i);
+  }
+  UT_CHECK(d.alloc() == 1 && d.alloc() == 3 && d.alloc() == 5 && d.alloc() == 6);
+
+  /* undo hooks reverse the bookkeeping */
+  d.free(2);
+  const uint32_t cnt = d.live_count();
+  const uint32_t i = d.alloc();
+  d.undo_alloc(i, true);
+  UT_CHECK(i == 2 && d.peek_alloc() == 2 && d.live_count() == cnt);
+  d.free(0);
+  d.undo_free(0);
+  UT_CHECK(d.peek_alloc() == 2 && d.live_count() == cnt && d.free_count() == 1);
 }
 
 static void test_snapshot()

@@ -20,6 +20,7 @@ add_library(ubertopo_topo STATIC
   topo/validate_geom.cc
   topo/freeze.cc
   topo/io.cc
+  topo/edit/editor.cc
 )
 target_link_libraries(ubertopo_topo PUBLIC ubertopo_geom ubertopo_ident attr util)
 

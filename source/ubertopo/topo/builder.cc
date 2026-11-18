@@ -7,6 +7,7 @@
 #include "litestl/util/task.h"
 #include "ubertopo/geom/cdt/cdt.h"
 #include "ubertopo/geom/predicates.h"
+#include "ubertopo/topo/face_geom.h"
 #include "ubertopo/topo/radial.h"
 
 namespace ubertopo::topo {
@@ -355,74 +356,22 @@ template <geom::CoordType C> bool Builder<C>::build(Complex<C> &out, BuildReport
       }
       const geom::PolyView<C> view{std::span<const Point>(pts.data(), pts.size()),
                                    std::span<const uint32_t>(off.data(), off.size())};
-      /* base triple: pts[0], the first distinct point, the first off their line */
-      int ib = -1, ic = -1;
-      for (int i = 1; i < int(pts.size()) && ib < 0; i++) {
-        if (geom::lex_compare<C>(pts[i], pts[0]) != 0) {
-          ib = i;
-        }
-      }
-      for (int i = 1; ib >= 0 && i < int(pts.size()) && ic < 0; i++) {
-        for (int k = 0; k < 3; k++) {
-          if (geom::orient2d_proj<C>(pts[0], pts[ib], pts[i], k) != 0) {
-            ic = i;
-            break;
-          }
-        }
-      }
-      bool planar = ic >= 0;
-      if (ic < 0) {
-        fail(BuildCode::DegenerateLoop);
-      }
-      else {
-        for (size_t i = 0; i < pts.size() && planar; i++) {
-          planar = geom::vol3<C>(pts[0], pts[ib], pts[ic], pts[i]) == 0;
-        }
-        if (!planar && !policy.allow_projectable_faces) {
-          fail(BuildCode::NonPlanarFace);
-        }
-      }
-      if (err < 0 && !planar) {
-        /* amendment A1: projectable along the dominant canonical Newell axis,
-         * else the others in index order; T(f) is the canonical CDT */
-        const int dom = geom::project_axis_canonical<C>(view);
-        int axes[3] = {dom, -1, -1}, na = dom >= 0 ? 1 : 0;
-        for (int k = 0; k < 3; k++) {
-          if (k != dom) {
-            axes[na++] = k;
-          }
-        }
-        bool winding = false, ok = false;
-        for (int a = 0; a < na && !ok; a++) {
-          const geom::CdtStatus st = geom::cdt_proj<C>(view, axes[a], f_tris[f]);
-          if (st == geom::CdtStatus::Ok) {
-            f_axis[f] = int8_t(axes[a]);
-            ok = true;
-          }
-          winding = winding || st == geom::CdtStatus::HoleOrientation;
-        }
-        if (!ok) {
-          fail(winding ? BuildCode::HoleOrientation : BuildCode::NotProjectable);
-        }
-      }
-      if (err < 0 && planar) {
-        const int axis = geom::project_axis<C>(view);
-        if (axis < 0) {
+      const FaceGeom g = classify_face<C>(view, policy.allow_projectable_faces, f_axis[f], f_tris[f]);
+      switch (g) {
+        case FaceGeom::Ok:
+          break;
+        case FaceGeom::DegenerateLoop:
           fail(BuildCode::DegenerateLoop);
-        }
-        else {
-          const uint32_t outer = geom::outer_loop_proj<C>(view, axis);
-          const int so = geom::loop_orientation_proj<C>(view.loop(outer), axis);
-          for (uint32_t l = 0; l < view.loop_count(); l++) {
-            const int s = geom::loop_orientation_proj<C>(view.loop(l), axis);
-            if (s == 0) {
-              fail(BuildCode::DegenerateLoop);
-            }
-            else if (l != outer && s == so) {
-              fail(BuildCode::HoleOrientation);
-            }
-          }
-        }
+          break;
+        case FaceGeom::NonPlanarFace:
+          fail(BuildCode::NonPlanarFace);
+          break;
+        case FaceGeom::NotProjectable:
+          fail(BuildCode::NotProjectable);
+          break;
+        case FaceGeom::HoleOrientation:
+          fail(BuildCode::HoleOrientation);
+          break;
       }
       f_err[f] = err;
     }
