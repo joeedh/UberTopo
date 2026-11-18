@@ -890,8 +890,21 @@ The decisions are recorded in DEC-014, and design 07 is complete.
 4. The validator catches one corruption per code, plus the planted wedge and radial
    mutations.
 5. Compile-fail tests cover cross-kind refs, implicit indices and a missing remap rule.
-6. The matrix results are listed below.
+6. The full matrix passes (listed above).
 7. Hygiene: no file over 40 KB and no `CLAUDENOTE:`.
+
+**Configuration matrix:**
+- UberTopo (17 suites, including compile-fail checks): clang Release, gcc Release,
+  clang `-march=x86-64-v3`, gcc Debug + ASan, gcc Debug + UBSan and gcc TSan (with
+  `LITESTL_ATTR_CHECKS`) all pass. The sanitizer runs use `LITESTL_TEST_SCALE_DIV=4`.
+- litestl (40 tests): clang-rel, gcc-rel, clang-v3, clang-noi128, gcc-tsan, gcc-ubsan
+  and gcc-asan all pass.
+- **Fix found by the matrix:** ASan's leak checker flagged litestl's per-thread tracker
+  lists, which now exist because P2b allocates in worker threads. The UberTopo tests
+  now use litestl's `lsan.supp` (see `docs/debugging.md`).
+
+**Merge.** At the owner's request, litestl `master` was fast-forwarded to `ccf0386`
+(from `ubertopo/p2-support`), which the UberTopo submodule pointer already references.
 
 **Mutation checks:**
 - CDT: tie-break ranks, cavity choice, winding;
