@@ -810,7 +810,7 @@ the amendments below.
 
 ## 11. Implementation notes and deviations (2026-11-18)
 
-Implemented on litestl `ubertopo/p1-attr` (from `8473fba` to `14d57b1`). The UberTopo
+Implemented on litestl `ubertopo/p1-attr` (from `8473fba` to `f0b8f2c`). The UberTopo
 side has the submodule bump, `test_smoke_attr`, design 03/05/06 status notes, DEC-010
 and the debugging-guide entries.
 
@@ -820,7 +820,7 @@ and the debugging-guide entries.
 | W1/W2 | As planned. `io/bytes.h` is header-only and uses a `const_cast` because `util::Vector` has no `const data()`. |
 | W3 | `PagedStore`'s page shift is a runtime setting (A6). Version stamps are minted **lazily**: mutations set a dirty bit and `version()` takes a fresh global stamp. Per-element writes therefore cost nothing extra and stamps stay unique. The A1 checksum is verified on copy-on-write of a shared page, on releasing a shared page via a uniform fill, and in the destructor. |
 | W4 | **`BoolColumn` stores one byte per element** (`Column<uint8_t, BoolOps>`, key `"bool"`). That makes parallel span writes race-free and paging identical to other columns, so the A16 bit-paging rules don't apply. Packing is a later memory optimisation. **NaN results of arithmetic mixes are canonicalised**, found by a Release-only divergence (see `docs/debugging.md`). Column virtuals take `ValidatedMixBatch` (A5). |
-| W5 | As planned with A4/A8/A13/A17/A18. `permute` is serial; callers flatten with `validate_permutation` plus per-column permutes. |
+| W5 | **TSan found a pre-existing litestl bug** in `util::Vector::remove_at`: it move-assigned into a destroyed element, double-freeing owning types such as group slots. Fixed, with a regression test. As planned otherwise, with A4/A8/A13/A17/A18. `permute` is serial; callers flatten with `validate_permutation` plus per-column permutes. |
 | W6 | As planned with A10–A12. **`kRunMin = 8`.** The header is flags, size and default; then the run count; then the runs. |
 | W7 | `test_attr_model`: 7 value types at shifts 2/4/12 (bool 2/6/8), 20k steps each. **Planted bugs** (no copy-on-write, no tail reset, sequential mix) were each caught, with 74–172 failures. Every 16th step also checks page-shift independence of the bytes. |
 | W8 | The registry is in `registry.cc`, with builtins registered on first use. The open-extension test is `TestPairColumn` in `test_attr_group.cc`, a full `ColumnBase` over `std::vector` with a claimed-slot Custom mix. The **A1 death test** forks a child that writes through a stale reference and must abort. The A21 threaded stress test runs under TSan. **Page-size benchmark** (clang Release, median of 5 runs, see the table below): shifts 12 and 14 are both within 10% of the best on read speed, and 12 has the least copy-on-write amplification, so **the default stays at 4096** (closes OI-3). `test_attr_digest` is pinned to `eb4c52c53316afaf23dbdc3cd35d0630`. The `_fma` probe (built with `-ffp-contract=fast`) and builds with clang and gcc `-march=x86-64-v3` all reproduce it. |

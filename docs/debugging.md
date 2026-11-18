@@ -99,3 +99,28 @@ Entry format:
   arithmetic. The model suite now prints the first differing index and the raw bytes
   on a content mismatch, which made this a one-run diagnosis.
 
+## TSan heap-use-after-free in `AttrGroup::remove` (litestl `Vector::remove_at`)
+- **Symptom:** gcc TSan reported a heap-use-after-free and double frees inside
+  `util::Vector<AttrGroup::Slot>::remove_at`, reached from `AttrGroup::remove`. Other
+  configurations passed silently.
+- **Cause:** a pre-existing litestl bug. For non-trivially-copyable `T`, `remove_at`
+  ran `data_[i].~T()` and then **move-assigned into the destroyed object**. For an
+  owning type (a `UniquePtr` inside `Slot`), the assignment freed the dangling pointer a
+  second time.
+- **Fix / technique:**
+  - Shift by move-assignment, which releases the removed value, and destroy only the
+    vacated last slot.
+  - The regression test `test_vector.cc` `test_remove_owning` uses an
+    ownership-tracking element type; it fails on the old code (29 asserts) and passes
+    now.
+  - Lesson: run the sanitizer configurations on new container usage patterns. Owning
+    element types exercise paths that trivially copyable ones skip.
+
+## Line endings silently changed by edit scripts
+- **Symptom:** a 72-line change to a litestl test showed as a 238-line diff.
+- **Cause:** several litestl files use CRLF line endings. Python's text-mode
+  read/write converted them to LF.
+- **Fix / technique:** restore with a binary rewrite, and check
+  `git diff --ignore-cr-at-eol --stat` against the original. When scripting edits to
+  litestl files, open them in binary mode or preserve `newline=''`.
+
