@@ -363,6 +363,23 @@ EditCode Editor<C>::split_face(FaceRef f, VertRef a, VertRef b, FaceRef *other, 
   const uint32_t right_off[2] = {0, uint32_t(right_pts.size())};
   const geom::PolyView<C> right_view{std::span<const Point>(right_pts.data(), right_pts.size()),
                                      std::span<const uint32_t>(right_off, 2)};
+  /* neither child may be degenerate (all its corners on one line) */
+  {
+    litestl::util::Vector<Point, 32> left_pts;
+    for (uint32_t c : p2) {
+      left_pts.append(k_.pos(k_.start_vert(CoedgeRef(c))));
+    }
+    left_pts.append(k_.pos(a));
+    const uint32_t left_off[2] = {0, uint32_t(left_pts.size())};
+    const geom::PolyView<C> left_view{std::span<const Point>(left_pts.data(), left_pts.size()),
+                                      std::span<const uint32_t>(left_off, 2)};
+    bool deg_l = false, deg_r = false;
+    face_points_planar<C>(left_view, &deg_l);
+    face_points_planar<C>(right_view, &deg_r);
+    if (deg_l || deg_r) {
+      return pr.fail(EditCode::DegenerateLoop, ElemKind::Face, f.i, "a child would be degenerate");
+    }
+  }
   auto side_of = [&](const Point &p) {
     return geom::point_in_poly_proj<C>(p, right_view, axis); /* Inside: right child */
   };
