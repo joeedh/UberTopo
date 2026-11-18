@@ -528,7 +528,8 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
 - **Goldens.** The topology hash of the fixed model in `test_topo_determinism`
   (`{0x98c378924d246f78, 0x28007637b0e58ee8}`) joins the determinism contract.
 - **Merged:** after P2b, at the owner's request, litestl `master` was fast-forwarded to
-  `ccf0386` (from `ubertopo/p2-support`). The full matrix passed first.
+  `ccf0386` (from `ubertopo/p2-support`). The full matrix passed first. UberTopo
+  `master` was then fast-forwarded to the P2 branch.
 - **Known limits:**
   - **Handle resolution** across versions: slots that are dropped and later
     re-allocated restart at generation 0.
