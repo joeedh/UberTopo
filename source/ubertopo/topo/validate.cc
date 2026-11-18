@@ -39,6 +39,18 @@ const char *validate_code_name(ValidateCode c)
     UT_VC(ShellPartition)
     UT_VC(ShellRegion)
     UT_VC(UnboundedRegion)
+    UT_VC(VertexLink)
+    UT_VC(NonPlanarFace)
+    UT_VC(SpuriousProjection)
+    UT_VC(ProjectionNotAllowed)
+    UT_VC(NotProjectable)
+    UT_VC(HoleWinding)
+    UT_VC(RadialOrder)
+    UT_VC(ContainerGeometry)
+    UT_VC(LoopIntersection)
+    UT_VC(HoleOutside)
+    UT_VC(FaceIntersection)
+    UT_VC(RegionsStale)
 #undef UT_VC
   }
   return "?";
@@ -481,6 +493,124 @@ struct Checker {
     }
   }
 
+  /* Euler-Poincare at each vertex. The radial orders define, at every
+   * vertex v, a rotation system on its link graph (nodes: face edges at v;
+   * arcs: face corners at v). Its sectors (orbits of the wedge relation on
+   * corner sides) must number E - V + 2C, the count for a planar embedding of
+   * each link component. An inconsistent radial order raises the genus and
+   * lowers the count. */
+  void check_vertex_links()
+  {
+    struct Dsu {
+      util::Vector<uint32_t> p;
+      void init(uint32_t n)
+      {
+        p.resize(n);
+        for (uint32_t i = 0; i < n; i++) {
+          p[i] = i;
+        }
+      }
+      uint32_t find(uint32_t x)
+      {
+        while (p[x] != x) {
+          p[x] = p[p[x]];
+          x = p[x];
+        }
+        return x;
+      }
+      void unite(uint32_t a, uint32_t b)
+      {
+        a = find(a);
+        b = find(b);
+        if (a != b) {
+          p[a < b ? b : a] = a < b ? a : b;
+        }
+      }
+    } sectors, link;
+    sectors.init(2 * NC); /* key: 2 * corner coedge + side */
+    link.init(2 * NE);    /* key: 2 * edge + endpoint slot */
+    auto corner_at = [&](CoedgeRef c, VertRef vx) { return k.start_vert(c) == vx ? c : k.next(c); };
+    auto eslot = [&](EdgeRef e, VertRef vx) { return k.edge_verts(e)[0] == vx ? 0u : 1u; };
+    for (uint32_t c = 0; c < NC; c++) {
+      if (!coedge_ok[c]) {
+        continue;
+      }
+      const CoedgeRef cr(c), cn = k.radial_next(cr);
+      if (!coedge_ok[cn.i]) {
+        continue;
+      }
+      const uint32_t sa = k.side_toward_next(cr), sb = 1 - k.side_toward_next(cn);
+      const auto vs = k.edge_verts(k.edge_of(cr));
+      for (const VertRef vx : vs) {
+        sectors.unite(2 * corner_at(cr, vx).i + sa, 2 * corner_at(cn, vx).i + sb);
+      }
+      /* the corner at c's start joins c's edge and prev(c)'s edge in the link */
+      const VertRef s0 = k.start_vert(cr);
+      const EdgeRef e0 = k.edge_of(cr), e1 = k.edge_of(k.prev(cr));
+      link.unite(2 * e0.i + eslot(e0, s0), 2 * e1.i + eslot(e1, s0));
+    }
+    /* per vertex: corners, link nodes, link components, sectors */
+    util::Vector<uint32_t> corners, nodes;
+    corners.resize(NV);
+    nodes.resize(NV);
+    for (uint32_t i = 0; i < NV; i++) {
+      corners[i] = nodes[i] = 0;
+    }
+    struct Key {
+      uint32_t v, root;
+      bool operator<(const Key &o) const
+      {
+        return v != o.v ? v < o.v : root < o.root;
+      }
+      bool operator==(const Key &o) const = default;
+    };
+    util::Vector<Key> sec_keys, link_keys;
+    for (uint32_t c = 0; c < NC; c++) {
+      if (!coedge_ok[c]) {
+        continue;
+      }
+      const uint32_t vx = k.start_vert(CoedgeRef(c)).i;
+      corners[vx]++;
+      sec_keys.append({vx, sectors.find(2 * c)});
+      sec_keys.append({vx, sectors.find(2 * c + 1)});
+    }
+    for (uint32_t e = 0; e < NE; e++) {
+      if (!elive(e) || !k.edge_coedge(EdgeRef(e))) {
+        continue;
+      }
+      const auto vs = k.edge_verts(EdgeRef(e));
+      for (uint32_t s = 0; s < 2; s++) {
+        if (vs[s].i < NV) {
+          nodes[vs[s].i]++;
+          link_keys.append({vs[s].i, link.find(2 * e + s)});
+        }
+      }
+    }
+    auto count_distinct = [&](util::Vector<Key> &ks, util::Vector<uint32_t> &per_v) {
+      std::sort(ks.begin(), ks.end());
+      per_v.resize(NV);
+      for (uint32_t i = 0; i < NV; i++) {
+        per_v[i] = 0;
+      }
+      for (uint32_t i = 0; i < ks.size(); i++) {
+        if (i == 0 || !(ks[i] == ks[i - 1])) {
+          per_v[ks[i].v]++;
+        }
+      }
+    };
+    util::Vector<uint32_t> nsec, ncomp;
+    count_distinct(sec_keys, nsec);
+    count_distinct(link_keys, ncomp);
+    for (uint32_t i = 0; i < NV; i++) {
+      if (corners[i] == 0) {
+        continue;
+      }
+      if (int64_t(nsec[i]) != int64_t(corners[i]) - int64_t(nodes[i]) + 2 * int64_t(ncomp[i])) {
+        rep.add(VC::VertexLink, ElemKind::Vertex, i);
+      }
+    }
+  }
+
   void run()
   {
     NV = v.capacity;
@@ -498,6 +628,9 @@ struct Checker {
     check_unique_ids(k.faces.get<".id">(), NF, [&](uint32_t i) { return flive(i); }, ElemKind::Face);
     check_unique_ids(
         k.regions.get<".id">(), k.regions.capacity(), [&](uint32_t i) { return k.regions.live(i); }, ElemKind::Region);
+    if (rep.ok()) {
+      check_vertex_links();
+    }
     if (!k.regions_dirty) {
       check_regions();
     }

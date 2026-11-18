@@ -90,7 +90,7 @@ template <geom::CoordType C> static Outcome check_model(Model<C> &m, Complex<C> 
     fprintf(stderr, "%s: region partition differs from ground truth (regions %u, labels %zu)\n", what,
             k.regions.live_count(), m.truth.labels.size());
   }
-  const ValidationReport vr = validate(k);
+  const ValidationReport vr = validate(k, ValidateLevel::Global);
   o.validated = vr.ok();
   if (!vr.ok()) {
     fprintf(stderr, "%s: ", what);

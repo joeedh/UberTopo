@@ -42,6 +42,20 @@ enum class ValidateCode : uint16_t {
   ShellPartition,       /* a face side in no shell, in two shells, or with the wrong .f.shell */
   ShellRegion,          /* .f.region[side] != the shell's region, or region shell chain broken */
   UnboundedRegion,      /* not exactly one unbounded region, at index 0 */
+  VertexLink,           /* Euler-Poincare at a vertex: sector count inconsistent with a planar link */
+  /* embedding layer */
+  NonPlanarFace,        /* an unflagged face is not exactly planar */
+  SpuriousProjection,   /* a projected flag on a planar face, or an invalid axis */
+  ProjectionNotAllowed, /* a projected face in a complex built without the opt-in */
+  NotProjectable,       /* a projected face is not projectable along its stored axis */
+  HoleWinding,          /* a planar face's hole winds like its outer loop */
+  RadialOrder,          /* the stored radial order differs from the geometric one */
+  ContainerGeometry,    /* an included vertex or wire is not inside its container */
+  /* global layer */
+  LoopIntersection,     /* a loop self-intersects, or two loops of a face meet */
+  HoleOutside,          /* a hole is not inside its face's outer loop */
+  FaceIntersection,     /* two faces meet away from shared vertices and edges */
+  RegionsStale,         /* stored regions differ from a fresh build_regions() */
 };
 
 const char *validate_code_name(ValidateCode c);
@@ -79,7 +93,9 @@ struct ValidationReport {
   void print(FILE *out) const;
 };
 
-enum class ValidateLevel : uint8_t { Combinatorial };
+/** Combinatorial (cheap), + Embedding (geometry on topology), + Global
+ * (expensive: loop simplicity, face-face intersections, regions recompute). */
+enum class ValidateLevel : uint8_t { Combinatorial, Embedding, Global };
 
 /** The vertex columns the non-template checks need. */
 struct VertexTopoView {
@@ -93,7 +109,12 @@ struct VertexTopoView {
 /** Combinatorial layer over the coordinate-independent domains. */
 void validate_combinatorial(const ComplexBase &k, const VertexTopoView &v, ValidationReport &rep);
 
-template <geom::CoordType C> ValidationReport validate(const Complex<C> &k, ValidateLevel = ValidateLevel::Combinatorial)
+/** Embedding and global layers (validate_geom.cc); run only on complexes
+ * that pass the combinatorial layer. */
+template <geom::CoordType C> void validate_embedding(const Complex<C> &k, ValidationReport &rep);
+template <geom::CoordType C> void validate_global(const Complex<C> &k, ValidationReport &rep);
+
+template <geom::CoordType C> ValidationReport validate(const Complex<C> &k, ValidateLevel level = ValidateLevel::Combinatorial)
 {
   ValidationReport rep;
   const VertexTopoView v{k.verts.template get<".v.e">(),
@@ -102,7 +123,20 @@ template <geom::CoordType C> ValidationReport validate(const Complex<C> &k, Vali
                          k.verts.template get<".live">(),
                          k.verts.capacity()};
   validate_combinatorial(k, v, rep);
+  if (rep.ok() && level >= ValidateLevel::Embedding) {
+    validate_embedding(k, rep);
+  }
+  if (rep.ok() && level >= ValidateLevel::Global) {
+    validate_global(k, rep);
+  }
   return rep;
 }
+
+extern template void validate_embedding<double>(const Complex<double> &, ValidationReport &);
+extern template void validate_embedding<float>(const Complex<float> &, ValidationReport &);
+extern template void validate_embedding<geom::Lattice>(const Complex<geom::Lattice> &, ValidationReport &);
+extern template void validate_global<double>(const Complex<double> &, ValidationReport &);
+extern template void validate_global<float>(const Complex<float> &, ValidationReport &);
+extern template void validate_global<geom::Lattice>(const Complex<geom::Lattice> &, ValidationReport &);
 
 } // namespace ubertopo::topo

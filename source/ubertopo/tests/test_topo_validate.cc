@@ -5,7 +5,10 @@
  * fronts face the outside) so invariant W also checks that the exact radial
  * order and the wedge rule agree on real models. */
 
+#include "ubertopo/topo/regions.h"
 #include "ubertopo/topo/validate.h"
+
+#include "gen/buildings.h"
 
 #include "litestl/util/alloc.h"
 #include "support/topo_fixtures.h"
@@ -278,10 +281,193 @@ template <geom::CoordType C> static void test_corruptions()
   expect_code<C>(base, VC::UnboundedRegion, [](Complex<C> &k) { k.regions.template get<".r.flags">().set(0, uint8_t(0)); });
 }
 
+template <geom::CoordType C>
+static void expect_level(const Complex<C> &base, ValidateLevel lvl, VC code, const Corrupt<C> &corrupt, const char *what)
+{
+  Complex<C> k = base;
+  corrupt(k);
+  const ValidationReport rep = validate(k, lvl);
+  if (rep.count(code) == 0) {
+    fprintf(stderr, "%s: %s not detected; got: ", what, validate_code_name(code));
+    rep.print(stderr);
+  }
+  UT_CHECK(rep.count(code) > 0);
+}
+
+template <geom::CoordType C> static void move(Complex<C> &k, uint32_t v, const I3 &p)
+{
+  k.verts.template get<"pos">().set(v, pt<C>(p));
+}
+
+template <geom::CoordType C> static uint32_t vertex_at(const Complex<C> &k, const I3 &p)
+{
+  for (uint32_t v = 0; v < k.verts.capacity(); v++) {
+    if (geom::lex_compare<C>(k.pos(VertRef(v)), pt<C>(p)) == 0) {
+      return v;
+    }
+  }
+  return NONE;
+}
+
+template <geom::CoordType C> static void test_geometric_layers()
+{
+  const auto L = ValidateLevel::Embedding, G = ValidateLevel::Global;
+  /* clean models pass every layer */
+  {
+    test::gen::Model<C> m(ident::derive(ident::tag::TestOnly, std::string_view("v")));
+    test::gen::GridOpts g;
+    g.nx = 2;
+    g.windows = 1;
+    test::gen::room_grid(m, {0, 0, 0}, g);
+    test::gen::sensor_and_wire(m, {2000, 0, 0});
+    test::gen::sloped_roof(m, {0, 2000, 0}, 3);
+    Complex<C> k;
+    BuildReport br;
+    RegionReport rr;
+    UT_CHECK(m.b.build(k, br, m.policy) && build_regions(k, rr));
+    expect_clean(k, "generated (combinatorial)");
+    const ValidationReport rep = validate(k, G);
+    if (!rep.ok()) {
+      rep.print(stderr);
+    }
+    UT_CHECK(rep.ok());
+
+    expect_level<C>(k, L, VC::ContainerGeometry, [](Complex<C> &x) {
+      for (uint32_t v = 0; v < x.verts.capacity(); v++) {
+        if (x.vert_container(VertRef(v)).kind() == ident::ContainerKind::Region && x.vert_container(VertRef(v)).index() != 0) {
+          move(x, v, {5000, 5000, 5000}); /* the sensor leaves its room */
+          return;
+        }
+      }
+    }, "sensor outside its room");
+    expect_level<C>(k, L, VC::ProjectionNotAllowed, [](Complex<C> &x) { x.set_allows_projectable(false); },
+                    "projected face without the opt-in");
+    expect_level<C>(k, L, VC::NotProjectable, [](Complex<C> &x) {
+      for (uint32_t f = 0; f < x.faces.capacity(); f++) {
+        if (x.face_proj_axis(FaceRef(f)) == 2) {
+          x.faces.template get<".f.flags">().set(f, with_proj_axis(x.face_flags(FaceRef(f)), 0));
+          return;
+        }
+      }
+    }, "projected face along a wrong axis");
+    expect_level<C>(k, L, VC::SpuriousProjection, [](Complex<C> &x) {
+      x.faces.template get<".f.flags">().set(0, with_proj_axis(x.face_flags(FaceRef(0)), 2));
+    }, "projection flag on a planar face");
+    expect_level<C>(k, L, VC::NonPlanarFace, [](Complex<C> &x) { move(x, vertex_at(x, {0, 0, 0}), {0, 0, -7}); },
+                    "a vertex moved off its faces' planes");
+    expect_level<C>(k, G, VC::RegionsStale, [](Complex<C> &x) {
+      x.regions.template get<".id">().set(1, test::pid(31337));
+    }, "stale region IDs");
+  }
+  /* radial order out of step with geometry: two boxes sharing a wall */
+  {
+    test::GridBuilder<C> g;
+    g.box({0, 0, 0}, {10, 10, 10});
+    g.box({10, 0, 0}, {20, 10, 10});
+    Complex<C> k;
+    BuildReport br;
+    UT_CHECK(g.b.build(k, br));
+    UT_CHECK(validate(k, G).ok());
+    expect_level<C>(k, ValidateLevel::Combinatorial, VC::VertexLink, [](Complex<C> &x) {
+      for (uint32_t e = 0; e < x.edges.capacity(); e++) {
+        std::vector<uint32_t> cyc;
+        x.for_each_radial(EdgeRef(e), [&](CoedgeRef c) { cyc.push_back(c.i); });
+        if (cyc.size() == 3) { /* reversed: a consistent cycle, but the links lose planarity */
+          for (size_t i = 0; i < 3; i++) {
+            x.coedges.template get<".c.radial_next">().set(cyc[i], cyc[(i + 2) % 3]);
+            x.coedges.template get<".c.radial_prev">().set(cyc[i], cyc[(i + 1) % 3]);
+          }
+          return;
+        }
+      }
+    }, "reversed radial cycle");
+    expect_level<C>(k, L, VC::RadialOrder, [](Complex<C> &x) {
+      for (uint32_t e = 0; e < x.edges.capacity(); e++) {
+        std::vector<uint32_t> cyc;
+        x.for_each_radial(EdgeRef(e), [&](CoedgeRef c) { cyc.push_back(c.i); });
+        if (cyc.size() == 3) { /* the cycle no longer starts at the smallest face ID */
+          x.edges.template get<".e.c">().set(e, cyc[1]);
+          return;
+        }
+      }
+    }, "radial cycle start");
+  }
+  /* a lone quad: bow tie (in plane), and a second quad crossing it */
+  {
+    test::GridBuilder<C> g;
+    g.face({{{0, 0, 0}, {10, 0, 0}, {10, 10, 0}, {0, 10, 0}}});
+    g.face({{{5, 5, -5}, {5, 5, 5}, {15, 5, 5}, {15, 5, -5}}}); /* pierces the first */
+    Complex<C> k;
+    BuildReport br;
+    UT_CHECK(g.b.build(k, br));
+    expect_level<C>(k, G, VC::FaceIntersection, [](Complex<C> &) {}, "piercing faces");
+  }
+  {
+    test::GridBuilder<C> g;
+    g.face({{{0, 0, 0}, {10, 0, 0}, {10, 10, 0}, {0, 10, 0}}});
+    Complex<C> k;
+    BuildReport br;
+    UT_CHECK(g.b.build(k, br) && validate(k, G).ok());
+    expect_level<C>(k, G, VC::LoopIntersection, [](Complex<C> &x) { move(x, vertex_at(x, {10, 10, 0}), {-5, 3, 0}); },
+                    "self-intersecting loop");
+  }
+  /* holes: winding and containment */
+  {
+    test::GridBuilder<C> g;
+    g.face({{{0, 0, 0}, {10, 0, 0}, {10, 10, 0}, {0, 10, 0}}, {{2, 2, 0}, {2, 4, 0}, {4, 4, 0}}});
+    Complex<C> k;
+    BuildReport br;
+    UT_CHECK(g.b.build(k, br) && validate(k, G).ok());
+    expect_level<C>(k, L, VC::HoleWinding, [](Complex<C> &x) {
+      const uint32_t a = vertex_at(x, {2, 4, 0}), b = vertex_at(x, {4, 4, 0});
+      move(x, a, {4, 4, 0});
+      move(x, b, {2, 4, 0}); /* swaps two hole corners: the hole now winds the other way */
+    }, "hole wound like the outer loop");
+    expect_level<C>(k, G, VC::HoleOutside, [](Complex<C> &x) {
+      move(x, vertex_at(x, {2, 2, 0}), {22, 2, 0});
+      move(x, vertex_at(x, {2, 4, 0}), {22, 4, 0});
+      move(x, vertex_at(x, {4, 4, 0}), {24, 4, 0});
+    }, "hole outside its face");
+  }
+  /* Euler-Poincare at vertices: a rotation inconsistent with any planar link */
+  {
+    test::GridBuilder<C> g;
+    g.box({0, 0, 0}, {10, 10, 10});
+    g.box({10, 0, 0}, {20, 10, 10});
+    g.box({0, 10, 0}, {10, 20, 10});
+    g.box({10, 10, 0}, {20, 20, 10});
+    Complex<C> k;
+    BuildReport br;
+    UT_CHECK(g.b.build(k, br) && validate(k).ok());
+    /* at an edge with 4 faces, swap two non-adjacent coedges' places */
+    Complex<C> x = k;
+    bool done = false;
+    for (uint32_t e = 0; e < x.edges.capacity() && !done; e++) {
+      std::vector<uint32_t> cyc;
+      x.for_each_radial(EdgeRef(e), [&](CoedgeRef c) { cyc.push_back(c.i); });
+      if (cyc.size() == 4) {
+        const uint32_t order[4] = {cyc[0], cyc[2], cyc[1], cyc[3]};
+        for (int i = 0; i < 4; i++) {
+          x.coedges.template get<".c.radial_next">().set(order[i], order[(i + 1) % 4]);
+          x.coedges.template get<".c.radial_prev">().set(order[i], order[(i + 3) % 4]);
+        }
+        done = true;
+      }
+    }
+    UT_CHECK(done);
+    const ValidationReport rep = validate(x);
+    if (rep.count(VC::VertexLink) == 0) {
+      rep.print(stderr);
+    }
+    UT_CHECK(rep.count(VC::VertexLink) > 0);
+  }
+}
+
 template <geom::CoordType C> static void run_all()
 {
   test_valid_models<C>();
   test_corruptions<C>();
+  test_geometric_layers<C>();
 }
 
 int main()
