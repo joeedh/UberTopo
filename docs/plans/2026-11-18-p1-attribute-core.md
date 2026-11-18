@@ -1,8 +1,9 @@
 # Plan P1 — litestl attribute core (`attr/`)
 
-- **Status:** **v2**. The pressure test is done (§10) and its verdict was "needs rework".
-  This version addresses all 24 findings. Intern pools are moved to **P1b** (§2).
-  Ready for implementation.
+- **Status:** **v3**. The v1 review (§10) said "needs rework". The v2 re-review (§10b)
+  said "ready with changes", and those changes are the normative amendments in **§4b**.
+  Where §4b conflicts with the W-item text, **§4b wins**. Intern pools are moved to
+  **P1b**. Ready for implementation.
 - **Date:** 2026-11-18
 - **Design:** [core-data-model/03](../design/core-data-model/03-attributes.md), plus the
   snapshot and determinism parts of
@@ -499,6 +500,150 @@ schema up by name (finding 7d).
   - `docs/index.md`;
   - `docs/debugging.md` entries as issues arise.
 
+
+## 4b. v3 amendments (normative; supersede the W-item text where they conflict)
+
+These come from the v2 re-review (§10b). They are numbered by its findings.
+
+- **A1. Stale-reference detection.** This replaces the "debug mutation epoch" for
+  `share()`.
+  - In debug builds, `share()` records a checksum of every Dense page that becomes
+    shared, kept next to the buffer.
+  - The checksum is re-verified when that buffer is later copied on write, or released
+    while still shared. A mismatch means someone wrote through a stale reference into a
+    shared page, and is reported as a test failure.
+  - `parallel_write` keeps a scope epoch, now **atomic**, to catch `share()`, `resize`
+    or other structural calls made during the scope.
+  - **AC3 is reworded:** "the debug shared-page checksum detects a write through a
+    reference held across `share()`, and the `parallel_write` scope epoch detects
+    structural calls during the scope".
+  - Both mechanisms are compiled into Debug and into the TSan configuration (which
+    defines `LITESTL_ATTR_CHECKS`), not only when NDEBUG is undefined.
+- **A2. Parallel-write contract.**
+  - Concurrent writes are allowed **only through spans obtained serially**: from
+    `page_write()` before the parallel region, or from the spans `parallel_write(fn)`
+    passes to `fn`.
+  - Calling `write()`, `set()`, `fill()` or any structural method inside a parallel
+    region is forbidden.
+  - The column `version()` is bumped **at the end** of `parallel_write` and when
+    `page_write` is called, never by `prepare_write`.
+- **A3. Shared tails.**
+  - **Any** write into a shared buffer copies it first. That includes the default
+    reset performed when growing past the old size inside the tail capacity.
+  - `same_page_as` compares live length as well as content, and treats Absent and
+    Constant(default) as equal.
+- **A4. Custom mix context.** `MixContext` carries:
+  - `pre`: a pre-call snapshot of the group (a cheap copy-on-write `share()`) that a
+    Custom handler reads siblings from;
+  - `src`: the source group for `mix_from`, or null;
+  - `const void *op`: an operator-defined context (for example Sculptcore-style
+    `merged_co`).
+
+  A Custom column may **claim sibling slots** at registration. The group's generic mix
+  loop skips claimed slots, and the claiming handler writes them, so a column and its
+  guard columns are handled together.
+- **A5. Validated batches.**
+  - `AttrGroup::mix` validates **once** and produces a `ValidatedMixBatch` token. Column
+    virtuals take only the token.
+  - **Checks:**
+    - `offsets[0] == 0`;
+    - offsets are non-decreasing;
+    - `offsets.back() == sources.size()`;
+    - `weights` is empty or the same length as `sources`;
+    - every target and source index is in range;
+    - targets are unique, checked on a sorted copy, O(T log T).
+  - Gather buffers are O(targets × sizeof(T)).
+- **A6. `PageShift` becomes a runtime, per-store constant.**
+  - It is fixed when the store is constructed. The default comes from the build
+    constant, and tests pass 2 or 4.
+  - `Column<T, Ops>` has **no** shift template parameter, so type identity, keys and
+    `builtin<>` are unaffected.
+  - Page arithmetic uses stored shifts and masks.
+  - `builtin<>` and `find<>` compare `ColumnType` **pointers**.
+- **A7. FP flags.**
+  - The `attr` target uses **PUBLIC** options, the same flag set as `predicates`, so
+    they also apply to `attr`'s own `.cc` files.
+  - Mix kernel bodies also open with a block-scoped `#pragma clang fp contract(off)`.
+  - `column.h` has an `#error` on `__FAST_MATH__`.
+  - A **probe test** target compiled with `-ffp-contract=fast`, linking `attr`, checks
+    the pinned mix digest. This proves the kernels are immune.
+- **A8. Serialised builtin layout.**
+  - The stream records the **full builtin layout**: name, key, flags and default for
+    every builtin, with **data omitted** for Temp and Derived builtins.
+  - `read()` parses into a **staging group**, verifies that the layout matches the
+    owner's (including defaults and flags), and drops the target's existing dynamic
+    columns. It **swaps the staging group in only on success**.
+- **A9. Version stamps.**
+  - Stamps come from a **process-global atomic counter**, so every mutation yields a
+    value never seen before, and copies don't collide after divergence.
+  - `AttrGroup::schema_version()` changes on add, remove and read.
+  - `flags` becomes private, with `set_flags()` bumping the version.
+- **A10. Read limits.**
+  - `read(r, ReadLimits{max_elements, max_columns})` is checked **before** any resize.
+  - Run counts must sum to the column `size`, and every column's size must equal the
+    group size. Otherwise the read fails cleanly.
+- **A11. Canonical run encoding,** defined precisely:
+  - Maximal runs of bitwise-equal values are found over the **element stream**, not
+    over pages.
+  - Runs of length at least `kRunMin = 8` (a **format constant**) are emitted as
+    `Default` if their value is the default, otherwise as `Constant`.
+  - Everything else is merged into maximal `Dense` runs.
+  - Dense bool runs are bit-packed from bit 0 of the run.
+  - Size 0 means zero runs.
+- **A12. Hash contents.**
+  - The hash and the stream cover **the same flag set** (all flags).
+  - The default is hashed, because it governs grows.
+  - Custom `ValueOps` must declare a fixed `kEncodedSize`; variable-width values belong
+    in custom column classes, which must length-prefix them.
+- **A13. Group canonical order.** The group hash and stream contain builtins in slot
+  order, then dynamic columns **sorted by name bytes**. Iteration order stays insertion
+  order. Group-level hash and bytes are therefore independent of `ensure` and `remove`
+  history. The group hash covers the builtin count, the column count, and the name, key
+  and content of every column.
+- **A14. Registry storage.**
+  - The registry uses **std containers with the std allocator**, plus `new`-allocated
+    entries, so none of it is visible to litestl's leak tracker. A test registers types
+    and then checks that `test_end` is clean.
+  - `"<elem>[N]"` keys are **registered explicitly**. `ensure` never auto-registers, and
+    `read()` needs prior registration, which the module init functions perform.
+    `static_type()` still lazily registers for convenience, but read correctness never
+    depends on it.
+- **A15. Leak checks across threads.** Threaded tests also assert that
+  `alloc::getMemorySize()`, which is global, returns to its baseline. The per-thread
+  tracker lists can't see worker-thread leaks.
+- **A16. `BoolColumn` paging.** A bool page is `kPage` *elements* (`kPage/64` words) and
+  requires `PageShift ≥ 6`. The tail minimum is clamped to `kPage`. The model suite runs
+  bools at shifts 6 and 8.
+- **A17. Group permute.**
+  - It is **serial by default**, and `permute_jobs()` exposes one job per column so P2's
+    freeze can flatten all domains into one parallel loop without nesting.
+  - Injectivity and range are validated once, returning `bool`.
+- **A18. APIs P2 needs:**
+  - `AttrGroup::mix_from(const AttrGroup &src, batch, policy_of)` matches columns by
+    name and type pointer. Columns the target lacks are created with
+    `ColumnBase::new_like(n)` (same type, default and flags).
+  - Type-erased element access `elem_size()`, `get_bytes(i, out)` and
+    `set_bytes(i, in)`, for the journal's `ColumnDelta`.
+  - `ColumnBase::mix_from` compares `ColumnType` pointers and fails with a message.
+- **A19. Weights are `double`.**
+- **A20. Bounded model-suite cost.**
+  - Element counts are capped at about 6 pages of the current shift, with at most
+    **8 live snapshots**, rotating.
+  - Full per-step checks run at shifts 2/4 (and 6/8 for bools). At the default shift,
+    every 64th step is checked.
+  - Sanitizer configurations run at 1/4 scale (environment variable).
+- **A21. TSan stress.** The writer publishes snapshots to readers through a
+  mutex-protected slot. Readers copy, read and destroy only snapshots they own.
+- **A22. `io/bytes.h` is header-only**, an INTERFACE target, so `attr` doesn't link `io`,
+  and through it `binding` and `lz4`.
+- **A23. W0.1 wording.** There are **no generic constructors** to constrain; the
+  re-review verified that only `operator T*()`/`Vec(const T*)` interplay, which loses to
+  copy. Add `static_assert(sizeof(Vec<T,N>) == N * sizeof(T))`.
+- **A24. Layout and API consistency.**
+  - `column.h` is split up front into `value_ops.h`, `mix.h` and `bool_column.h`.
+  - All name parameters are `std::string_view`.
+  - The registry call is `add<Col>()`, taking its key from `ColumnTypeKey<Col>`.
+
 ## 5. Order and dependencies
 
 ```
@@ -528,8 +673,9 @@ builds and passes all tests.
    bytes match the reference encoders after every step, and every live snapshot
    matches its frozen copy.
 3. **Copy-on-write and threads:** TSan is clean on the writer-plus-snapshot-readers
-   stress and on parallel writers. The debug epoch detects a reference held across
-   `share()`.
+   stress and on parallel writers. **The debug shared-page checksum detects a write
+   through a reference held across `share()`, and the `parallel_write` scope epoch
+   detects structural calls during the scope** (A1).
 4. **Canonical forms:** hash and bytes are identical across page sizes and histories,
    round trips are exact, and fuzzing causes no crash, undefined behaviour or leak.
 5. **The open-extension test passes with no litestl changes** (DEC-007).
@@ -621,3 +767,42 @@ All findings were accepted. Their disposition:
 | 22 | Minor | `util::span`, no heterogeneous Map lookup, int `IndexRange`, alignment, `UniquePtr` base conversion, missing operators and ctors, CMake target, `Bind<T>` detection | All addressed in §3, W1, W4, W5 and W9. `Bind<T>` deferred to N-API |
 | 23 | Minor | P2 interplay: tombstones in hash, uniform pages after permute, permute definition, parallel permute, NOCOPY | `set_default_list`; permute keeps uniform pages, is injective and defaults the rest; parallel group permute; snapshots carry Temp; no NOCOPY flag needed (W4, W5) |
 | 24 | Nit | Design 03 still says "static registrar"; scope too large | Design 03 updated (W9); scope reduced by moving pools to P1b |
+
+## 10b. Re-review of v2 (fresh-context agent, 2026-11-18)
+
+**Verdict:** "ready with changes". The architecture holds. The reviewer **verified W0
+by compiling it**: with defaulted copy, `Vec` is trivially copyable on clang and gcc,
+and every copy form resolves correctly, because there are no generic constructors.
+`Vec` is already `force_type_is_simple`, so W0 legalises existing behaviour rather than
+changing it.
+
+The claimed fixes for v1 findings 1, 2/3/15/16, 4, 6, 8, 12, 17, 19, 20, 21 and 24
+hold. Findings 5, 7, 9/10, 11, 13 and 14 were only partly fixed; they are completed by
+the amendments below.
+
+| # | Sev. | Finding | Amendment |
+|---|---|---|---|
+| 1 | Major | The debug epoch can't detect a write through a reference held across `share()`; it races in const `share()`, and NDEBUG compiles it out of TSan | A1 |
+| 2 | Major | The parallel-write contract conflicts with `version()`, the epoch and bool words | A2 |
+| 3 | Major | The partial tail can be written while shared; `same_page_as` ignores live length | A3 |
+| 4 | Major | The Custom hook reads live, order-dependent sibling state; no claims, no source group, no operator context | A4 |
+| 5 | Major | `MixBatch::validate` incomplete (offset checks) and O(size × columns) | A5 |
+| 6 | Major | `PageShift` isn't part of column identity, so a test-shift `builtin<>` cast is UB | A6 |
+| 7 | Major | INTERFACE FP options miss `attr`'s own TUs; the probe proves nothing | A7 |
+| 8 | Major | Temp/Derived exclusion breaks the builtin layout check; read semantics unspecified | A8 |
+| 9 | Major | Per-column version counters collide after copy; no schema epoch; public flags | A9 |
+| 10 | Major | Unbounded allocation in `read()` from Default/Constant runs | A10 |
+| 11 | Minor | Run encoding not canonical as written | A11 |
+| 12 | Minor | Hash and bytes disagree on user flags; variable-width encode is ambiguous | A12 |
+| 13 | Minor | Group hash composition and column order unspecified | A13 |
+| 14 | Minor | Registry `Map`/`string` storage is leak-tracked; `[N]` keys auto-registered | A14 |
+| 15 | Minor | Worker-thread leaks invisible to the per-thread tracker | A15 |
+| 16 | Minor | `BoolColumn` paging undefined; tail minimum exceeds `kPage` at shift 2 | A16 |
+| 17 | Minor | Parallel permute nests `parallel_for` in P2 freeze | A17 |
+| 18 | Minor | Missing group `mix_from`, `new_like`, type-erased element bytes | A18 |
+| 19 | Minor | Float weights limit f64 precision | A19 |
+| 20 | Minor | Model-suite cost unbounded | A20 |
+| 21 | Minor | TSan stress test violates the threading contract as written | A21 |
+| 22 | Nit | `attr` → `io` drags in bindings and lz4 | A22 |
+| 23 | Nit | W0 wording; size assertion | A23 |
+| 24 | Nit | Split `column.h` early; string type and registry API inconsistencies | A24 |
