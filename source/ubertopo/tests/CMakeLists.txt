@@ -10,3 +10,4 @@ endfunction()
 
 ut_test(test_smoke_litestl.cc predicates math util platform)
 ut_test(test_smoke_attr.cc attr util math platform)
+ut_test(test_geom_predicates.cc ubertopo_geom)
