@@ -493,6 +493,46 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
 - **Goldens.** The persistent-ID derivation goldens in `test_ident.cc` join the
   determinism contract.
 
+## DEC-014 — P2b: regions, validation, freeze, opt-in projected faces with a canonical CDT
+
+- **Date:** 2026-11-18. Implements P2b and amendment A1 of the
+  [P2 plan](plans/2026-11-18-p2-cell-complex.md). The realised API is
+  [design 07](design/core-data-model/07-topology-api.md).
+- **Owner decisions:**
+  - **Opt-in projectable faces.** Non-planar faces are accepted only when client code
+    sets `BuildPolicy::allow_projectable_faces`. Such a face must project to a simple
+    polygon with holes along an axis-aligned plane, and its geometry is the
+    triangulation of that projection, not a best-fit plane.
+  - **The triangulation is a canonical exact CDT**, chosen over ear clipping and built
+    in P2b. It is also the intended render triangulator.
+  - **Degenerate `double` shells are reported**, not computed exactly (§9.1 of the
+    plan).
+  - **litestl is merged after P2b.**
+- **Decisions:**
+  - **Projected faces**: the `ProjAxis` flag bits (`(axis + 1) << 4`) are set only by
+    the builder. The opt-in is recorded on the complex (`.g.allows_projectable`, a
+    global builtin) and checked by the validator.
+  - **CDT uniqueness** comes from Simulation of Simplicity with lexicographic ranks.
+    litestl gains `pred::incircle_sos`.
+  - **Regions:** union-find shells; sheet shells; exact or certified signed volumes;
+    the shared-face rule plus exact ray winding for nesting; the innermost container
+    by volume; region IDs from hints or the minimum face side; region attributes
+    carried over by ID.
+  - **The Euler–Poincaré cross-check** is a per-vertex planarity test of the link
+    rotation system, so it needs no generator ground truth.
+  - **Freeze:** Morton order over the tile frame's fixed extent; a remap table with
+    compile-time coverage; the generation rule `max(own, slot's old) + 1` for moved
+    elements; frozen caches that aren't serialised.
+  - **Hashes.** `topology_hash` leaves out positions and the coordinate key, so it is
+    equal across `double` and `Lattice`.
+- **Goldens.** The topology hash of the fixed model in `test_topo_determinism`
+  (`{0x98c378924d246f78, 0x28007637b0e58ee8}`) joins the determinism contract.
+- **Known limits:**
+  - **Handle resolution** across versions: slots that are dropped and later
+    re-allocated restart at generation 0.
+  - **Edit rules** for projected faces wait for P3. On those faces the triangulation is
+    the geometry, so any loop edit changes it.
+
 ---
 
 ## Open questions

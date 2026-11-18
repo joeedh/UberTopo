@@ -65,7 +65,7 @@ topology (authoritative); `D` means derived (rebuildable from the `T` columns).
 | Face | `.f.l` | u32 | T | First loop, or NONE for a loopless face (closed periodic surface) |
 | | `.f.region` | u32×2 | T | Region on the FRONT and BACK side |
 | | `.f.shell` | u32×2 | D | Shell of each side |
-| | `.f.surface` | `GeomRef` | T | Carrier surface. NONE means planar, with the plane derived from the loop |
+| | `.f.surface` | `GeomRef` | T | Carrier surface. NONE means planar, with the plane derived from the loop; or, for a face flagged `ProjAxis` (opt-in, amendment A1), the canonical CDT of its projection along the stored axis |
 | | `.f.flags` | u8 | T | `virtual` (tile seam or world box), `aperture` (fills a hole), `reversed` (surface normal opposes the front side) |
 | FaceSide | `.fs.shell_next` | u32 | D | Next face side in the same shell (editable mode). Frozen mode uses a CSR list instead |
 | Shell | `.s.region` | u32 | D | Region bounded |
@@ -212,6 +212,17 @@ the tile can be closed with virtual faces (`flags.virtual`) on the tile boundary
 world box. These are never tessellated or exported as reflectors. Simulation exports
 replace them with their own truncation boundaries.
 
+**Implementation note (P2b; [07 §10](07-topology-api.md#10-regions-toporegionsh)).**
+- **Sheet shells.** A shell holding both sides of every face it touches is a sheet
+  shell, such as a fence, or a thin-walled shell open through a window. It has no
+  volume and nests like a cavity.
+- **Touching shells.** Two shells that share a face on opposite sides are never nested
+  in each other. This covers the common case of a thin-walled room against the outside
+  and a room against its thick wall.
+- **Containment tree.** Cavity and sheet shells join the innermost outer shell that
+  contains them, chosen by enclosed volume. P2 doesn't store an explicit containment
+  tree of outer shells.
+
 ## 7. Primitive operations
 
 **Public construction** goes through **bulk builders**:
@@ -280,6 +291,12 @@ Sculptcore's `mesh_validate.h` census and Euler output. It does not assert.
    - Loops don't self-intersect; holes lie inside the face; faces meet only along
      shared edges and vertices (no unrecorded intersections).
    - Shell closure and nesting agree with `build_regions()`.
+
+**Implementation note (P2b; [07 §9](07-topology-api.md#9-validator-topovalidateh-validate_geomcc)).**
+- **Euler–Poincaré.** The cross-check is implemented per vertex, as a planarity test of
+  the link rotation system that the radial orders define. It needs no ground truth.
+- **Generation monotonicity** is a freeze test, not a validator code, because it
+  compares two complexes.
 
 ## 9. Editable and frozen modes
 

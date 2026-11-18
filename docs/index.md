@@ -22,7 +22,7 @@ Index of everything under `docs/`. Update this file whenever a doc is added, mov
 - [04-identity-versions-journal.md](design/core-data-model/04-identity-versions-journal.md) — Indices, handles, persistent IDs, keyed RNG, snapshots, journal, compaction, determinism contract
 - [05-geometry-pools.md](design/core-data-model/05-geometry-pools.md) — GeomRef, geometry pools, layered exact/approximation geometry, initial curve and surface kinds
 - [06-modules-litestl-and-phasing.md](design/core-data-model/06-modules-litestl-and-phasing.md) — Source layout, litestl work list, phases P0–P5
-- [07-topology-api.md](design/core-data-model/07-topology-api.md) — Realised `geom/`, `ident/`, `topo/` API (P2a): coordinates and frames, derived predicates, IDs and refs, domain schemas, Complex, radial order, builder, validator
+- [07-topology-api.md](design/core-data-model/07-topology-api.md) — Realised `geom/`, `ident/`, `topo/` API (P2): coordinates and frames, derived predicates, canonical CDT, IDs and refs, domain schemas, Complex, radial order, builder (with opt-in projected faces), regions, three-layer validator, freeze/serialisation/hashes, test generators
 
 ## Plans (`plans/`)
 
@@ -30,7 +30,7 @@ Plans must be pressure-tested by a fresh-context agent before implementation.
 
 - [2026-11-17-p0-litestl-foundations.md](plans/2026-11-17-p0-litestl-foundations.md) — P0 (**implemented**; v2 reviewed): wide ints, exact/adaptive predicates, hash128 (SipHash-2-4-128), Philox RNG, deterministic reduce in litestl
 - [2026-11-18-p1-attribute-core.md](plans/2026-11-18-p1-attribute-core.md) — P1 (**implemented**; v3 after two reviews; intern pools deferred to P1b): litestl `attr/` — paged COW columns with partial tails, open column interface, simultaneous mixing, groups with builtin slots, locked registry, page-size-independent hashing/serialization, page-size benchmark
-- [2026-11-18-p2-cell-complex.md](plans/2026-11-18-p2-cell-complex.md) — P2 (**v2**, reviewed; **P2a implemented**, P2b next): UberTopo `geom/` (Lattice, derived exact predicates), `ident/` (persistent IDs, typed refs), `topo/` domains and `Complex<C>`, bulk builder, exact radial order, `build_regions()`, validator, freeze/thaw, determinism suite
+- [2026-11-18-p2-cell-complex.md](plans/2026-11-18-p2-cell-complex.md) — P2 (**implemented**: P2a + P2b; v2 reviewed; amendment A1 v3 (opt-in projected faces, canonical CDT) reviewed twice): UberTopo `geom/` (Lattice, derived exact predicates), `ident/` (persistent IDs, typed refs), `topo/` domains and `Complex<C>`, bulk builder, exact radial order, `build_regions()`, validator, freeze/thaw, determinism suite
 
 ## Research (`research/`)
 

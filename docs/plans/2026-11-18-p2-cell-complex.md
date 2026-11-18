@@ -1,6 +1,6 @@
 # Plan P2 — Cell complex core (UberTopo `geom/`, `ident/`, `topo/`)
 
-- **Status:** v2, revised after the fresh-context pressure test (§10). **P2a implemented** (§11); P2b next.
+- **Status:** v2, revised after the fresh-context pressure test (§10); amendment A1 v3 (§12). **Implemented**: P2a and P2b (§11).
 - **Date:** 2026-11-18
 - **Design:** [core-data-model/01](../design/core-data-model/01-cell-complex.md) (cell
   complex), [02](../design/core-data-model/02-coordinates-and-predicates.md) (coordinates
@@ -835,6 +835,69 @@ decisions are recorded in DEC-013.
     TSan (with `LITESTL_ATTR_CHECKS`) all pass.
   - litestl (39 tests, on `ubertopo/p2-support`): clang-rel, gcc-rel, clang-v3,
     clang-noi128, gcc-tsan, gcc-ubsan and gcc-asan all pass.
+
+### P2b (2026-11-18)
+
+**Landed:**
+- amendment A1, with litestl `incircle_sos`, `geom/cdt/` and the builder's
+  projectable faces;
+- W7, the rest of W8, W9, W10 and W11.
+
+The decisions are recorded in DEC-014, and design 07 is complete.
+
+**Deviations and additions:**
+- **CDT.**
+  - **Insertion.** Bowyer–Watson cavities are used for vertex insertion, with ghost
+    triangles and a 1-D start. The plan's Lawson-flip wording describes an equivalent
+    construction.
+  - **The orientation rule** is the projectability check.
+  - **API.** The `cdt_proj` signature has no `sigma` argument; the front winding is
+    derived from the outer loop.
+- **Regions:**
+  - union-find runs serially;
+  - volumes and nesting are parallel per shell;
+  - there is no stored containment tree of outer shells (the innermost container is
+    chosen by volume);
+  - a `nested_solids` family was added to make the innermost choice observable, after
+    a mutation survived without it.
+- **Euler–Poincaré** is checked per vertex, as a planarity test of the link rotation
+  system, instead of from generator Betti numbers. It caught a reversed radial cycle
+  before the embedding layer did.
+- **The face–face test** uses each face's canonical CDT. Planar faces use it too,
+  because loop fans of non-convex faces aren't surfaces.
+- **The global layer** runs at full scale on every generator family, at 25 buildings.
+  The 200-building city runs the embedding layer.
+- **Freeze:**
+  - shells and regions keep `build_regions()`'s canonical order (identity
+    compaction);
+  - generation rule: `max(own, slot's old) + 1` for moved elements;
+  - the frozen caches are side structures stamped with `Complex::version()`, not
+    `Derived` columns.
+- **The test frame quantum is 2^-8**, so `double` and `Lattice` produce the same
+  Morton orders.
+
+**Acceptance (§6):**
+1. Every generator family, in both instantiations, matches its ground truth exactly
+   and passes all three validation layers.
+2. Bytes and content hashes are identical at 1, 2, 4 and 12 bands; topology hashes are
+   identical across `double` and `Lattice`; the pinned golden holds (matrix below).
+3. The oracles agree:
+   - big-integer oracles for the predicates;
+   - the formal-polynomial oracle for `incircle_sos`;
+   - global Delaunay, validity and area oracles for the CDT;
+   - `atan2` for radial order;
+   - analytic ray winding.
+4. The validator catches one corruption per code, plus the planted wedge and radial
+   mutations.
+5. Compile-fail tests cover cross-kind refs, implicit indices and a missing remap rule.
+6. The matrix results are listed below.
+7. Hygiene: no file over 40 KB and no `CLAUDENOTE:`.
+
+**Mutation checks:**
+- CDT: tie-break ranks, cavity choice, winding;
+- projected half-plane sign;
+- `build_regions`: volume sign, shared-face rule, wedge pairing, innermost container;
+- remap: a wrong rule fails tests, and a missing rule fails the `static_assert`.
 
 ## 12. Amendment A1 — opt-in projectable faces (2026-11-18)
 

@@ -160,6 +160,14 @@ exact integer determinants are general-purpose, so they go into **litestl**
   every exact component above the FTZ threshold, even for insphere (see the P0 plan).
 UberTopo supplies only the `CoordTraits` glue and the derived predicates.
 
+**Implementation note (P2b).**
+- **Derived predicates.** The derived set now includes `incircle_proj` and
+  `incircle_sos_proj`. The latter is litestl's `pred::incircle_sos`, a Simulation of
+  Simplicity tie-break by rank.
+- **Canonical CDT.** `geom/cdt/` provides an exact CDT in projection, built on those
+  predicates. It is the geometry of opt-in projected faces, and the intended
+  triangulator for future render meshes.
+
 ## 5. The plane-based option (D2)
 
 The exact plane-based Boolean line (Campen & Kobbelt; Nehring-Wirxel; EMBER) represents
