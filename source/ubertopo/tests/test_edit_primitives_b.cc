@@ -746,6 +746,8 @@ template <geom::CoordType C> void test_on_commit()
   EXPECT_EDIT(ed, ed.make_vertex(pt<C>({2, -2, 2}), hid("pierce_a"), &a), EditCode::Ok);
   EXPECT_EDIT(ed, ed.make_vertex(pt<C>({2, 2, 2}), hid("pierce_b"), &b), EditCode::Ok);
   EXPECT_EDIT(ed, ed.make_edge(a, b), EditCode::Ok); /* through the wall y = 0 */
+  VertRef far;
+  EXPECT_EDIT(ed, ed.make_vertex(pt<C>({50, 50, 50}), hid("far_away"), &far), EditCode::Ok); /* unrelated, last */
   EXPECT_EDIT(ed, ed.commit(), EditCode::Invalid);
   UT_CHECK(reports(ed, ValidateCode::WireCrossesFace));
   UT_CHECK(hk(fx.k) == h1 && fx.j.undo_count() == 3 && ed.index_consistent() && ed.grid_consistent());

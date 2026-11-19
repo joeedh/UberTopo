@@ -51,6 +51,12 @@ ut_test(test_topo_determinism.cc ubertopo_topo)
 ut_test(test_edit_primitives.cc ubertopo_topo)
 ut_test(test_edit_primitives_b.cc ubertopo_topo)
 ut_test(test_face_grid.cc ubertopo_topo)
+ut_test(test_validate_local.cc ubertopo_topo)
 ut_test(test_edit_random.cc ubertopo_topo)
 set_tests_properties(test_edit_random PROPERTIES LABELS long)
 set_tests_properties(test_topo_determinism PROPERTIES LABELS long)
+
+# benchmarks: built, not run by ctest
+add_executable(bench_edit bench_edit.cc)
+target_link_libraries(bench_edit PRIVATE ubertopo_topo platform)
+target_include_directories(bench_edit PRIVATE ${PROJECT_SOURCE_DIR}/source)
