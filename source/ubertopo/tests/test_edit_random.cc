@@ -20,6 +20,7 @@
 #include "gen/buildings.h"
 #include "litestl/util/alloc.h"
 #include "litestl/util/task.h"
+#include "support/legacy_fixture.h"
 #include "support/splitmix64.h"
 #include "ut_test.h"
 
@@ -100,6 +101,7 @@ template <geom::CoordType C> struct Run {
   Complex<C> k;
   Journal<C> j;
   Stats st;
+  PersistentId structure;
 
   /** One random step; returns the code of its (last) primitive. */
   const char *last = "";
@@ -477,6 +479,7 @@ template <geom::CoordType C> struct Run {
     if (topo) {
       *topo = topology_hash(k);
     }
+    structure = test::structure_hash(k);
     return content_hash(k);
   }
 };
@@ -494,10 +497,14 @@ PersistentId run_one(uint64_t seed,
                      PersistentId *topo,
                      bool print,
                      ValidateMode mode = ValidateMode::Full,
-                     uint32_t group = 0)
+                     uint32_t group = 0,
+                     PersistentId *structure = nullptr)
 {
   Run<C> run;
   const PersistentId h = run.run(seed, steps, topo, mode, group);
+  if (structure) {
+    *structure = run.structure;
+  }
   if (group) {
     printf("edit_random grouped (%s, seed %llu, %u per transaction): commits", geom::CoordTraits<C>::key,
            (unsigned long long)seed, group);
@@ -530,8 +537,8 @@ int main()
   const size_t baseline = litestl::alloc::getMemorySize();
   const uint32_t steps = scaled(600);
   for (uint64_t seed : {1ull, 2ull, 3ull}) {
-    PersistentId td, tl;
-    const PersistentId hd = run_one<double>(seed, steps, &td, true);
+    PersistentId td, tl, sd;
+    const PersistentId hd = run_one<double>(seed, steps, &td, true, ValidateMode::Full, 0, &sd);
     run_one<geom::Lattice>(seed, steps, &tl, true);
     UT_CHECK(td == tl); /* same topology, IDs and attributes in both coordinate types */
     {
@@ -559,6 +566,8 @@ int main()
       if (getenv("LITESTL_PRINT_GOLDENS")) {
         printf("golden %llu: {0x%016llxull, 0x%016llxull}\n", (unsigned long long)seed, (unsigned long long)hd.lo,
                (unsigned long long)hd.hi);
+        printf("structure golden %llu: {0x%016llxull, 0x%016llxull}\n", (unsigned long long)seed,
+               (unsigned long long)sd.lo, (unsigned long long)sd.hi);
       }
       /* re-pinned for P3b W9: the step mix gained imprint, unimprint, holes,
        * weld and compact (and earlier, §3.1: region rebuilds advance the
@@ -569,6 +578,14 @@ int main()
                                        PersistentId{0x75bccfc9fd30c4fbull, 0x0f75f4b7fd6a4b1cull},
                                        PersistentId{0x7c4ccbaea916883aull, 0xacddf65e683a064aull}};
       UT_CHECK(hd == goldens[seed - 1]);
+      /* the structure hash leaves out the geometry columns: pinned with the
+       * format-2 code before the P4a geometry store, and unchanged by it, it
+       * shows that a content-golden re-pin in P4a W5 changed geometry
+       * columns only (plan P4a §5.4) */
+      const PersistentId structure[3] = {PersistentId{0xd8fbd4f7fe768190ull, 0xf4b744a7f5c1d50eull},
+                                         PersistentId{0x579258e7a87dcffbull, 0x9673687d947834c5ull},
+                                         PersistentId{0x0b8d523f5c0952c9ull, 0x451d19bf501dd425ull}};
+      UT_CHECK(sd == structure[seed - 1]);
     }
   }
   UT_CHECK(litestl::alloc::getMemorySize() == baseline);

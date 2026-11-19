@@ -15,6 +15,7 @@
 #include "ubertopo/topo/validate.h"
 
 #include "gen/buildings.h"
+#include "support/legacy_fixture.h"
 #include "ut_test.h"
 
 #include <chrono>
@@ -152,17 +153,22 @@ static void test_golden()
   grid(a);
   grid(b);
   const PersistentId ha = topology_hash(a), hb = topology_hash(b);
+  const PersistentId sa = test::structure_hash(a);
   /* re-pinned for DEC-017 (hinted region IDs from the hint alone); only the
    * region IDs, .f.region, .s.region and .r.shell changed (P3b C8) */
   const PersistentId golden = {0x824b09e6bbd23a72ULL, 0xf96f12ef6fe48699ULL};
   if (getenv("LITESTL_PRINT_GOLDENS")) {
     printf("  topology golden: {0x%016" PRIx64 "ULL, 0x%016" PRIx64 "ULL}\n", ha.lo, ha.hi);
+    printf("  structure golden: {0x%016" PRIx64 "ULL, 0x%016" PRIx64 "ULL}\n", sa.lo, sa.hi);
   }
   else {
     if (!(ha == golden)) {
       fprintf(stderr, "topology golden changed: {0x%016" PRIx64 ", 0x%016" PRIx64 "}\n", ha.lo, ha.hi);
     }
     UT_CHECK(ha == golden);
+    /* pinned before the P4a geometry store, which must not change it (the
+     * structure hash leaves out the geometry columns; plan P4a §5.4) */
+    UT_CHECK(sa == (PersistentId{0x2034fcac11721f96ULL, 0x8000930c6a9d8b27ULL}));
   }
   UT_CHECK(ha == hb);
 }
