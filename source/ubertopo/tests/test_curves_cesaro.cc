@@ -64,7 +64,7 @@ void test_oracle()
       worst_t = std::max(worst_t, et / bt);
     }
     printf("%-15s pieces %5d  eval_error %.3g  worst position err/bound %.3g  tangent %.3g\n", fx[i].name,
-           c.pieces.size(), ev->eval_error(), worst, worst_t);
+           int(c.pieces.size()), ev->eval_error(), worst, worst_t);
     UT_CHECK(bad == 0);
     UT_CHECK(ev->eval_error() > 0);
     if (std::string_view(fx[i].name) == "chain_10km") {

@@ -309,21 +309,24 @@ const char *Cesaro2::make(double x0, double y0, double theta0, const util::Vecto
     c.seg_start.append(s_acc.hi);
     if (i + 1 < n) {
       /* continuity at the join, judged on the exact data */
-      double el, el1;
-      const double kl = sg.kappa.eval(sg.length, &el);
-      const double kr0 = c.segs[i + 1].kappa.size() ? c.segs[i + 1].kappa.c[0] : 0.0;
-      const Poly d0 = sg.kappa.deriv(), d1 = c.segs[i + 1].kappa.deriv();
-      const double dl = d0.eval(sg.length, &el1);
-      const double dr = d1.size() ? d1.c[0] : 0.0;
+      /* r^(j+2) involves kappa^(j): a jump in kappa^(j) makes the join
+       * C^(j+1); identical laws make it C-infinity (kSmooth) */
+      Poly dl = sg.kappa, dr = c.segs[i + 1].kappa;
       uint8_t cont = kSmooth;
-      if (std::fabs(kl - kr0) > el) {
-        cont = 1;
-      }
-      else {
-        join_mismatch = std::max(join_mismatch, std::fabs(kl - kr0) + el);
-        if (std::fabs(dl - dr) > el1) {
-          cont = 2;
+      for (int j = 0; j <= kMaxKappaDegree; j++) {
+        double e;
+        const double vl = dl.eval(sg.length, &e);
+        const double vr = dr.size() ? dr.c[0] : 0.0;
+        e += dr.size() ? dr.e[0] : 0.0;
+        if (std::fabs(vl - vr) > e) {
+          cont = uint8_t(j + 1);
+          break;
         }
+        if (j == 0) {
+          join_mismatch = std::max(join_mismatch, std::fabs(vl - vr) + e);
+        }
+        dl = dl.deriv();
+        dr = dr.deriv();
       }
       c.join_cont.append(cont);
     }

@@ -1,6 +1,7 @@
 /* Curve kind registry (curve.h). */
 
 #include "ubertopo/curves/curve.h"
+#include "ubertopo/curves/bspline.h"
 #include "ubertopo/curves/cesaro.h"
 
 #include <cstdio>
@@ -14,7 +15,9 @@ namespace ubertopo::curves {
  * every stored ref, depend on it). */
 util::span<const KindOps *const> kinds()
 {
-  static const KindOps *const list[] = {&cesaro2_kind()};
+  /* CLAUDENOTE: W4 inserts offset2, alignment3, catenary3 and polyline3
+   * between these two, so bspline ends at pool id 6 as the plan fixes. */
+  static const KindOps *const list[] = {&cesaro2_kind(), &bspline_kind()};
   return util::span<const KindOps *const>(list, sizeof(list) / sizeof(list[0]));
 }
 
@@ -27,6 +30,18 @@ void register_pools(attr::PoolStore &s)
   for (const KindOps *k : kinds()) {
     k->add_pool(s);
   }
+}
+
+uint32_t pool_id(const KindOps &k)
+{
+  const auto ks = kinds();
+  for (size_t i = 0; i < ks.size(); i++) {
+    if (ks[i] == &k) {
+      return uint32_t(i + 1);
+    }
+  }
+  fprintf(stderr, "ubertopo::curves::pool_id: kind %s is not registered\n", k.key());
+  abort();
 }
 
 const KindOps *kind_of(attr::PoolRef r)

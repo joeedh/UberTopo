@@ -40,9 +40,11 @@ struct Interval {
 
 enum class ParamKind : uint8_t { ArcLength, Station, General };
 
-/** Continuity at a special parameter: C^continuity there. kSmooth means C3
- * or better (inflections, curvature extrema: places, not breaks). */
-inline constexpr uint8_t kSmooth = 3;
+/** Continuity at a special parameter: the curve is C^continuity there and
+ * no smoother (a break: algorithms cut there). kSmooth marks a feature where
+ * the curve is C-infinity (an inflection, a curvature extremum): a place,
+ * not a break. */
+inline constexpr uint8_t kSmooth = 255;
 struct SpecialParam {
   double t;
   uint8_t continuity;
@@ -90,6 +92,8 @@ public:
 util::span<const KindOps *const> kinds();
 /** Registers every kind's pool in a fresh store, in order. */
 void register_pools(attr::PoolStore &s);
+/** The pool id of a registered kind in a store set up by register_pools. */
+uint32_t pool_id(const KindOps &k);
 /** The kind of r in a store set up by register_pools (nullptr for none). */
 const KindOps *kind_of(attr::PoolRef r);
 /** Dimension of the live curve r (0 for none, dead or not a curve). */
