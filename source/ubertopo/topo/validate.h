@@ -64,6 +64,8 @@ enum class ValidateCode : uint16_t {
   FaceIntersection,     /* two faces meet away from shared vertices and edges */
   WireCrossesFace,      /* a wire meets a face other than at a shared endpoint (P3b C5) */
   RegionsStale,         /* stored regions differ from a fresh build_regions() */
+  SkeletonDegenerate,   /* a curved edge's refined skeleton touches its own loop or another
+                         * edge of the face, or the edge doesn't flatten (P4b §4.3) */
 };
 
 const char *validate_code_name(ValidateCode c);

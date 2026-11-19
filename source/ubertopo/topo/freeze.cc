@@ -152,11 +152,13 @@ template <geom::CoordType C> void build_caches(Complex<C> &k)
   };
   csr(ident::ContainerKind::Face, F, c.face_incl_off, c.face_incl);
   csr(ident::ContainerKind::Region, R, c.region_incl_off, c.region_incl);
-  /* T(f) of projected faces */
+  /* T(f) of projected faces, in corner indices of the refined skeleton's
+   * FacePoints order (plan P4b §4.3) */
   c.tri_off.append(0);
+  Skeleton<C> sk(k);
   for (uint32_t f = 0; f < F; f++) {
     util::Vector<geom::Triangle> t;
-    if (k.faces.live(f) && face_triangles<C>(k, FaceRef(f), t)) {
+    if (k.faces.live(f) && face_triangles<C>(k, FaceRef(f), t, &sk)) {
       for (auto &x : t) {
         c.tris.append(x);
       }

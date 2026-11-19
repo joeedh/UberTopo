@@ -13,27 +13,36 @@ namespace util = litestl::util;
 
 namespace {
 
-template <geom::CoordType C> bool face_box(const Complex<C> &k, uint32_t f, FaceGrid::Box &b)
+/* the box of face f's refined skeleton (plan P4b §12 D), grown by
+ * skeleton_tol where the face has a curved edge, so it covers the carriers */
+template <geom::CoordType C> bool face_box(const Complex<C> &k, uint32_t f, FaceGrid::Box &b, Skeleton<C> &sk)
 {
-  bool any = false;
   for (int i = 0; i < 3; i++) {
     b.lo[i] = INFINITY;
     b.hi[i] = -INFINITY;
   }
-  k.for_each_loop(FaceRef(f), [&](LoopRef l) {
-    k.for_each_coedge(l, [&](CoedgeRef c) {
-      const auto d = geom::to_double3<C>(k.pos(k.start_vert(c)));
-      for (int i = 0; i < 3; i++) {
-        b.lo[i] = std::min(b.lo[i], d[i]);
-        b.hi[i] = std::max(b.hi[i], d[i]);
-      }
-      any = true;
-    });
-  });
-  return any;
+  FacePoints<C> fp;
+  fp.gather(k, FaceRef(f), sk);
+  bool curved = false;
+  for (int j = 0; j < fp.pts.size(); j++) {
+    const auto d = geom::to_double3<C>(fp.pts[j]);
+    curved = curved || !sk.is_vertex(fp.ids[j]);
+    for (int i = 0; i < 3; i++) {
+      b.lo[i] = std::min(b.lo[i], d[i]);
+      b.hi[i] = std::max(b.hi[i], d[i]);
+    }
+  }
+  if (curved) {
+    const double g = 2 * k.global.template get<".g.skeleton_tol">()[0] + (std::is_same_v<C, geom::Lattice> ? 1.0 : 0.0);
+    for (int i = 0; i < 3; i++) {
+      b.lo[i] -= g;
+      b.hi[i] += g;
+    }
+  }
+  return fp.pts.size() > 0;
 }
 
-template <geom::CoordType C> FaceGrid::Box points_box(const Complex<C> &k, std::initializer_list<uint32_t> vs)
+template <geom::CoordType C> FaceGrid::Box points_box(const Skeleton<C> &k, std::span<const uint32_t> vs)
 {
   FaceGrid::Box b;
   for (int i = 0; i < 3; i++) {
@@ -41,7 +50,7 @@ template <geom::CoordType C> FaceGrid::Box points_box(const Complex<C> &k, std::
     b.hi[i] = -INFINITY;
   }
   for (uint32_t v : vs) {
-    const auto d = geom::to_double3<C>(k.pos(VertRef(v)));
+    const auto d = geom::to_double3<C>(k.pos(v));
     for (int i = 0; i < 3; i++) {
       b.lo[i] = std::min(b.lo[i], d[i]);
       b.hi[i] = std::max(b.hi[i], d[i]);
@@ -108,9 +117,11 @@ template <geom::CoordType C> void FaceGrid::update_face(const Complex<C> &k, uin
     return;
   }
   Rec r;
-  if (!face_box<C>(k, f, r.box)) {
+  Skeleton<C> sk(k);
+  if (!face_box<C>(k, f, r.box, sk)) {
     return;
   }
+  r.curved = sk.extra_count() > 0;
   auto add_cells = [&](const Box &b, const Entry &x) {
     for_cells(b, [&](const CellKey &key) {
       add_entry(key, x);
@@ -121,24 +132,24 @@ template <geom::CoordType C> void FaceGrid::update_face(const Complex<C> &k, uin
   if (cell_count(r.box) > kLargeCells) {
     ValidationReport dummy;
     util::Vector<std::array<uint32_t, 3>> tris;
-    if (vdetail::face_checks_and_tris<C>(k, f, false, dummy, tris)) {
+    if (vdetail::face_checks_and_tris<C>(k, f, false, dummy, tris, sk)) {
       by_tris = true;
       /* front orientation: as face_fan (T(f) as given for projected faces;
        * the outer loop's orientation for planar ones) */
       if (k.face_proj_axis(FaceRef(f)) < 0) {
         FacePoints<C> fp;
-        fp.gather(k, FaceRef(f));
+        fp.gather(k, FaceRef(f), sk);
         const int axis = vdetail::face_axis<C>(k, FaceRef(f), fp.view());
         const int front = geom::face_front_sign<C>(fp.view(), axis);
         for (auto &t : tris) {
-          const int o = geom::orient2d_proj<C>(k.pos(VertRef(t[0])), k.pos(VertRef(t[1])), k.pos(VertRef(t[2])), axis);
+          const int o = geom::orient2d_proj<C>(sk.pos(t[0]), sk.pos(t[1]), sk.pos(t[2]), axis);
           if (o != 0 && o != front) {
             std::swap(t[1], t[2]);
           }
         }
       }
       for (uint32_t i = 0; i < uint32_t(tris.size()); i++) {
-        const Box tb = points_box<C>(k, {tris[i][0], tris[i][1], tris[i][2]});
+        const Box tb = points_box<C>(sk, std::span<const uint32_t>(tris[i].data(), 3));
         r.tris.append(tris[i]);
         r.tri_boxes.append(tb);
         add_cells(tb, Entry{f, i, Kind::FaceTri});
@@ -162,12 +173,16 @@ template <geom::CoordType C> void FaceGrid::update_wire(const Complex<C> &k, uin
   if (e >= k.edges.capacity() || !k.edges.live(e) || k.edge_coedge(EdgeRef(e))) {
     return;
   }
-  const auto vs = k.edge_verts(EdgeRef(e));
   Rec r;
-  r.box = points_box<C>(k, {vs[0].i, vs[1].i});
-  const auto p = geom::to_double3<C>(k.pos(vs[0])), q = geom::to_double3<C>(k.pos(vs[1]));
-  const double pd[3] = {p[0], p[1], p[2]}, qd[3] = {q[0], q[1], q[2]};
-  segment_boxes(pd, qd, [&](const Box &b) { for_cells(b, [&](const CellKey &key) { r.cells.append(key); }); });
+  Skeleton<C> sk(k);
+  const auto chain = wire_chain<C>(k, sk, e);
+  r.box = points_box<C>(sk, std::span<const uint32_t>(chain.data(), chain.size()));
+  r.curved = chain.size() > 2;
+  for (int j = 0; j + 1 < chain.size(); j++) {
+    const auto p = geom::to_double3<C>(sk.pos(chain[j])), q = geom::to_double3<C>(sk.pos(chain[j + 1]));
+    const double pd[3] = {p[0], p[1], p[2]}, qd[3] = {q[0], q[1], q[2]};
+    segment_boxes(pd, qd, [&](const Box &b) { for_cells(b, [&](const CellKey &key) { r.cells.append(key); }); });
+  }
   std::sort(r.cells.begin(), r.cells.end(), [](const CellKey &a, const CellKey &b) {
     return a.x != b.x ? a.x < b.x : (a.y != b.y ? a.y < b.y : a.z < b.z);
   });
@@ -200,17 +215,18 @@ template <geom::CoordType C> void FaceGrid::build(const Complex<C> &k)
 {
   /* the cell: the smallest power of two >= the median face-box extent */
   util::Vector<double> ext;
+  Skeleton<C> sk(k);
   for (uint32_t f = 0; f < k.faces.capacity(); f++) {
     Box b;
-    if (k.faces.live(f) && face_box<C>(k, f, b)) {
+    if (k.faces.live(f) && face_box<C>(k, f, b, sk)) {
       ext.append(std::max({b.hi[0] - b.lo[0], b.hi[1] - b.lo[1], b.hi[2] - b.lo[2]}));
     }
   }
   if (ext.size() == 0) {
     for (uint32_t e = 0; e < k.edges.capacity(); e++) {
       if (k.edges.live(e) && !k.edge_coedge(EdgeRef(e))) {
-        const auto vs = k.edge_verts(EdgeRef(e));
-        const Box b = points_box<C>(k, {vs[0].i, vs[1].i});
+        const auto chain = wire_chain<C>(k, sk, e);
+        const Box b = points_box<C>(sk, std::span<const uint32_t>(chain.data(), chain.size()));
         ext.append(std::max({b.hi[0] - b.lo[0], b.hi[1] - b.lo[1], b.hi[2] - b.lo[2]}));
       }
     }

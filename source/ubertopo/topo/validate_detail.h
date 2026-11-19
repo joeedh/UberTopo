@@ -20,34 +20,6 @@ namespace ubertopo::topo::vdetail {
 
 namespace util = litestl::util;
 
-template <geom::CoordType C> bool face_is_planar(const geom::PolyView<C> &v)
-{
-  const auto &p = v.pts;
-  int ib = -1, ic = -1;
-  for (int i = 1; i < int(p.size()) && ib < 0; i++) {
-    if (geom::lex_compare<C>(p[i], p[0]) != 0) {
-      ib = i;
-    }
-  }
-  for (int i = 1; ib >= 0 && i < int(p.size()) && ic < 0; i++) {
-    for (int a = 0; a < 3; a++) {
-      if (geom::orient2d_proj<C>(p[0], p[ib], p[i], a) != 0) {
-        ic = i;
-        break;
-      }
-    }
-  }
-  if (ic < 0) {
-    return false;
-  }
-  for (size_t i = 0; i < p.size(); i++) {
-    if (geom::vol3<C>(p[0], p[ib], p[ic], p[i]) != 0) {
-      return false;
-    }
-  }
-  return true;
-}
-
 /** The axis a face's geometry uses: the stored axis of a projected face, else
  * the dominant Newell axis. */
 template <geom::CoordType C> int face_axis(const Complex<C> &k, FaceRef f, const geom::PolyView<C> &v)
@@ -58,11 +30,12 @@ template <geom::CoordType C> int face_axis(const Complex<C> &k, FaceRef f, const
 
 /** Front-winding triangles of face @p f: the loop fan for a planar face
  * (signed; correct for winding and volumes), T(f) for a projected one. */
-template <geom::CoordType C> void face_fan(const Complex<C> &k, FaceRef f, util::Vector<geom::Point<C>> &out)
+template <geom::CoordType C>
+void face_fan(const Complex<C> &k, FaceRef f, util::Vector<geom::Point<C>> &out, Skeleton<C> &sk)
 {
   out.clear();
   FacePoints<C> fp;
-  fp.gather(k, f);
+  fp.gather(k, f, sk);
   if (k.face_proj_axis(f) >= 0) {
     util::Vector<geom::Triangle> t;
     if (geom::cdt_proj<C>(fp.view(), k.face_proj_axis(f), t) == geom::CdtStatus::Ok) {
@@ -127,11 +100,11 @@ bool in_closed_triangle(const geom::Point<C> &p, const geom::Point<C> &a, const 
   return false;
 }
 
-/** Does segment (p, q) of one face (or a wire) meet triangle t of another
+/** Does segment (p, q) (skeleton ids) of one face (or a wire) meet triangle t of another
  * face other than at shared vertices (@p shared_v) and along shared edges
  * (@p shared_e, only when (p, q) is a boundary edge)? */
 template <geom::CoordType C, typename SharedV, typename SharedE>
-bool bad_contact(const Complex<C> &k,
+bool bad_contact(const Skeleton<C> &sk,
                  uint32_t p,
                  uint32_t q,
                  bool pq_boundary,
@@ -140,7 +113,7 @@ bool bad_contact(const Complex<C> &k,
                  SharedE &&shared_e)
 {
   using P = geom::Point<C>;
-  auto pos = [&](uint32_t v) -> const P & { return k.pos(VertRef(v)); };
+  auto pos = [&](uint32_t v) -> const P & { return sk.pos(v); };
   const P &P0 = pos(p), &Q0 = pos(q), &A = pos(t[0]), &B = pos(t[1]), &Cc = pos(t[2]);
   const int op = geom::vol3<C>(A, B, Cc, P0), oq = geom::vol3<C>(A, B, Cc, Q0);
   if (op * oq > 0) {
@@ -198,25 +171,33 @@ bool bad_contact(const Complex<C> &k,
 }
 
 /** Loop checks of face @p f (with @p checks: simple, disjoint, holes inside
- * the outer loop) and its triangulation T(f) as vertex-index triples. False
+ * the outer loop) and its triangulation T(f) as skeleton-id triples (vertex indices when the face has no curved edge). False
  * if the face fails a check or doesn't triangulate. */
 template <geom::CoordType C>
 bool face_checks_and_tris(const Complex<C> &k,
                           uint32_t f,
                           bool checks,
                           ValidationReport &rep,
-                          util::Vector<std::array<uint32_t, 3>> &tris)
+                          util::Vector<std::array<uint32_t, 3>> &tris,
+                          Skeleton<C> &sk)
 {
   using ident::ElemKind;
   using VC = ValidateCode;
   tris.clear();
   FacePoints<C> fp;
-  fp.gather(k, FaceRef(f));
+  fp.gather(k, FaceRef(f), sk);
   const auto v = fp.view();
   const int axis = face_axis<C>(k, FaceRef(f), v);
   if (checks) {
     const uint32_t outer = geom::outer_loop_proj<C>(v, axis);
-    bool loops_ok = true;
+    /* a segment with a flattening point at either end belongs to a curved
+     * edge's skeleton: a meeting that involves one is SkeletonDegenerate */
+    auto skel_seg = [&](uint32_t l, size_t i) {
+      const auto L = v.loop(l);
+      const uint32_t o = v.off[l];
+      return !sk.is_vertex(fp.ids[o + i]) || !sk.is_vertex(fp.ids[o + (i + 1) % L.size()]);
+    };
+    bool loops_ok = true, skel = false;
     for (uint32_t l = 0; l < v.loop_count() && loops_ok; l++) {
       const auto L1 = v.loop(l);
       for (uint32_t m = l; m < v.loop_count() && loops_ok; m++) {
@@ -228,13 +209,14 @@ bool face_checks_and_tris(const Complex<C> &k,
                                                                       L2[(j + 1) % L2.size()], axis);
             if (adjacent ? (s == geom::SegIsect::Overlap || s == geom::SegIsect::Proper) : s != geom::SegIsect::None) {
               loops_ok = false;
+              skel = skel_seg(l, i) || skel_seg(m, j);
             }
           }
         }
       }
     }
     if (!loops_ok) {
-      rep.add(VC::LoopIntersection, ElemKind::Face, f);
+      rep.add(skel ? VC::SkeletonDegenerate : VC::LoopIntersection, ElemKind::Face, f);
       return false;
     }
     for (uint32_t l = 0; l < v.loop_count(); l++) {
@@ -255,10 +237,8 @@ bool face_checks_and_tris(const Complex<C> &k,
     }
     return false;
   }
-  util::Vector<uint32_t, 32> corner_v;
-  k.for_each_loop(FaceRef(f), [&](LoopRef l) { k.for_each_coedge(l, [&](CoedgeRef c) { corner_v.append(k.start_vert(c).i); }); });
   for (auto &x : t) {
-    tris.append({corner_v[x[0]], corner_v[x[1]], corner_v[x[2]]});
+    tris.append({fp.ids[x[0]], fp.ids[x[1]], fp.ids[x[2]]});
   }
   return true;
 }
@@ -287,15 +267,50 @@ template <geom::CoordType C> bool edge_on_face(const Complex<C> &k, uint32_t a, 
   return on;
 }
 
+/** True if edge @p e bounds face @p f. */
+template <geom::CoordType C> bool edge_bounds_face(const Complex<C> &k, EdgeRef e, uint32_t f)
+{
+  bool on = false;
+  k.for_each_radial(e, [&](CoedgeRef c) { on = on || k.face_of(c).i == f; });
+  return on;
+}
+
+/** vertex_on_face for skeleton ids (plan P4b §4.3): a flattening point is on
+ * f when its edge bounds f. */
+template <geom::CoordType C> bool skel_point_on_face(const Complex<C> &k, Skeleton<C> &sk, uint32_t id, uint32_t f)
+{
+  return sk.is_vertex(id) ? vertex_on_face<C>(k, id, f) : edge_bounds_face<C>(k, sk.edge_of(id), f);
+}
+
+/** edge_on_face for skeleton ids: (a, b) is a boundary segment of f, either a
+ * straight edge (or a curved one with no interior points) between two
+ * vertices, or two consecutive points of a curved edge bounding f. */
+template <geom::CoordType C> bool skel_segment_on_face(const Complex<C> &k, Skeleton<C> &sk, uint32_t a, uint32_t b, uint32_t f)
+{
+  if (sk.is_vertex(a) && sk.is_vertex(b)) {
+    bool on = false;
+    k.for_each_edge_at(VertRef(a), [&](EdgeRef e) {
+      const auto vs = k.edge_verts(e);
+      if (((vs[0].i == a && vs[1].i == b) || (vs[0].i == b && vs[1].i == a)) && sk.interior(e).size() == 0) {
+        on = on || edge_bounds_face<C>(k, e, f);
+      }
+    });
+    return on;
+  }
+  EdgeRef e;
+  return sk.consecutive(a, b, &e) && edge_bounds_face<C>(k, e, f);
+}
+
 /** The embedded-wire rule (plan P3b C5): a wire (p, q) embedded in face f
  * crosses no loop edge of f, overlaps none, passes through no corner of f,
  * and has its exact midpoint strictly inside f. */
-template <geom::CoordType C> bool embedded_wire_ok(const Complex<C> &k, uint32_t p, uint32_t q, uint32_t f)
+template <geom::CoordType C>
+bool embedded_wire_ok(const Complex<C> &k, uint32_t p, uint32_t q, uint32_t f, Skeleton<C> &sk)
 {
   using P = geom::Point<C>;
-  auto pos = [&](uint32_t v) -> const P & { return k.pos(VertRef(v)); };
+  auto pos = [&](uint32_t v) -> const P & { return sk.pos(v); };
   FacePoints<C> fp;
-  fp.gather(k, FaceRef(f));
+  fp.gather(k, FaceRef(f), sk);
   const auto v = fp.view();
   const int axis = face_axis<C>(k, FaceRef(f), v);
   for (uint32_t l = 0; l < v.loop_count(); l++) {

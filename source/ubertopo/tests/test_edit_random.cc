@@ -398,6 +398,21 @@ template <geom::CoordType C> struct Run {
       if (e == NONE) {
         return EditCode::BadArgument;
       }
+      /* plan P4b §5.3: an xy arc with linear z stays in a face's plane only
+       * when the face is horizontal, so the step takes wires and edges whose
+       * faces are all planar and horizontal */
+      bool flat = true;
+      k.for_each_radial(EdgeRef(e), [&](CoedgeRef c) {
+        const FaceRef f = k.face_of(c);
+        flat = flat && k.face_proj_axis(f) < 0;
+        const auto z0 = k.pos(k.start_vert(c))[2];
+        k.for_each_loop(f, [&](LoopRef l) {
+          k.for_each_coedge(l, [&](CoedgeRef d) { flat = flat && k.pos(k.start_vert(d))[2] == z0; });
+        });
+      });
+      if (!flat) {
+        return EditCode::BadArgument;
+      }
       const double alpha = (r.below(2) ? 1 : -1) * 0.1 * double(1 + r.below(5));
       const auto vs = k.edge_verts(EdgeRef(e));
       litestl::attr::PoolRef ref;
@@ -675,7 +690,17 @@ int main()
         printf("structure golden %llu: {0x%016llxull, 0x%016llxull}\n", (unsigned long long)seed,
                (unsigned long long)sd.lo, (unsigned long long)sd.hi);
       }
-      /* re-pinned for P4b W1: the store gained three pools (the hash covers
+      /* re-pinned for P4b W2, behaviourally (plan §5.3): the arc step takes
+       * only wires and edges of horizontal planar faces, and set_edge_curve
+       * on a face edge now re-sorts its radial order and dirties the regions
+       * (the faces' refined skeletons changed). Across all of this test's runs,
+       * 45 arcs land on face edges and 72 on wires; every commit validates. P4b W1
+       * values: {0xf518e2197d0f31a6, 0x7c87c672a07242ca}, {0x6a85b05b76d3d9e6,
+       * 0xa6df0ee200717093}, {0xcf6cdd7508132d31, 0x013e813727790612};
+       * structure {0x87019c85d025cd98, 0x00cdbd6afe4b6663},
+       * {0x918bc20da10b0c36, 0xadab290c82009bbc}, {0x42aeec0fb1eab127,
+       * 0x3117e834d4be2d8e}.
+       * Re-pinned for P4b W1: the store gained three pools (the hash covers
        * the pool count) and the global group .g.skeleton_tol; the structure
        * goldens below are unchanged, so nothing else changed. P4a W6 values:
        * {0x7ce5ffd466d9054b, 0x670cb9e60e3d5bb2}, {0x6c72c409e108ce3b,
@@ -689,19 +714,20 @@ int main()
        * and compact joined the mix (and §3.1: region rebuilds advance the
        * generations of shells and regions that changed). Seeds 2 and 3 end
        * with hinted rooms, so their goldens cover region IDs (DEC-017). */
-      const PersistentId goldens[3] = {PersistentId{0xf518e2197d0f31a6ull, 0x7c87c672a07242caull},
-                                       PersistentId{0x6a85b05b76d3d9e6ull, 0xa6df0ee200717093ull},
-                                       PersistentId{0xcf6cdd7508132d31ull, 0x013e813727790612ull}};
+      const PersistentId goldens[3] = {PersistentId{0x43da9c3224b285d1ull, 0x11a35c20a48e069full},
+                                       PersistentId{0x339f00b89b89cc36ull, 0x14bd7d328afdb162ull},
+                                       PersistentId{0x0071f444ac2078f3ull, 0xdde9a7286c002ad9ull}};
       UT_CHECK(hd == goldens[seed - 1]);
       /* the structure hash leaves out the geometry columns. Pinned with the
        * format-2 code and unchanged by the P4a W5 store, it showed that W5's
        * content re-pin changed geometry columns only (plan P4a §5.4; those
        * values: {0x312bf4c14cd7cc33, 0xde5a81cf3970cca5}, {0x95af9a0f06132fff,
        * 0xae2d7fbb428b6b96}, {0x6d9b2bccf6f70c48, 0xb63b38dcdf26f9e6}).
-       * Re-pinned for W6: the curve steps change the random sequence. */
-      const PersistentId structure[3] = {PersistentId{0x87019c85d025cd98ull, 0x00cdbd6afe4b6663ull},
-                                         PersistentId{0x918bc20da10b0c36ull, 0xadab290c82009bbcull},
-                                         PersistentId{0x42aeec0fb1eab127ull, 0x3117e834d4be2d8eull}};
+       * Re-pinned for W6: the curve steps change the random sequence, and
+       * for P4b W2 (above). */
+      const PersistentId structure[3] = {PersistentId{0x110a560462b66f3cull, 0xab190288f8f89a85ull},
+                                         PersistentId{0x71ad7c533c9a722full, 0xb5dbfa06c31c5ab4ull},
+                                         PersistentId{0xc7eb235e00f612b0ull, 0x1c7c92bf50ee91e3ull}};
       UT_CHECK(sd == structure[seed - 1]);
     }
   }

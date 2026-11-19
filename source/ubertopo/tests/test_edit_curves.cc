@@ -159,7 +159,9 @@ template <geom::CoordType C> void test_set_and_split()
 }
 
 /* a face edge with a carrier off one of its faces' planes: setting it is
- * fine (the skeleton is unchanged), splitting it is not */
+ * fine (planarity reads the stored vertices; the in-plane check is OI-P4b-7),
+ * though it changes the faces' skeletons and so dirties the regions (P4b
+ * §4.3); splitting it is not fine */
 template <geom::CoordType C> void test_face_edge()
 {
   Fixture<C> fx;
@@ -171,7 +173,8 @@ template <geom::CoordType C> void test_face_edge()
   double s = 0;
   EXPECT_EDIT(ed, test::arc_carrier(ed, vs[0], vs[1], 0.4, &arc, &s), EditCode::Ok);
   EXPECT_EDIT(ed, ed.set_edge_curve(e, arc, 0, s), EditCode::Ok);
-  UT_CHECK(fx.valid() && !fx.k.regions_dirty);
+  UT_CHECK(fx.valid());
+  UT_CHECK(fx.k.regions_dirty);
   const PersistentId h0 = h(fx.k);
   EXPECT_EDIT(ed, ed.split_edge_at(e, s / 2), EditCode::NonPlanarFace);
   UT_CHECK(h(fx.k) == h0);
@@ -205,7 +208,9 @@ template <geom::CoordType C> void test_face_split_ok()
   double s = 0;
   EXPECT_EDIT(ed, test::arc_carrier(ed, v[0], v[1], -0.3, &arc, &s), EditCode::Ok);
   EXPECT_EDIT(ed, ed.set_edge_curve(e, arc, fwd ? 0 : s, fwd ? s : 0), EditCode::Ok);
-  UT_CHECK(!fx.k.regions_dirty);
+  UT_CHECK(fx.k.regions_dirty); /* the face's skeleton changed (P4b §4.3) */
+  EXPECT_EDIT(ed, ed.rebuild_regions(), EditCode::Ok);
+  UT_CHECK(!fx.k.regions_dirty && fx.valid());
   VertRef m;
   EXPECT_EDIT(ed, ed.split_edge_at(e, s / 2, &m), EditCode::Ok);
   UT_CHECK(fx.k.regions_dirty && fx.valid());

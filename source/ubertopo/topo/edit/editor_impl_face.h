@@ -33,8 +33,10 @@ template <geom::CoordType C> double proj_area(std::span<const geom::Point<C>> pt
 /** Measure of a face for propagation weights: outer loop minus holes. */
 template <geom::CoordType C> double face_area(const Complex<C> &k, FaceRef f)
 {
+  /* on the refined skeleton: a curved face's measure to within skeleton_tol */
+  Skeleton<C> sk(k);
   FacePoints<C> fp;
-  if (!fp.gather(k, f)) {
+  if (!fp.gather(k, f, sk)) {
     return 0;
   }
   const auto view = fp.view();
@@ -162,8 +164,31 @@ EditCode Editor<C>::make_face(std::span<const VertRef> verts,
     }
     const geom::PolyView<C> view{std::span<const Point>(pts.data(), pts.size()),
                                  std::span<const uint32_t>(off.data(), off.size())};
+    /* the refined skeleton of the loops (plan P4b §4.3): each edge's
+     * flattening points in the direction the loop runs it */
+    Skeleton<C> sk(k_);
+    litestl::util::Vector<Point, 32> spts;
+    litestl::util::Vector<uint32_t, 8> soff;
+    soff.append(0);
+    j0 = 0;
+    for (uint32_t m : loop_sizes) {
+      for (uint32_t j = 0; j < m; j++) {
+        const VertRef u = verts[j0 + j];
+        const EdgeRef e(edges[j0 + j]);
+        spts.append(k_.pos(u));
+        const auto in = sk.interior(e);
+        const bool fwd = k_.edge_verts(e)[0] == u;
+        for (size_t i = 0; i < in.size(); i++) {
+          spts.append(sk.pos(in[fwd ? i : in.size() - 1 - i]));
+        }
+      }
+      j0 += m;
+      soff.append(uint32_t(spts.size()));
+    }
+    const geom::PolyView<C> sview{std::span<const Point>(spts.data(), spts.size()),
+                                  std::span<const uint32_t>(soff.data(), soff.size())};
     litestl::util::Vector<geom::Triangle> tris;
-    switch (classify_face<C>(view, k_.allows_projectable(), axis, tris)) {
+    switch (classify_face<C>(view, sview, k_.allows_projectable(), axis, tris)) {
       case FaceGeom::Ok:
         break;
       case FaceGeom::DegenerateLoop:

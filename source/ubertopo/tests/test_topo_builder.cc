@@ -588,11 +588,11 @@ template <geom::CoordType C> static void test_projected_fan()
       geom::HalfPlane<C> h;
       bool ok;
       if (k.face_proj_axis(f) >= 0) {
-        litestl::util::Vector<std::pair<CoedgeRef, VertRef>> th;
+        litestl::util::Vector<std::pair<CoedgeRef, geom::Point<C>>> th;
         ok = projected_third_vertices<C>(k, f, th);
         for (auto &x : th) {
           if (x.first == cc) {
-            h.q = k.pos(x.second);
+            h.q = x.second;
           }
         }
         h.s = 1;

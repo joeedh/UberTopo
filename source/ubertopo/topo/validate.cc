@@ -56,6 +56,7 @@ const char *validate_code_name(ValidateCode c)
     UT_VC(FaceIntersection)
     UT_VC(WireCrossesFace)
     UT_VC(RegionsStale)
+    UT_VC(SkeletonDegenerate)
 #undef UT_VC
   }
   return "?";

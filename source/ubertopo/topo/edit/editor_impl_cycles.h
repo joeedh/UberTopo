@@ -20,12 +20,16 @@ namespace ubertopo::topo {
 
 namespace edit_detail {
 
-/** Half-planes of coedges for radial_order (planar rule or T(f) triangle). */
+/** Half-planes of coedges for radial_order (planar rule or T(f) triangle),
+ * on the refined skeleton (plan P4b §4.3). */
 template <geom::CoordType C> struct HalfPlanes {
   const Complex<C> &k;
+  Skeleton<C> sk;
   std::map<uint32_t, FaceFrame> frames;
-  std::map<uint32_t, std::vector<std::pair<CoedgeRef, VertRef>>> third;
+  std::map<uint32_t, std::vector<std::pair<CoedgeRef, geom::Point<C>>>> third;
   FaceRef failed; /* the face whose half-plane couldn't be formed */
+
+  explicit HalfPlanes(const Complex<C> &kk) : k(kk), sk(kk) {}
 
   bool operator()(CoedgeRef c, geom::HalfPlane<C> &h)
   {
@@ -33,9 +37,9 @@ template <geom::CoordType C> struct HalfPlanes {
     if (k.face_proj_axis(f) >= 0) {
       auto it = third.find(f.i);
       if (it == third.end()) {
-        litestl::util::Vector<std::pair<CoedgeRef, VertRef>> tv;
-        std::vector<std::pair<CoedgeRef, VertRef>> v;
-        if (projected_third_vertices<C>(k, f, tv)) {
+        litestl::util::Vector<std::pair<CoedgeRef, geom::Point<C>>> tv;
+        std::vector<std::pair<CoedgeRef, geom::Point<C>>> v;
+        if (projected_third_vertices<C>(k, f, tv, &sk)) {
           for (const auto &x : tv) {
             v.push_back(x);
           }
@@ -44,7 +48,7 @@ template <geom::CoordType C> struct HalfPlanes {
       }
       for (const auto &x : it->second) {
         if (x.first == c) {
-          h.q = k.pos(x.second);
+          h.q = x.second;
           h.s = 1; /* T(f) triangles lie on the interior side */
           return true;
         }
@@ -54,9 +58,11 @@ template <geom::CoordType C> struct HalfPlanes {
     }
     auto it = frames.find(f.i);
     if (it == frames.end()) {
-      it = frames.emplace(f.i, face_frame<C>(k, f)).first;
+      FacePoints<C> fp;
+      fp.gather(k, f, sk);
+      it = frames.emplace(f.i, face_frame<C>(fp.view())).first;
     }
-    if (!coedge_half_plane<C>(k, c, it->second, h)) {
+    if (!coedge_half_plane<C>(k, c, it->second, h, &sk)) {
       failed = f;
       return false;
     }
@@ -152,9 +158,9 @@ template <geom::CoordType C> EditCode Editor<C>::resort_radial(EdgeRef e, std::s
   for (uint32_t c : extra) {
     in.append(c);
   }
-  edit_detail::HalfPlanes<C> hp{k_, {}, {}, {}};
+  edit_detail::HalfPlanes<C> hp(k_);
   bool tie = false;
-  if (!radial_order<C>(k_, e, std::span<const uint32_t>(in.data(), in.size()), hp, order, &tie)) {
+  if (!radial_order<C>(k_, e, std::span<const uint32_t>(in.data(), in.size()), hp, order, &tie, &hp.sk)) {
     rep_.kind = ident::ElemKind::Face;
     rep_.index = hp.failed.i;
     return hp.failed && k_.face_proj_axis(hp.failed) >= 0 ? EditCode::NotProjectable : EditCode::DegenerateLoop;
@@ -225,11 +231,13 @@ template <geom::CoordType C> void Editor<C>::fix_projection(FaceRef f)
   if (proj_axis(fl) < 0) {
     return;
   }
-  FacePoints<C> fp;
-  if (!fp.gather(k_, f)) {
+  Skeleton<C> sk(k_);
+  FacePoints<C> fv, fp;
+  if (!fv.gather(k_, f) || !fp.gather(k_, f, sk)) {
     return;
   }
-  if (face_points_planar<C>(fp.view())) {
+  bool degenerate = false;
+  if (face_planar_rule<C>(fv.view(), fp.view(), &degenerate) && !degenerate) {
     setF<".f.flags">(f, uint8_t(fl & ~face_flags::ProjAxisMask));
   }
 }

@@ -70,6 +70,10 @@ public:
     litestl::util::Vector<CellKey, 8> cells;                  /* sorted, unique */
     litestl::util::Vector<std::array<uint32_t, 3>, 4> tris;   /* large faces: T(f), front-oriented */
     litestl::util::Vector<Box, 4> tri_boxes;
+    /* the face (or wire) had a curved edge when entered: its tris hold
+     * skeleton ids of that build's table, valid only by triangle index
+     * (the canonical CDT gives the same order); plan P4b §12 */
+    bool curved = false;
   };
 
   bool valid() const

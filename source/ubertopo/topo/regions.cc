@@ -158,6 +158,10 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
   ftri.resize(F);
   util::Vector<uint8_t> ftri_ok;
   ftri_ok.resize(F);
+  /* the refined skeleton (plan P4b §4.3), flattened up front: the parallel
+   * loop below only reads it */
+  Skeleton<C> sk(k);
+  sk.warm();
   task::parallel_for_chunks(util::IndexRange(0, int(F)), 256, [&](int, util::IndexRange r) {
     for (int f : r) {
       ftri_ok[f] = 1;
@@ -168,7 +172,7 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
       if (k.face_proj_axis(fr) >= 0) {
         FacePoints<C> fp;
         util::Vector<geom::Triangle> tris;
-        if (!fp.gather(k, fr) || geom::cdt_proj<C>(fp.view(), k.face_proj_axis(fr), tris) != geom::CdtStatus::Ok) {
+        if (!fp.gather(k, fr, sk) || geom::cdt_proj<C>(fp.view(), k.face_proj_axis(fr), tris) != geom::CdtStatus::Ok) {
           ftri_ok[f] = 0;
           continue;
         }
@@ -179,15 +183,17 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
         }
       }
       else {
-        k.for_each_loop(fr, [&](LoopRef l) {
-          util::Vector<Point, 32> lp;
-          k.for_each_coedge(l, [&](CoedgeRef c) { lp.append(k.pos(k.start_vert(c))); });
-          for (uint32_t i = 1; i + 1 < lp.size(); i++) {
+        FacePoints<C> fp;
+        fp.gather(k, fr, sk);
+        const auto v = fp.view();
+        for (uint32_t l = 0; l < v.loop_count(); l++) {
+          const auto lp = v.loop(l);
+          for (size_t i = 1; i + 1 < lp.size(); i++) {
             ftri[f].append(lp[0]);
             ftri[f].append(lp[i]);
             ftri[f].append(lp[i + 1]);
           }
-        });
+        }
       }
     }
   });
@@ -269,6 +275,9 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
         for (uint32_t i = 0; i + 2 < t.size(); i += 3) {
           /* outward from the side's region: + for BACK sides, - for FRONT */
           vol[sh].add(t[i], t[i + 1], t[i + 2], (s & 1u) ? 1 : -1);
+        }
+        for (const Point &x : t) {
+          box[sh].add(geom::to_double3<C>(x)); /* covers curved edges' skeletons */
         }
         k.for_each_loop(FaceRef(f), [&](LoopRef l) {
           k.for_each_coedge(l, [&](CoedgeRef c) {

@@ -56,6 +56,17 @@ EditCode Editor<C>::set_edge_curve(EdgeRef e, litestl::attr::PoolRef ref, double
   }
   setE<".e.curve">(e, ref);
   setE<".e.range">(e, litestl::math::double2(t0, t1));
+  /* the faces on e have a new skeleton (plan P4b §4.3): their coedges join
+   * the commit filter, and the radial order is re-sorted about the new first
+   * segment */
+  if (k_.edge_coedge(e)) {
+    k_.for_each_radial(e, [&](CoedgeRef c) { touch(Grp::Coedges, c.i); });
+    set_dirty();
+    const EditCode rc = resort_radial(e);
+    if (rc != EditCode::Ok) {
+      return pr.fail(rc, rep_.kind, rep_.index);
+    }
+  }
   pr.op.u.append(e.i);
   pr.op.u.append(ref.pool);
   pr.op.u.append(ref.slot);
@@ -98,9 +109,13 @@ template <geom::CoordType C> EditCode Editor<C>::split_edge_at(EdgeRef e, double
   }
   const double frac = (t - t0) / (t1 - t0);
   VertRef v;
-  const EditCode sc = split_impl(pr, e, p, frac, &t, &v, e_out);
+  EdgeRef e2;
+  const EditCode sc = split_impl(pr, e, p, frac, &t, &v, &e2);
   if (sc != EditCode::Ok) {
     return sc;
+  }
+  if (e_out) {
+    *e_out = e2;
   }
   /* the skeleton gained a corner at v: planar faces must stay planar */
   litestl::util::Vector<uint32_t, 8> faces;
@@ -108,11 +123,24 @@ template <geom::CoordType C> EditCode Editor<C>::split_edge_at(EdgeRef e, double
   if (faces.size()) {
     set_dirty();
   }
+  Skeleton<C> sk(k_);
   for (uint32_t f : faces) {
     if (k_.face_proj_axis(FaceRef(f)) < 0) {
-      FacePoints<C> fp;
-      if (!fp.gather(k_, FaceRef(f)) || !face_points_planar<C>(fp.view())) {
+      FacePoints<C> fv, fp;
+      bool degenerate = false;
+      if (!fv.gather(k_, FaceRef(f)) || !fp.gather(k_, FaceRef(f), sk) ||
+          !face_planar_rule<C>(fv.view(), fp.view(), &degenerate) || degenerate)
+      {
         return pr.fail(EditCode::NonPlanarFace, ident::ElemKind::Face, f);
+      }
+    }
+  }
+  /* both pieces sort about their own first skeleton segment */
+  for (const EdgeRef x : {e, e2}) {
+    if (x && k_.edge_coedge(x)) {
+      const EditCode rc = resort_radial(x);
+      if (rc != EditCode::Ok) {
+        return pr.fail(rc, rep_.kind, rep_.index);
       }
     }
   }

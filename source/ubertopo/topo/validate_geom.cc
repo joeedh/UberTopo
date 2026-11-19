@@ -22,7 +22,6 @@ using VC = ValidateCode;
 
 using vdetail::bad_contact;
 using vdetail::face_axis;
-using vdetail::face_is_planar;
 using vdetail::in_closed_triangle;
 
 /* fn(i) for each index in @p list (a filter list), or for every row below
@@ -49,15 +48,20 @@ void validate_embedding(const Complex<C> &k, ValidationReport &rep, const Valida
    * their neighbours (plan P3b C13) */
   std::unordered_map<uint32_t, FaceFrame> frames;
   validate_curves(k, rep, flt);
+  /* one skeleton table for the pass (plan P4b §4.3): planarity reads the
+   * stored vertices, everything else the refined skeleton */
+  Skeleton<C> sk(k);
   for_rows(flt, flt ? &flt->faces : nullptr, k.faces.capacity(), [&](uint32_t f) {
     if (!k.faces.live(f)) {
       return;
     }
     const FaceRef fr(f);
-    FacePoints<C> fp;
-    fp.gather(k, fr);
+    FacePoints<C> fv, fp;
+    fv.gather(k, fr);
+    fp.gather(k, fr, sk);
     const auto v = fp.view();
-    const bool planar = face_is_planar<C>(v);
+    bool degenerate = false;
+    const bool planar = face_planar_rule<C>(fv.view(), v, &degenerate) && !degenerate;
     const int pa = k.face_proj_axis(fr);
     if (pa >= 0) {
       if (pa > 2 || planar) {
@@ -88,6 +92,16 @@ void validate_embedding(const Complex<C> &k, ValidationReport &rep, const Valida
       }
     }
   });
+  /* curved edges that don't flatten (plan P4b §4.3): read as straight by
+   * every test above, so reported here */
+  {
+    const auto &cv = k.edges.template get<".e.curve">();
+    for_rows(flt, flt ? &flt->edges : nullptr, k.edges.capacity(), [&](uint32_t e) {
+      if (k.edges.live(e) && !cv[e].none() && sk.edge_failed(EdgeRef(e))) {
+        rep.add(VC::SkeletonDegenerate, ElemKind::Edge, e);
+      }
+    });
+  }
   if (!rep.ok()) {
     return;
   }
@@ -96,33 +110,35 @@ void validate_embedding(const Complex<C> &k, ValidationReport &rep, const Valida
   auto frame_of = [&](uint32_t f) -> const FaceFrame & {
     auto it = frames.find(f);
     if (it == frames.end()) {
-      it = frames.emplace(f, face_frame<C>(k, FaceRef(f))).first;
+      FacePoints<C> fq;
+      fq.gather(k, FaceRef(f), sk);
+      it = frames.emplace(f, face_frame<C>(fq.view())).first;
     }
     return it->second;
   };
   /* radial order: re-derive from geometry */
-  std::unordered_map<uint32_t, uint32_t> third; /* coedge -> T(f) third vertex (projected faces) */
+  std::unordered_map<uint32_t, geom::Point<C>> third; /* coedge -> T(f) third point (projected faces) */
   std::unordered_map<uint32_t, bool> third_done;
   auto half_plane = [&](CoedgeRef c, geom::HalfPlane<C> &h) {
     const FaceRef f = k.face_of(c);
     if (k.face_proj_axis(f) >= 0) {
       if (!third_done.count(f.i)) {
         third_done[f.i] = true;
-        util::Vector<std::pair<CoedgeRef, VertRef>> th;
-        projected_third_vertices<C>(k, f, th);
+        util::Vector<std::pair<CoedgeRef, geom::Point<C>>> th;
+        projected_third_vertices<C>(k, f, th, &sk);
         for (auto &x : th) {
-          third[x.first.i] = x.second.i;
+          third[x.first.i] = x.second;
         }
       }
       auto it = third.find(c.i);
       if (it == third.end()) {
         return false;
       }
-      h.q = k.pos(VertRef(it->second));
+      h.q = it->second;
       h.s = 1;
       return true;
     }
-    return coedge_half_plane<C>(k, c, frame_of(f.i), h);
+    return coedge_half_plane<C>(k, c, frame_of(f.i), h, &sk);
   };
   util::Vector<uint32_t, 8> in, order;
   for_rows(flt, flt ? &flt->edges : nullptr, k.edges.capacity(), [&](uint32_t e) {
@@ -132,7 +148,7 @@ void validate_embedding(const Complex<C> &k, ValidationReport &rep, const Valida
     in.clear();
     k.for_each_radial(EdgeRef(e), [&](CoedgeRef c) { in.append(c.i); });
     bool tie = false;
-    if (!radial_order<C>(k, EdgeRef(e), std::span<const uint32_t>(in.data(), in.size()), half_plane, order, &tie) ||
+    if (!radial_order<C>(k, EdgeRef(e), std::span<const uint32_t>(in.data(), in.size()), half_plane, order, &tie, &sk) ||
         order.size() != in.size())
     {
       rep.add(VC::RadialOrder, ElemKind::Edge, e);
@@ -154,15 +170,16 @@ void validate_embedding(const Complex<C> &k, ValidationReport &rep, const Valida
     auto it = fans.find(f);
     if (it == fans.end()) {
       it = fans.emplace(f, util::Vector<geom::Point<C>>()).first;
-      vdetail::face_fan<C>(k, FaceRef(f), it->second);
+      vdetail::face_fan<C>(k, FaceRef(f), it->second, sk);
     }
     return it->second;
   };
   auto point_in_container = [&](const geom::Point<C> &p, ident::ContainerRef cr) {
     if (cr.kind() == ident::ContainerKind::Face) {
       const FaceRef f = cr.as_face();
-      FacePoints<C> fp;
-      fp.gather(k, f);
+      FacePoints<C> fv, fp;
+      fv.gather(k, f);
+      fp.gather(k, f, sk);
       const auto v = fp.view();
       const int pa = k.face_proj_axis(f);
       if (pa >= 0) {
@@ -178,7 +195,7 @@ void validate_embedding(const Complex<C> &k, ValidationReport &rep, const Valida
         }
         return false;
       }
-      const auto &q = v.pts;
+      const auto &q = fv.pts; /* stored vertices: the skeleton is only near the plane */
       /* coplanar with the face, and inside or on it in projection */
       for (size_t i = 2; i < q.size(); i++) {
         if (geom::vol3<C>(q[0], q[1], q[i], p) != 0) {
@@ -261,6 +278,7 @@ void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateF
   }
   using P = geom::Point<C>;
   const uint32_t F = k.faces.capacity();
+  Skeleton<C> sk(k); /* one table: faces sharing a curved edge share its ids */
   util::Vector<FaceMesh<C>> mesh;
   util::Vector<uint8_t> built; /* 0: not yet, 1: built, 2: failed */
   mesh.resize(F);
@@ -271,15 +289,14 @@ void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateF
   /* loop checks (with checks set) and the triangulation of face f */
   auto build = [&](uint32_t f, bool checks) -> bool {
       FaceMesh<C> &fm = mesh[f];
-      if (!vdetail::face_checks_and_tris<C>(k, f, checks, rep, fm.tris)) {
+      if (!vdetail::face_checks_and_tris<C>(k, f, checks, rep, fm.tris, sk)) {
         return false;
       }
-      util::Vector<uint32_t, 32> corner_v;
-      util::Vector<uint32_t, 8> off{0u};
-      k.for_each_loop(FaceRef(f), [&](LoopRef l) {
-        k.for_each_coedge(l, [&](CoedgeRef c) { corner_v.append(k.start_vert(c).i); });
-        off.append(uint32_t(corner_v.size()));
-      });
+      /* skeleton ids: a curved edge's segments are shared like edges */
+      FacePoints<C> fp;
+      fp.gather(k, FaceRef(f), sk);
+      const auto &corner_v = fp.ids;
+      const auto &off = fp.off;
       for (uint32_t cv : corner_v) {
         fm.verts.append(cv);
       }
@@ -297,7 +314,7 @@ void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateF
         fm.hi[i] = -INFINITY;
       }
       for (uint32_t cv : corner_v) {
-        const auto d = geom::to_double3<C>(k.pos(VertRef(cv)));
+        const auto d = geom::to_double3<C>(sk.pos(cv));
         for (int i = 0; i < 3; i++) {
           fm.lo[i] = std::min(fm.lo[i], d[i]);
           fm.hi[i] = std::max(fm.hi[i], d[i]);
@@ -330,15 +347,15 @@ void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateF
       fm.lo[i] = INFINITY;
       fm.hi[i] = -INFINITY;
     }
-    k.for_each_loop(FaceRef(f), [&](LoopRef l) {
-      k.for_each_coedge(l, [&](CoedgeRef c) {
-        const auto d = geom::to_double3<C>(k.pos(k.start_vert(c)));
-        for (int i = 0; i < 3; i++) {
-          fm.lo[i] = std::min(fm.lo[i], d[i]);
-          fm.hi[i] = std::max(fm.hi[i], d[i]);
-        }
-      });
-    });
+    FacePoints<C> fp;
+    fp.gather(k, FaceRef(f), sk);
+    for (const P &x : fp.pts) {
+      const auto d = geom::to_double3<C>(x);
+      for (int i = 0; i < 3; i++) {
+        fm.lo[i] = std::min(fm.lo[i], d[i]);
+        fm.hi[i] = std::max(fm.hi[i], d[i]);
+      }
+    }
   }
 
   /* candidate pairs: uniform grid over face bounding boxes */
@@ -390,13 +407,13 @@ void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateF
     }
   }
   std::sort(pairs.begin(), pairs.end());
-  auto pos = [&](uint32_t v) -> const P & { return k.pos(VertRef(v)); };
+  auto pos = [&](uint32_t v) -> const P & { return sk.pos(v); };
 
   /* does segment (p, q) of face f meet triangle t of face g other than at
    * shared vertices and along shared edges? */
   auto bad_contact = [&](uint32_t p, uint32_t q, bool pq_boundary, const std::array<uint32_t, 3> &t, const Shared &sh) {
     return vdetail::bad_contact<C>(
-        k, p, q, pq_boundary, t, [&](uint32_t v) { return sh.vert(v); }, [&](uint32_t a, uint32_t b) { return sh.edge(a, b); });
+        sk, p, q, pq_boundary, t, [&](uint32_t v) { return sh.vert(v); }, [&](uint32_t a, uint32_t b) { return sh.edge(a, b); });
   };
 
   for (auto &[f, g] : pairs) {
@@ -446,12 +463,19 @@ void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateF
       }
       const auto wv = k.edge_verts(EdgeRef(w));
       const uint32_t p = wv[0].i, q = wv[1].i;
-      double lo[3], hi[3];
-      {
-        const auto a = geom::to_double3<C>(pos(p)), b = geom::to_double3<C>(pos(q));
+      /* the wire's skeleton chain p, interior points, q (plan P4b §12 E) */
+      util::Vector<uint32_t, 16> chain;
+      chain.append(p);
+      for (uint32_t id : sk.interior(EdgeRef(w))) {
+        chain.append(id);
+      }
+      chain.append(q);
+      double lo[3] = {INFINITY, INFINITY, INFINITY}, hi[3] = {-INFINITY, -INFINITY, -INFINITY};
+      for (uint32_t id : chain) {
+        const auto a = geom::to_double3<C>(pos(id));
         for (int i = 0; i < 3; i++) {
-          lo[i] = std::min(a[i], b[i]);
-          hi[i] = std::max(a[i], b[i]);
+          lo[i] = std::min(lo[i], a[i]);
+          hi[i] = std::max(hi[i], a[i]);
         }
       }
       /* candidate faces: the grid cells the wire's box covers */
@@ -487,7 +511,9 @@ void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateF
         const FaceMesh<C> &m = mesh[f];
         bool bad = false;
         if (wc.kind() == ident::ContainerKind::Face && wc.index() == f) {
-          bad = !vdetail::embedded_wire_ok<C>(k, p, q, f);
+          for (uint32_t i = 0; i + 1 < chain.size() && !bad; i++) {
+            bad = !vdetail::embedded_wire_ok<C>(k, chain[i], chain[i + 1], f, sk);
+          }
         }
         else {
           /* elsewhere: only shared endpoints, or endpoints embedded in f */
@@ -500,8 +526,11 @@ void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateF
               sh.verts.append(e);
             }
           }
-          for (uint32_t j = 0; j < m.tris.size() && !bad; j++) {
-            bad = bad_contact(p, q, false, m.tris[j], sh);
+          std::sort(sh.verts.begin(), sh.verts.end());
+          for (uint32_t i = 0; i + 1 < chain.size() && !bad; i++) {
+            for (uint32_t j = 0; j < m.tris.size() && !bad; j++) {
+              bad = bad_contact(chain[i], chain[i + 1], false, m.tris[j], sh);
+            }
           }
         }
         if (bad) {

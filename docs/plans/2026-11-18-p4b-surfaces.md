@@ -540,6 +540,9 @@ Each must be killed by at least one test:
   acceptance case only builds forward.
 - **OI-P4b-7 — planar faces' curved carriers aren't checked against the plane.** Only
   the stored vertices decide planarity, as in P4a.
+- **OI-P4b-8 — `split_edge_at`'s re-sort of the second piece is untested** (W2
+  mutation check). It needs three planar faces on an S-shaped carrier split
+  exactly on its chord. Due with the W5 editor tests.
 
 ## 11. Review (fresh context, 2026-11-18, of v1)
 
@@ -671,3 +674,56 @@ same ids.
 - **Mutation check:** 16 W1 mutants, all killed (the pool-limit guard only after
   `test_attr_pool` gained its test).
 
+
+**W2:**
+- **`Skeleton<C>`** (`topo/face_skeleton.h`) is the §12 table. `FacePoints::gather(k,
+  f, sk)` expands curved edges and fills `ids` (skeleton ids) and `owner` (the
+  coedge of each point); `gather(k, f)` stays vertices-only. `warm()` flattens
+  every curved edge up front, so `build_regions`' parallel loop only reads the
+  table.
+- **Planarity rule.** `face_planar_rule` (face_geom.h): the stored vertices decide,
+  unless they are degenerate (a loop of arcs can have two vertices), and then the
+  skeleton decides. The editor (`classify_face`, `fix_projection`, `split_edge_at`,
+  imprint's children) and the validator share it.
+- **`coedge_half_plane` walks skeleton points** after the axis (as §12 C says).
+  Without curved edges this is the old walk. For a planar face whose arc leaves
+  the face's plane (OI-P4b-7), the first off-line point can be off the plane; such
+  faces are rejected once OI-P4b-7 is closed.
+- **`set_edge_curve` on a face edge** touches the edge's coedges, so their faces
+  join the commit filter. It also re-sorts the radial order and marks the regions
+  dirty. `split_edge_at` re-sorts both pieces. Before W2, the faces around a newly
+  curved edge were never re-validated.
+- **`SkeletonDegenerate`** is reported in two cases. The first is a loop meeting
+  that involves a segment with a flattening point at either end. The second is a
+  curved edge that doesn't flatten at `.g.skeleton_tol`: before W2 such an edge
+  was silently read as straight.
+- **Face grid.** Records of faces and wires with curved edges hold skeleton ids
+  from the table of the build that made them. `Rec::curved` marks them. Their
+  triangles are read by index from the current pass's T(f), since the canonical
+  CDT gives the same order. Face boxes are grown by 2·skeleton_tol (+1 quantum for
+  `Lattice`).
+- **Contact sets** take skeleton ids: `skel_point_on_face` and
+  `skel_segment_on_face` (validate_detail.h). A flattening point is on f when its
+  edge bounds f. A segment is on f when it is consecutive on a curved edge that
+  bounds f, or is a straight edge of f.
+- **Goldens.** `test_edit_random` was re-pinned behaviourally (§5.3). Across its
+  runs, 45 arcs land on face edges and 72 on wires. The determinism goldens are
+  unchanged. `test_edit_curves` now expects dirty regions after
+  `set_edge_curve` on a face edge.
+- **Fixture lesson** (debugging.md): fins on a curved edge with apexes at one
+  height intersect exactly when the radial order would swap.
+- **Imprint** reads the children of a split and an island cycle on their
+  skeletons. A hole in a curved edge's bulge goes to the child owning the edge, and
+  an inclusion in a cycle's bulge goes to the island.
+- **Mutation check:** 17 W2 mutants, 15 killed (all by `test_face_skeleton`, some
+  also by `test_edit_curves` and `test_edit_random`). Two survive:
+  - *`set_edge_curve` without the explicit coedge touch* is equivalent. The
+    resort that follows writes every coedge's radial links, which touches them
+    anyway. The touch stays as a guard against setters that skip no-op writes.
+  - *`split_edge_at` re-sorting only the first piece* is open (OI-P4b-8). Planar
+    faces on a split curved edge must all contain the new vertex. With three or
+    more faces, that is reachable only when the split point lies exactly on the
+    chord, which needs an S-shaped carrier and `Lattice` rounding. The test
+    belongs with the W5 editor tests.
+  - The mutation runner now pushes file times forward on every write, after one
+    batch reported a stale build as a survivor.

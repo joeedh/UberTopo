@@ -377,3 +377,22 @@ Entry format:
     every build script syncs first.
   - A mutation runner should edit the mirror, not the checkout.
   - Adding cores through `.wslconfig` doesn't help an I/O-bound build.
+
+## Fins on a curved edge intersect although they looked disjoint when straight
+- **Symptom:** a test built three triangular faces on one edge, then put an arc on
+  the edge to change its radial order. `set_edge_curve` came back `Invalid` with
+  `FaceIntersection` between two of the faces.
+- **Cause:** with a curved edge, each triangle becomes a fan from its apex to the
+  arc's skeleton. When two apexes are at the same height, the cross-section of one
+  fan at a given height is a translate of the other's. A translated copy of an arc
+  crosses the original whenever the translation direction lies inside the arc's
+  tangent range. That is the same condition that makes the order about the first
+  skeleton segment differ from the order about the chord, so the order swap the test
+  wanted came with an intersection.
+- **Fix / technique:** give the apexes different heights, so the cross-sections are
+  scaled by different factors as well as shifted. In `test_face_skeleton`, F2's
+  section then lies strictly between F3's arc and its chord.
+- **Note:** in a valid complex, the radial order about the first skeleton segment
+  usually agrees with the order about the chord. A test that makes them differ
+  needs faces that are close in angle near the edge and are separated by their
+  heights.

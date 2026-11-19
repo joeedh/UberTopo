@@ -55,21 +55,42 @@ template <geom::CoordType C> bool face_points_planar(const geom::PolyView<C> &vi
   return true;
 }
 
+/** The planarity rule with curved edges (plan P4b §2, §4.3): the stored
+ * vertices @p verts decide, unless they are degenerate (a loop of arcs can
+ * have two vertices), when the refined skeleton @p skel decides. Rounded
+ * flattening points are rarely exactly coplanar, so such faces are usually
+ * projected. *degenerate: the deciding view is degenerate. */
+template <geom::CoordType C>
+bool face_planar_rule(const geom::PolyView<C> &verts, const geom::PolyView<C> &skel, bool *degenerate)
+{
+  bool dv = false;
+  const bool pv = face_points_planar<C>(verts, &dv);
+  if (!dv) {
+    *degenerate = false;
+    return pv;
+  }
+  return face_points_planar<C>(skel, degenerate);
+}
+
 /** Classifies a face (see the header comment). @p axis_out: the projection
  * axis of a projected face, -1 for a planar one. @p tris receives T(f) of a
- * projected face (scratch otherwise). */
+ * projected face (scratch otherwise), in @p skel's point order. Planarity
+ * follows face_planar_rule; projection and loop orientation read the
+ * refined skeleton @p skel (the same as @p view without curved edges). */
 template <geom::CoordType C>
-FaceGeom classify_face(const geom::PolyView<C> &view,
+FaceGeom classify_face(const geom::PolyView<C> &verts,
+                       const geom::PolyView<C> &skel,
                        bool allow_projectable,
                        int8_t &axis_out,
                        litestl::util::Vector<geom::Triangle> &tris)
 {
   axis_out = -1;
   bool degenerate = false;
-  const bool planar = face_points_planar<C>(view, &degenerate);
+  const bool planar = face_planar_rule<C>(verts, skel, &degenerate);
   if (degenerate) {
     return FaceGeom::DegenerateLoop;
   }
+  const geom::PolyView<C> &view = skel;
   if (!planar) {
     if (!allow_projectable) {
       return FaceGeom::NonPlanarFace;
@@ -108,6 +129,16 @@ FaceGeom classify_face(const geom::PolyView<C> &view,
     }
   }
   return FaceGeom::Ok;
+}
+
+/** classify_face for a face without curved edges. */
+template <geom::CoordType C>
+FaceGeom classify_face(const geom::PolyView<C> &view,
+                       bool allow_projectable,
+                       int8_t &axis_out,
+                       litestl::util::Vector<geom::Triangle> &tris)
+{
+  return classify_face<C>(view, view, allow_projectable, axis_out, tris);
 }
 
 } // namespace ubertopo::topo

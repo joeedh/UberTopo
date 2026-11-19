@@ -150,8 +150,9 @@ EditCode Editor<C>::split_core(FaceRef f,
     return fail_report(make_chord || !on_two_loops ? EditCode::NotInLoop : EditCode::NotOuterLoop, ElemKind::Face, f.i);
   }
   const int axis = edit_detail::face_axis<C>(k_, f);
+  Skeleton<C> sk(k_);
   FacePoints<C> fp;
-  if (axis < 0 || !fp.gather(k_, f)) {
+  if (axis < 0 || !fp.gather(k_, f, sk)) {
     return fail_report(EditCode::DegenerateLoop, ElemKind::Face, f.i);
   }
   if (loops.size() > 1 && geom::outer_loop_proj<C>(fp.view(), axis) != l_ordinal) {
@@ -180,31 +181,54 @@ EditCode Editor<C>::split_core(FaceRef f,
   for (CoedgeRef c = cb; c != ca; c = k_.next(c)) {
     p2.append(c.i);
   }
-  litestl::util::Vector<Point, 32> right_pts;
-  for (uint32_t c : p1) {
-    right_pts.append(k_.pos(k_.start_vert(CoedgeRef(c))));
-  }
+  /* the children's outer loops, as stored vertices and as refined skeletons
+   * (plan P4b §4.3): chain vertex chain_v[i] and then the flattening points
+   * of the chain edge toward the next vertex (none for a chord to be made) */
+  litestl::util::Vector<Point, 32> right_pts, left_pts, right_v, left_v;
+  auto chain_run = [&](litestl::util::Vector<Point, 32> &pts, litestl::util::Vector<Point, 32> &vs, uint32_t i, uint32_t to) {
+    const Point &p = k_.pos(VertRef(chain_v[i]));
+    pts.append(p);
+    vs.append(p);
+    const uint32_t ei = std::min(i, to);
+    if (ei < chain_e.size()) {
+      const EdgeRef e(chain_e[ei]);
+      const auto in = sk.interior(e);
+      const bool fwd = k_.edge_verts(e)[0].i == chain_v[i];
+      for (size_t j = 0; j < in.size(); j++) {
+        pts.append(sk.pos(in[fwd ? j : in.size() - 1 - j]));
+      }
+    }
+  };
+  auto loop_runs = [&](litestl::util::Vector<Point, 32> &pts, litestl::util::Vector<Point, 32> &vs,
+                       const litestl::util::Vector<uint32_t, 32> &path) {
+    FacePoints<C> run;
+    for (uint32_t c : path) {
+      run.append_run(k_, CoedgeRef(c), &sk);
+      vs.append(k_.pos(k_.start_vert(CoedgeRef(c))));
+    }
+    for (const Point &p : run.pts) {
+      pts.append(p);
+    }
+  };
+  loop_runs(right_pts, right_v, p1);
   for (uint32_t i = n; i >= 1; i--) {
-    right_pts.append(k_.pos(VertRef(chain_v[i])));
+    chain_run(right_pts, right_v, i, i - 1);
   }
-  const uint32_t right_off[2] = {0, uint32_t(right_pts.size())};
-  const geom::PolyView<C> right_view{std::span<const Point>(right_pts.data(), right_pts.size()),
-                                     std::span<const uint32_t>(right_off, 2)};
-  /* neither child may be degenerate (all its corners on one line) */
+  loop_runs(left_pts, left_v, p2);
+  for (uint32_t i = 0; i < n; i++) {
+    chain_run(left_pts, left_v, i, i + 1);
+  }
+  auto view = [](const litestl::util::Vector<Point, 32> &pts, const uint32_t *off) {
+    return geom::PolyView<C>{std::span<const Point>(pts.data(), pts.size()), std::span<const uint32_t>(off, 2)};
+  };
+  const uint32_t right_off[2] = {0, uint32_t(right_pts.size())}, left_off[2] = {0, uint32_t(left_pts.size())};
+  const uint32_t right_voff[2] = {0, uint32_t(right_v.size())}, left_voff[2] = {0, uint32_t(left_v.size())};
+  const geom::PolyView<C> right_view = view(right_pts, right_off);
+  /* neither child may be degenerate (face_planar_rule's view all on one line) */
   {
-    litestl::util::Vector<Point, 32> left_pts;
-    for (uint32_t c : p2) {
-      left_pts.append(k_.pos(k_.start_vert(CoedgeRef(c))));
-    }
-    for (uint32_t i = 0; i < n; i++) {
-      left_pts.append(k_.pos(VertRef(chain_v[i])));
-    }
-    const uint32_t left_off[2] = {0, uint32_t(left_pts.size())};
-    const geom::PolyView<C> left_view{std::span<const Point>(left_pts.data(), left_pts.size()),
-                                      std::span<const uint32_t>(left_off, 2)};
     bool deg_l = false, deg_r = false;
-    face_points_planar<C>(left_view, &deg_l);
-    face_points_planar<C>(right_view, &deg_r);
+    face_planar_rule<C>(view(left_v, left_voff), view(left_pts, left_off), &deg_l);
+    face_planar_rule<C>(view(right_v, right_voff), right_view, &deg_r);
     if (deg_l || deg_r) {
       return fail_report(EditCode::DegenerateLoop, ElemKind::Face, f.i, "a child would be degenerate");
     }
@@ -429,30 +453,42 @@ EditCode Editor<C>::island_core(FaceRef f,
   using ident::ElemKind;
   const uint32_t n = uint32_t(chain_e.size());
   const int axis = edit_detail::face_axis<C>(k_, f);
+  Skeleton<C> sk(k_);
   FacePoints<C> fp;
-  if (axis < 0 || !fp.gather(k_, f)) {
+  if (axis < 0 || !fp.gather(k_, f, sk)) {
     return fail_report(EditCode::DegenerateLoop, ElemKind::Face, f.i);
   }
   litestl::util::Vector<uint32_t, 8> loops;
   k_.for_each_loop(f, [&](LoopRef l) { loops.append(l.i); });
   const uint32_t outer = loops.size() > 1 ? geom::outer_loop_proj<C>(fp.view(), axis) : 0;
-  /* the cycle's polygon and orientations */
-  litestl::util::Vector<Point, 32> cyc;
+  /* the cycle's polygon and orientations, on the refined skeleton (plan P4b
+   * §4.3): each chain vertex, then its edge's flattening points toward the
+   * next */
+  litestl::util::Vector<Point, 32> cyc, cyc_v;
   for (uint32_t i = 0; i < n; i++) {
     cyc.append(k_.pos(VertRef(chain_v[i])));
+    cyc_v.append(k_.pos(VertRef(chain_v[i])));
+    const EdgeRef e(chain_e[i]);
+    const auto in = sk.interior(e);
+    const bool fwd = k_.edge_verts(e)[0].i == chain_v[i];
+    for (size_t j = 0; j < in.size(); j++) {
+      cyc.append(sk.pos(in[fwd ? j : in.size() - 1 - j]));
+    }
   }
-  const uint32_t cyc_off[2] = {0, n};
+  const uint32_t cyc_off[2] = {0, uint32_t(cyc.size())}, cyc_voff[2] = {0, n};
   const geom::PolyView<C> cyc_view{std::span<const Point>(cyc.data(), cyc.size()), std::span<const uint32_t>(cyc_off, 2)};
   {
     bool deg = false;
-    face_points_planar<C>(cyc_view, &deg);
+    face_planar_rule<C>(geom::PolyView<C>{std::span<const Point>(cyc_v.data(), cyc_v.size()),
+                                          std::span<const uint32_t>(cyc_voff, 2)},
+                        cyc_view,
+                        &deg);
     if (deg) {
       return fail_report(EditCode::DegenerateLoop, ElemKind::Face, f.i, "the cycle is degenerate");
     }
   }
-  litestl::util::Vector<Point, 32> outer_pts;
-  k_.for_each_coedge(LoopRef(loops[int(outer)]), [&](CoedgeRef c) { outer_pts.append(k_.pos(k_.start_vert(c))); });
-  const int o_outer = geom::loop_orientation_proj<C>(std::span<const Point>(outer_pts.data(), outer_pts.size()), axis);
+  const auto outer_pts = fp.view().loop(outer);
+  const int o_outer = geom::loop_orientation_proj<C>(outer_pts, axis);
   const int o_cyc = geom::loop_orientation_proj<C>(std::span<const Point>(cyc.data(), cyc.size()), axis);
   /* the new face's loop runs like f's outer loop; the hole the other way */
   const bool island_fwd = o_cyc == o_outer;
@@ -779,8 +815,9 @@ template <geom::CoordType C> EditCode Editor<C>::remove_hole(FaceRef f, LoopRef 
     return pr.fail(EditCode::BadArgument, ElemKind::Loop, l.i);
   }
   const int axis = edit_detail::face_axis<C>(k_, f);
+  Skeleton<C> sk(k_);
   FacePoints<C> fp;
-  if (axis < 0 || !fp.gather(k_, f)) {
+  if (axis < 0 || !fp.gather(k_, f, sk)) {
     return pr.fail(EditCode::DegenerateLoop, ElemKind::Face, f.i);
   }
   uint32_t ordinal = 0, mine = NONE, count = 0;
