@@ -569,14 +569,16 @@ int main()
         printf("structure golden %llu: {0x%016llxull, 0x%016llxull}\n", (unsigned long long)seed,
                (unsigned long long)sd.lo, (unsigned long long)sd.hi);
       }
-      /* re-pinned for P3b W9: the step mix gained imprint, unimprint, holes,
-       * weld and compact (and earlier, §3.1: region rebuilds advance the
-       * generations of shells and regions that changed). Seeds 2 and 3 end
-       * with hinted rooms, so their goldens cover region IDs (DEC-017);
-       * seed 1 ends with region 0 only. */
-      const PersistentId goldens[3] = {PersistentId{0xd232bb3c173ca918ull, 0xf365153588a08e2cull},
-                                       PersistentId{0x75bccfc9fd30c4fbull, 0x0f75f4b7fd6a4b1cull},
-                                       PersistentId{0x7c4ccbaea916883aull, 0xacddf65e683a064aull}};
+      /* re-pinned for P4a W5: the geometry store's PoolRef Geom columns,
+       * .e.range, .e.geom_flags and .g.curve_tol (format 3); the structure
+       * goldens below are unchanged, so nothing else changed. Earlier, P3b
+       * W9: the step mix gained imprint, unimprint, holes, weld and compact
+       * (and §3.1: region rebuilds advance the generations of shells and
+       * regions that changed). Seeds 2 and 3 end with hinted rooms, so their
+       * goldens cover region IDs (DEC-017); seed 1 ends with region 0 only. */
+      const PersistentId goldens[3] = {PersistentId{0x530458424ac186a9ull, 0x7ca59d2d57e5d1d1ull},
+                                       PersistentId{0x7cb72ae1e192ca43ull, 0x5d1a3663bcccaeddull},
+                                       PersistentId{0xfacd1364227e0117ull, 0xb8b5e75892a3a346ull}};
       UT_CHECK(hd == goldens[seed - 1]);
       /* the structure hash leaves out the geometry columns: pinned with the
        * format-2 code before the P4a geometry store, and unchanged by it, it

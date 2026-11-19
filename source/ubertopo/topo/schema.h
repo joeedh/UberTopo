@@ -30,7 +30,7 @@ template <> struct ValueKey<ubertopo::ident::ContainerRef> {
     return "cref";
   }
 };
-template <> struct ValueKey<ubertopo::topo::GeomRef> {
+template <> struct ValueKey<ubertopo::topo::LegacyGeomRef> {
   static std::string key()
   {
     return "gref";
@@ -70,8 +70,31 @@ template <litestl::util::StrLiteral Name>
 struct Flags8 : AttrDef<Name, attr::Column<uint8_t>, ColumnFlags::Topo> {};
 template <litestl::util::StrLiteral Name>
 struct Container : AttrDef<Name, attr::Column<ident::ContainerRef>, ColumnFlags::Topo> {};
+/** A geometry store ref (plan P4a §4.1); kNoRef = straight / planar. */
 template <litestl::util::StrLiteral Name>
 struct Geom : AttrDef<Name, attr::Column<GeomRef>, ColumnFlags::Topo> {};
+/** Formats 1 and 2 (io_legacy.cc only). */
+template <litestl::util::StrLiteral Name>
+struct LegacyGeom : AttrDef<Name, attr::Column<LegacyGeomRef>, ColumnFlags::Topo> {};
+
+/** The parameter range [t0, t1] of .e.curve the edge uses (P4a), oriented
+ * from vs[0] to vs[1]; (0, 0) while the edge is straight. */
+struct EdgeRange : AttrDef<".e.range", attr::Column<litestl::math::double2>, ColumnFlags::Topo> {
+  static litestl::math::double2 default_value()
+  {
+    return litestl::math::double2(0.0, 0.0);
+  }
+};
+namespace edge_geom_flags {
+inline constexpr uint8_t PcurvePrimary = 1; /* design 05 §1; always 0 in P4a */
+}
+/** The tolerance of curve endpoint checks (plan P4a §5.3). */
+struct CurveTol : AttrDef<".g.curve_tol", attr::Column<double>, ColumnFlags::Topo> {
+  static double default_value()
+  {
+    return 0x1p-30;
+  }
+};
 
 using Id = AttrDef<".id", attr::Column<ident::PersistentId>, ColumnFlags::Topo>;
 using Gen = AttrDef<".gen", attr::Column<uint32_t>, ColumnFlags::Topo>;
@@ -95,6 +118,8 @@ using EdgeSchema = Schema<Link2<".e.vs">,
                           Container<".e.container">,
                           ContainerHintId<".e.container_hint">,
                           Geom<".e.curve">,
+                          EdgeRange,
+                          Flags8<".e.geom_flags">,
                           Id,
                           Gen,
                           Live>;
@@ -136,7 +161,7 @@ using RegionSchema = Schema<Link<".r.shell">, Flags8<".r.flags">, Id, Gen, Live>
  * complex was built with the projectable-faces opt-in (amendment A1); the
  * validator rejects projected faces without it. */
 using AllowsProjectable = AttrDef<".g.allows_projectable", attr::BoolColumn, ColumnFlags::Topo>;
-using GlobalSchema = Schema<AllowsProjectable>;
+using GlobalSchema = Schema<AllowsProjectable, CurveTol>;
 
 /** Registers every UberTopo column type with litestl's registry (needed
  * before reading a stream in a process that hasn't created such columns). */

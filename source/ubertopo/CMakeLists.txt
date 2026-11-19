@@ -41,9 +41,11 @@ add_library(ubertopo_topo STATIC
   topo/compact.cc
   topo/freeze.cc
   topo/io.cc
+  topo/io_legacy.cc
+  topo/geom_store.cc
   topo/edit/editor.cc
 )
-target_link_libraries(ubertopo_topo PUBLIC ubertopo_geom ubertopo_ident attr util)
+target_link_libraries(ubertopo_topo PUBLIC ubertopo_curves ubertopo_geom ubertopo_ident attr util)
 
 if (BUILD_TESTING)
   add_subdirectory(tests)

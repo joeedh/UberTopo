@@ -17,7 +17,7 @@
 namespace ubertopo::topo {
 
 enum class Remap : uint8_t {
-  None,       /* not an index (IDs, flags, generations, hints, geometry refs in P2) */
+  None,       /* not an element index (IDs, flags, generations, hints, geometry store refs) */
   Vertex,
   Edge,
   Coedge,
@@ -54,6 +54,8 @@ UT_REMAP(Link<".e.c">, Coedge)
 UT_REMAP(Container<".e.container">, Container)
 UT_REMAP(ContainerHintId<".e.container_hint">, None)
 UT_REMAP(Geom<".e.curve">, None)
+UT_REMAP(EdgeRange, None)
+UT_REMAP(Flags8<".e.geom_flags">, None)
 /* coedge */
 UT_REMAP(Link<".c.e">, Edge)
 UT_REMAP(Link<".c.v">, Vertex)
@@ -87,6 +89,7 @@ UT_REMAP(Link<".r.shell">, Shell)
 UT_REMAP(Flags8<".r.flags">, None)
 /* global */
 UT_REMAP(AllowsProjectable, None)
+UT_REMAP(CurveTol, None)
 #undef UT_REMAP
 
 template <typename S> struct SchemaCovered;

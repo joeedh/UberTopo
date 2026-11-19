@@ -10,6 +10,9 @@ void register_column_types()
   (void)attr::Column<geom::Point<geom::Lattice>>::static_type();
   (void)attr::Column<ident::ContainerRef>::static_type();
   (void)attr::Column<GeomRef>::static_type();
+  (void)attr::Column<LegacyGeomRef>::static_type();
+  (void)attr::Column<litestl::math::double2>::static_type();
+  (void)attr::Column<double>::static_type();
   (void)attr::Column<U32x2>::static_type();
   (void)attr::Column<U32x4>::static_type();
   (void)attr::Column<ident::PersistentId>::static_type();

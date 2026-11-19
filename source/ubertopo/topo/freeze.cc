@@ -5,7 +5,10 @@
 
 #include "litestl/util/sort.h"
 #include "ubertopo/geom/cdt/cdt.h"
+#include <cstdio>
+
 #include "ubertopo/topo/compact.h"
+#include "ubertopo/topo/geom_store.h"
 #include "ubertopo/topo/radial.h"
 #include "ubertopo/topo/remap.h"
 
@@ -172,6 +175,13 @@ template <geom::CoordType C> FreezeResult freeze(Complex<C> &k)
   if (k.frozen()) {
     return FreezeResult::AlreadyFrozen;
   }
+  /* the store's canonicalisation below must not fail after the permutes */
+  {
+    const GeomRoots<C> roots(k);
+    if (!k.geom.audit(roots.roots(), false)) {
+      return FreezeResult::GeometryInvalid;
+    }
+  }
   auto qpos = [&](VertRef v, double out[3]) {
     const auto &p = k.pos(v);
     for (int i = 0; i < 3; i++) {
@@ -263,8 +273,18 @@ template <geom::CoordType C> FreezeResult freeze(Complex<C> &k)
   }
   /* shells and regions keep build_regions' order; apply_remap fills them */
   apply_remap(k, maps);
+  /* canonical store numbering (07 §13), with the permuted groups as roots */
+  {
+    const GeomMutRoots<C> roots(k);
+    const char *err = nullptr;
+    if (!k.geom.canonicalize(roots.roots(), nullptr, &err)) {
+      fprintf(stderr, "topo::freeze: geometry canonicalize failed after audit: %s\n", err ? err : "?");
+      abort();
+    }
+  }
   build_caches(k);
   k.frozen_stamp = k.version();
+  k.frozen_geom_version = k.geom.version();
   return FreezeResult::Ok;
 }
 

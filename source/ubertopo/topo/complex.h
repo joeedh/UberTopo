@@ -15,6 +15,8 @@
 #include <cstdint>
 
 #include "litestl/attr/group.h"
+#include "litestl/attr/pool_store.h"
+#include "ubertopo/curves/curve.h"
 #include "ubertopo/geom/coord.h"
 #include "ubertopo/ident/ref.h"
 #include "ubertopo/topo/domain.h"
@@ -69,10 +71,16 @@ public:
   Domain<RegionSchema> regions;
   attr::TypedGroup<GlobalSchema> global;
   geom::TileFrame frame;
+  /** The geometry store (plan P4a §4.1): the curve kinds' pools, registered
+   * in curves::kinds() order. The Geom columns hold refs into it; its roots
+   * are the domain groups (geom_store.h). Copied and moved with the complex
+   * (copy-on-write). */
+  attr::PoolStore geom;
 
   ComplexBase()
   {
     global.resize(1);
+    curves::register_pools(geom);
   }
 
   bool allows_projectable() const
@@ -88,6 +96,9 @@ public:
   FrozenCaches caches;
   /** Version stamp at the last freeze (0: never frozen). */
   uint64_t frozen_stamp = 0;
+  /** geom.version() at the last freeze: interning after a freeze unfreezes,
+   * though version() itself ignores the store. */
+  uint64_t frozen_geom_version = 0;
 
   /** Version of the coordinate-independent groups (any mutation changes it). */
   uint64_t base_version() const
@@ -316,7 +327,7 @@ public:
   }
   bool frozen() const
   {
-    return frozen_stamp != 0 && frozen_stamp == version();
+    return frozen_stamp != 0 && frozen_stamp == version() && frozen_geom_version == geom.version();
   }
 
   const Point &pos(VertRef v) const

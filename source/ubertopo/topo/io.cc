@@ -2,67 +2,59 @@
 
 #include <array>
 #include <bit>
+#include <cstdio>
+#include <cstdlib>
 
 #include "ubertopo/topo/freeze.h"
+#include "ubertopo/topo/geom_store.h"
+#include "ubertopo/topo/io_detail.h"
 #include "ubertopo/topo/schema.h"
 
 namespace ubertopo::topo {
 
-namespace {
-constexpr ident::DomainTag kTopologyHash = ident::DomainTag(263);
+using namespace detail;
 
-template <geom::CoordType C> void hash_groups(const Complex<C> &k, ident::Hasher128 &h, bool with_pos)
+namespace {
+
+/* the groups in stream order, ref columns through the canonical map */
+template <geom::CoordType C>
+void hash_groups(const Complex<C> &k, ident::Hasher128 &h, bool with_pos, const attr::RefRemap &map)
 {
+  auto all = [](std::string_view, const attr::ColumnBase &) { return true; };
+  auto no_pos = [](std::string_view name, const attr::ColumnBase &) { return name != "pos"; };
   if (with_pos) {
-    k.verts.group().hash_into(h);
+    k.verts.group().hash_into(h, all, map);
   }
   else {
-    k.verts.group().hash_into(h, [](std::string_view name, const attr::ColumnBase &) { return name != "pos"; });
+    k.verts.group().hash_into(h, no_pos, map);
   }
-  k.edges.group().hash_into(h);
-  k.coedges.group().hash_into(h);
-  k.loops.group().hash_into(h);
-  k.faces.group().hash_into(h);
-  k.faces.sides().group().hash_into(h);
-  k.shells.group().hash_into(h);
-  k.regions.group().hash_into(h);
-  k.global.group().hash_into(h);
-}
-
-/* the generation floors in a fixed domain order (faces carry their sides) */
-template <geom::CoordType C> std::array<uint32_t, 7> floors_of(const Complex<C> &k)
-{
-  return {k.verts.gen_floor(),
-          k.edges.gen_floor(),
-          k.coedges.gen_floor(),
-          k.loops.gen_floor(),
-          k.faces.gen_floor(),
-          k.shells.gen_floor(),
-          k.regions.gen_floor()};
-}
-
-template <geom::CoordType C> void hash_floors(const Complex<C> &k, ident::Hasher128 &h)
-{
-  const auto fl = floors_of(k);
-  bool any = false;
-  for (uint32_t f : fl) {
-    any = any || f != 0;
-  }
-  if (!any) {
-    return; /* all-zero states hash as before format 2 */
-  }
-  h.u8(0xF1);
-  for (uint32_t f : fl) {
-    h.u32(f);
+  for (const attr::AttrGroup *g : {&k.edges.group(), &k.coedges.group(), &k.loops.group(), &k.faces.group(),
+                                   &k.faces.sides().group(), &k.shells.group(), &k.regions.group(),
+                                   &k.global.group()})
+  {
+    g->hash_into(h, all, map);
   }
 }
 
-template <geom::CoordType C> void hash_frame(const Complex<C> &k, ident::Hasher128 &h)
+/* One path for both hashes (plan P4a §4.3): the groups hashed through the
+ * store's canonical map, which is cheap (no copy, no renumbering), so the
+ * hashes equal those of the canonicalised complex that write() emits. A
+ * store whose refs don't validate gets a marker and an empty map, so its
+ * hash is still deterministic but matches no valid complex. */
+template <geom::CoordType C> void hash_body(const Complex<C> &k, ident::Hasher128 &h, bool content)
 {
-  h.str(geom::CoordTraits<C>::key);
-  h.f64_bits(k.frame.origin[0]).f64_bits(k.frame.origin[1]).f64_bits(k.frame.origin[2]);
-  h.i32(k.frame.quantum_log2).u64(k.frame.frame_id);
+  const GeomRoots<C> roots(k);
+  attr::PoolStore::CanonicalMap map;
+  if (!k.geom.canonical_map(roots.roots(), map)) {
+    h.u32(0xBAD6E0u);
+  }
+  hash_groups(k, h, content, map);
+  if (content) {
+    k.geom.hash_into(h, map);
+  }
+  hash_floors(k, h);
 }
+
 } // namespace
 
 template <geom::CoordType C> ident::PersistentId content_hash(const Complex<C> &k)
@@ -70,8 +62,7 @@ template <geom::CoordType C> ident::PersistentId content_hash(const Complex<C> &
   ident::Hasher128 h(ident::DomainTag::Content);
   hash_frame(k, h);
   h.boolean(k.regions_dirty);
-  hash_groups(k, h, true);
-  hash_floors(k, h);
+  hash_body(k, h, true);
   return h.finish();
 }
 
@@ -80,36 +71,52 @@ template <geom::CoordType C> ident::PersistentId topology_hash(const Complex<C> 
   ident::Hasher128 h(kTopologyHash);
   h.u64(k.frame.frame_id);
   h.boolean(k.regions_dirty);
-  hash_groups(k, h, false);
-  hash_floors(k, h);
+  hash_body(k, h, false);
   return h.finish();
 }
 
 template <geom::CoordType C> void write(const Complex<C> &k, litestl::io::ByteWriter &w)
 {
+  /* from a canonicalised copy (07 §13): copy-on-write, so k is untouched */
+  Complex<C> c = k;
+  {
+    const GeomMutRoots<C> roots(c);
+    const char *err = nullptr;
+    if (!c.geom.canonicalize(roots.roots(), nullptr, &err)) {
+      fprintf(stderr, "topo::write: the geometry store does not validate: %s\n", err ? err : "?");
+      abort();
+    }
+  }
   w.u32(kComplexMagic);
   w.u32(kComplexFormat);
   w.str(geom::CoordTraits<C>::key);
   for (int i = 0; i < 3; i++) {
-    w.u64(std::bit_cast<uint64_t>(k.frame.origin[i]));
+    w.u64(std::bit_cast<uint64_t>(c.frame.origin[i]));
   }
-  w.i64(k.frame.quantum_log2);
-  w.u64(k.frame.frame_id);
-  w.u8(k.regions_dirty ? 1 : 0);
+  w.i64(c.frame.quantum_log2);
+  w.u64(c.frame.frame_id);
+  w.u8(c.regions_dirty ? 1 : 0);
   w.u8(k.frozen() ? 1 : 0);
-  for (uint32_t f : floors_of(k)) {
+  for (uint32_t f : floors_of(c)) {
     w.u32(f);
   }
-  k.verts.group().write(w);
-  k.edges.group().write(w);
-  k.coedges.group().write(w);
-  k.loops.group().write(w);
-  k.faces.group().write(w);
-  k.faces.sides().group().write(w);
-  k.shells.group().write(w);
-  k.regions.group().write(w);
-  k.global.group().write(w);
-  const ident::PersistentId h = content_hash(k);
+  {
+    const GeomRoots<C> roots(c);
+    if (!c.geom.write(w, roots.roots())) {
+      fprintf(stderr, "topo::write: the geometry store is not canonical after canonicalize\n");
+      abort();
+    }
+  }
+  c.verts.group().write(w);
+  c.edges.group().write(w);
+  c.coedges.group().write(w);
+  c.loops.group().write(w);
+  c.faces.group().write(w);
+  c.faces.sides().group().write(w);
+  c.shells.group().write(w);
+  c.regions.group().write(w);
+  c.global.group().write(w);
+  const ident::PersistentId h = content_hash(c);
   w.u64(h.lo);
   w.u64(h.hi);
 }
@@ -133,6 +140,10 @@ template <geom::CoordType C> bool read(Complex<C> &k, litestl::io::ByteReader &r
   if (r.str() != std::string_view(geom::CoordTraits<C>::key)) {
     return fail("coordinate type mismatch");
   }
+  if (format < 3) {
+    return read_legacy(k, r, format, err);
+  }
+  /* the strict owner sequence (plan P4a §4.3) */
   Complex<C> s;
   for (int i = 0; i < 3; i++) {
     s.frame.origin[i] = std::bit_cast<double>(r.u64());
@@ -142,15 +153,16 @@ template <geom::CoordType C> bool read(Complex<C> &k, litestl::io::ByteReader &r
   s.regions_dirty = r.u8() != 0;
   const bool frozen = r.u8() != 0;
   uint32_t floors[7] = {};
-  if (format >= 2) {
-    for (uint32_t &f : floors) {
-      f = r.u32();
-    }
+  for (uint32_t &f : floors) {
+    f = r.u32();
   }
   if (r.failed()) {
     return fail("truncated header");
   }
   const char *gerr = nullptr;
+  if (!s.geom.read(r, {}, &gerr)) {
+    return fail(gerr ? gerr : "geometry store read failed");
+  }
   if (!s.verts.group().read(r, {}, &gerr) || !s.edges.group().read(r, {}, &gerr) ||
       !s.coedges.group().read(r, {}, &gerr) || !s.loops.group().read(r, {}, &gerr) ||
       !s.faces.group().read(r, {}, &gerr) || !s.faces.sides().group().read(r, {}, &gerr) ||
@@ -162,30 +174,32 @@ template <geom::CoordType C> bool read(Complex<C> &k, litestl::io::ByteReader &r
   if (s.faces.sides().size() != 2 * s.faces.capacity() || s.global.size() != 1) {
     return fail("face side or global group size mismatch");
   }
-  s.verts.set_gen_floor(floors[0]);
-  s.edges.set_gen_floor(floors[1]);
-  s.coedges.set_gen_floor(floors[2]);
-  s.loops.set_gen_floor(floors[3]);
-  s.faces.set_gen_floor(floors[4]);
-  s.shells.set_gen_floor(floors[5]);
-  s.regions.set_gen_floor(floors[6]);
+  set_floors(s, floors);
+  {
+    const GeomRoots<C> roots(s);
+    if (!s.geom.audit(roots.roots(), true)) {
+      return fail("geometry store: a dangling, refused or unreachable entry");
+    }
+  }
+  {
+    const GeomMutRoots<C> roots(s);
+    bool changed = true;
+    if (!s.geom.canonicalize(roots.roots(), &changed, &gerr) || changed) {
+      return fail("geometry store is not in canonical order");
+    }
+  }
   ident::PersistentId h;
   h.lo = r.u64();
   h.hi = r.u64();
   if (r.failed() || !(h == content_hash(s))) {
     return fail("content hash mismatch");
   }
-  s.verts.rebuild_allocator();
-  s.edges.rebuild_allocator();
-  s.coedges.rebuild_allocator();
-  s.loops.rebuild_allocator();
-  s.faces.rebuild_allocator();
-  s.shells.rebuild_allocator();
-  s.regions.rebuild_allocator();
+  rebuild_allocators(s);
   k = std::move(s);
   if (frozen) {
     build_caches(k);
     k.frozen_stamp = k.version();
+    k.frozen_geom_version = k.geom.version();
   }
   return true;
 }

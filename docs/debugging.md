@@ -248,3 +248,24 @@ Entry format:
 - **Symptom:** `Cesaro2::make` refused simple curves (a 60 m cubic spiral, a 10 km chain) with "too many pieces", after bisecting to the depth limit.
 - **Cause:** pieces were accepted only when their whole certified error was at most `kPieceTol·h`. Some terms are proportional to h, chiefly the heading uncertainty at the piece midpoint (δθ·h), so bisection cannot make them smaller relative to h. Once δθ is about 1e-14 rad, which a heading of 2.5 rad reaches through rounding alone, no piece can pass.
 - **Fix / technique:** split an error budget into the terms bisection reduces faster than h (Taylor tail, coefficient uncertainty, recurrence rounding) and the terms proportional to h. Accept a piece on the first group, and keep both groups in the certified bound.
+
+## A "structure hash" that excludes columns still changes when columns are added
+- **Symptom:** structure goldens pinned before P4a W5, meant to prove that only geometry
+  columns changed, failed after the switch. They used
+  `AttrGroup::hash_into(h, keep)` with the geometry columns filtered out.
+- **Cause:** the filtered group hash still covers the group's size and its builtin
+  column count (`h.u32(builtins_)`). Adding builtins (`.e.range`, `.e.geom_flags`,
+  `.g.curve_tol`) changes that count, filtered or not.
+- **Fix / technique:** a hash meant to survive schema changes must hash the kept
+  columns itself (name plus `ColumnBase::hash_into`, in `canonical_order()`). Pin it
+  with the old code, and check that the switch leaves it unchanged before trusting it
+  as a proof.
+
+## `function_ref` from a const lambda does not compile
+- **Symptom:** `reinterpret_cast from 'const (lambda) *' to 'void *' casts away
+  qualifiers` in `litestl/util/function.h`, when a `const auto keep = [](...) {...};`
+  was passed as an `AttrGroup::ColumnFilter`.
+- **Cause:** litestl's `function_ref` stores a `void *` to the callable and does not
+  accept const callables.
+- **Fix / technique:** declare the lambda without `const` (`auto keep = ...`), or pass
+  it as a temporary.

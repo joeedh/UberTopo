@@ -25,7 +25,9 @@
 
 namespace ubertopo::topo {
 
-enum class FreezeResult : uint8_t { Ok, AlreadyFrozen, RegionsDirty };
+/** GeometryInvalid: a geometry ref is dangling, malformed or of a kind its
+ * column does not accept (geom_store.h); nothing was changed. */
+enum class FreezeResult : uint8_t { Ok, AlreadyFrozen, RegionsDirty, GeometryInvalid };
 
 template <geom::CoordType C> FreezeResult freeze(Complex<C> &k);
 

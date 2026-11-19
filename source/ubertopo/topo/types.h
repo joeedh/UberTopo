@@ -5,19 +5,24 @@
 #include <array>
 #include <cstdint>
 
+#include "litestl/attr/pool_ref.h"
 #include "ubertopo/ident/ref.h"
 
 namespace ubertopo::topo {
 
 using ident::NONE;
 
-/** Reference into a geometry pool (design 05; P4). NONE means a straight
- * segment / planar face; every GeomRef is NONE in P2. */
-struct GeomRef {
+/** Reference into the complex's geometry store (design 05, plan P4a §4.1).
+ * kNoRef means a straight segment / planar face. */
+using GeomRef = litestl::attr::PoolRef;
+
+/** The 4-byte geometry reference of formats 1 and 2 (always NONE there);
+ * kept for io_legacy.cc only. */
+struct LegacyGeomRef {
   uint32_t i = NONE;
-  friend constexpr bool operator==(GeomRef a, GeomRef b) = default;
+  friend constexpr bool operator==(LegacyGeomRef a, LegacyGeomRef b) = default;
 };
-static_assert(sizeof(GeomRef) == 4 && std::has_unique_object_representations_v<GeomRef>);
+static_assert(sizeof(LegacyGeomRef) == 4 && std::has_unique_object_representations_v<LegacyGeomRef>);
 
 using U32x2 = std::array<uint32_t, 2>;
 using U32x4 = std::array<uint32_t, 4>;
