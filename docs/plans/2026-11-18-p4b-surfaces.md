@@ -293,7 +293,7 @@ Zero candidates, or more than one, is `SurfaceLink`.
 
 ### 4.3 The refined skeleton (`topo/face_skeleton.h`)
 
-**Consumers** (the inventory W0 completes and records in §12 before W2 changes them):
+**Consumers** (the full inventory, with line numbers, is §12):
 - `radial.h`: `FacePoints::gather`, `face_frame`, `coedge_half_plane`,
   `radial_order` (which sorts about the chord v0→v1) and
   `projected_third_vertices` (which returns `VertRef`, so it cannot name a
@@ -587,6 +587,65 @@ widening overlaps the superelevation transition, so both factors vary.
 - t is a horizontal offset;
 - the P4c split of §1 is accepted (queries stay in P4c).
 
-## 12. Skeleton consumer inventory
+## 12. Skeleton consumer inventory (W0)
 
-To be completed in W0.
+Found by searching `source/ubertopo/topo` for `PolyView`, `FacePoints`, `cdt_proj`,
+`face_frame`, `coedge_half_plane`, `radial_order`, `projected_third_vertices`,
+`face_fan`, `classify_face`, `face_points_planar`, `face_area`, `face_box` and
+`embedded_wire_ok` (2026-11-19, at dbd5c25).
+
+**The hub.** Most consumers read loop points through `FacePoints<C>::gather`
+(radial.h:34), which appends each coedge's start vertex. W2 splits it in two:
+- `gather` stays as it is: stored vertices only. **Planarity** uses it.
+- `gather_skeleton(k, f, table)` expands curved edges (§4.3). It also fills a parallel
+  `ids` array (a stored vertex's index, or vertex count + the table index of a
+  flattening point) and the coedge each point belongs to.
+
+**A. Planarity: stays on stored vertices (no change but a test):**
+- `editor_impl_curves.h:113` (`split_edge_at` keeps incident planar faces planar);
+- `editor_impl_vertex_edge.h:115` (`split_impl`);
+- `editor_impl_cycles.h:228` (`fix_projection`);
+- `editor_impl_face.h:364` (`join_faces`), `editor_impl_unimprint.h:100`;
+- `editor_impl_imprint.h:206–207, 448` (degeneracy of the split loops).
+
+**B. Projection, T(f) and frames: switch to `gather_skeleton`:**
+- `face_geom.h:62` `classify_face`: planarity on the vertices, the CDT on the skeleton.
+  Its callers build their own point lists: `builder.cc:357` (the builder makes no
+  curved edges, so it passes vertices only), `editor_impl_face.h:163` (`make_face`),
+  `editor_impl_imprint.h:191, 203` (the two sides of a split).
+- `radial.h:67` `face_frame(k, f)` and `radial.h:104` `face_triangles`;
+- `regions.cc:169` (T(f) for volumes and rays);
+- `validate_detail.h:61` `face_fan`, `:213` loop checks and T(f), `:293`
+  `embedded_wire_ok`;
+- `validate_geom.cc:57` (projection and planarity checks: planarity on vertices, the
+  CDT on the skeleton) and `:164` (container fans);
+- `face_grid.cc:129` (T(f) entries of large faces);
+- `editor_impl_face.h:34` `face_area` (propagation weights; the skeleton makes a
+  curved face's area right to within skeleton_tol);
+- `editor_impl_imprint.h:153, 432, 782` (loop points of the face being imprinted).
+
+**C. Index users: need skeleton ids, not `VertRef`:**
+- `radial.h:120` `projected_third_vertices` returns (coedge, `VertRef`) pairs. It
+  becomes (coedge, skeleton id), and for a curved edge the triangle is the one on its
+  first skeleton segment.
+- `radial.h:79` `coedge_half_plane` walks the loop's stored vertices for an off-line
+  point. For a curved coedge it uses the first skeleton segment and walks skeleton
+  points.
+- `radial.h:153` `radial_order` sorts about the chord v0→v1. For a curved edge: about
+  its first skeleton segment from `vs[0]`. Callers: `validate_geom.cc:99–125`,
+  `builder.cc:624, 689`, `editor_impl_cycles.h:38–59` (`resort_radial`).
+- `validate_geom.cc:238` and `validate_detail.h:130–133`: T(f) triangles in vertex
+  indices and the `SharedV`/`SharedE` contact sets. They switch to skeleton ids, with
+  shared segments of a curved edge added to `SharedE`.
+
+**D. Boxes:**
+- `face_grid.cc:16` `face_box` reads vertex positions. A curved edge adds its
+  skeleton points' box, grown by skeleton_tol + rounding, so the box still covers
+  the true carrier.
+
+**E. Wires** (`validate_geom.cc:490`, `validate_grid.cc:250`): a curved wire tests
+each skeleton segment against the face's T(f). Its endpoints are unchanged.
+
+**The table.** One `SkeletonTable` per validation pass or editor operation: a map from
+(edge, k) to an id, filled on first use, so every face that names an edge sees the
+same ids.
