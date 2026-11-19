@@ -57,6 +57,13 @@ const char *validate_code_name(ValidateCode c)
     UT_VC(WireCrossesFace)
     UT_VC(RegionsStale)
     UT_VC(SkeletonDegenerate)
+    UT_VC(SurfaceKind)
+    UT_VC(PcurveKind)
+    UT_VC(PcurveRange)
+    UT_VC(PcurveVertex)
+    UT_VC(PcurveDeviation)
+    UT_VC(SurfaceLink)
+    UT_VC(SurfaceOrientation)
 #undef UT_VC
   }
   return "?";

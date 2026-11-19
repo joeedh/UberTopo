@@ -48,6 +48,7 @@ void validate_embedding(const Complex<C> &k, ValidationReport &rep, const Valida
    * their neighbours (plan P3b C13) */
   std::unordered_map<uint32_t, FaceFrame> frames;
   validate_curves(k, rep, flt);
+  validate_surfaces(k, rep, flt);
   /* one skeleton table for the pass (plan P4b §4.3): planarity reads the
    * stored vertices, everything else the refined skeleton */
   Skeleton<C> sk(k);

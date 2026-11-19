@@ -182,15 +182,29 @@ public:
     *z = (1 - *w) * zk + *w * zk1;
   }
 
+  int piece_count() const override
+  {
+    return d_.links();
+  }
+  int piece_at(double u, double v, Side su, Side sv) const override
+  {
+    return link_at(std::clamp(u, lo_, hi_), v, su, sv);
+  }
+
   void eval(double s, double t, int n, Vec<3> *out, Side su, Side sv) const override
+  {
+    eval_piece(s, t, n, out, link_at(std::clamp(s, lo_, hi_), t, su, sv), su);
+  }
+
+  void eval_piece(double s, double t, int n, Vec<3> *out, int k, Side su) const override
   {
     s = std::clamp(s, lo_, hi_);
     n = std::clamp(n, 0, 2);
+    k = std::clamp(k, 0, d_.links() - 1);
     Vec<2> r[4];
     ref_->eval(s, n + 1, r, su);
     /* xy: Offset2View::eval's expression and order (rule 1 of §3.2) */
     const double x = r[0][0] - t * r[1][1], y = r[0][1] + t * r[1][0];
-    const int k = link_at(s, t, su, sv);
     const Fn1D &Bk = d_.borders[k], &Bk1 = d_.borders[k + 1], &Zk = d_.heights[k], &Zk1 = d_.heights[k + 1];
     const double bk = Bk.eval(s, 0, su), bk1 = Bk1.eval(s, 0, su);
     const double zk = Zk.eval(s, 0, su), zk1 = Zk1.eval(s, 0, su);
@@ -231,7 +245,21 @@ public:
 
   double deriv_bound(const ParamBox &box, int i, int j, Side sv) const override
   {
+    /* the link named by the box's middle and sv, extended over the box */
+    const double u0 = std::max(lo_, std::min(box.u.lo, box.u.hi)), u1 = std::min(hi_, std::max(box.u.lo, box.u.hi));
+    const double v0 = std::min(box.v.lo, box.v.hi), v1 = std::max(box.v.lo, box.v.hi);
+    if (!(u0 <= u1)) {
+      return INFINITY;
+    }
+    return deriv_bound_piece(box, i, j, link_at(u0 + 0.5 * (u1 - u0), v0 + 0.5 * (v1 - v0), Side::Above, sv));
+  }
+
+  double deriv_bound_piece(const ParamBox &box, int i, int j, int k) const override
+  {
     const int ord = i + j;
+    if (k < 0 || k >= d_.links()) {
+      return INFINITY;
+    }
     if (i < 0 || j < 0 || ord > 2) {
       return INFINITY;
     }
@@ -243,9 +271,6 @@ public:
     if (!(u0 <= u1)) {
       return INFINITY;
     }
-    /* the link named by the box's middle and sv, extended over the box */
-    const double um = u0 + 0.5 * (u1 - u0), vm = v0 + 0.5 * (v1 - v0);
-    const int k = link_at(um, vm, Side::Above, sv);
     const Fn1D &Bk = d_.borders[k], &Bk1 = d_.borders[k + 1], &Zk = d_.heights[k], &Zk1 = d_.heights[k + 1];
     auto mag = [&](const Fn1D &f, int q) { return f.range(u0, u1, q).abs_max(); };
     auto dmag = [&](const Fn1D &a, const Fn1D &b, int q) { return diff_range(a, b, u0, u1, q).abs_max(); };

@@ -57,7 +57,7 @@ enum class ValidateCode : uint16_t {
   CurveRange,           /* .e.range outside the domain, equal ends, across an offset fold,
                          * or non-zero with no carrier */
   CurveEndpoint,        /* an end vertex lies off the carrier (beyond the §2 tolerance) */
-  GeometryUnsupported,  /* a pcurve, a surface or .e.geom_flags: not in P4a */
+  GeometryUnsupported,  /* non-zero .e.geom_flags (reserved; plan P4b §4.1) */
   /* global layer */
   LoopIntersection,     /* a loop self-intersects, or two loops of a face meet */
   HoleOutside,          /* a hole is not inside its face's outer loop */
@@ -66,6 +66,17 @@ enum class ValidateCode : uint16_t {
   RegionsStale,         /* stored regions differ from a fresh build_regions() */
   SkeletonDegenerate,   /* a curved edge's refined skeleton touches its own loop or another
                          * edge of the face, or the edge doesn't flatten (P4b §4.3) */
+  /* surfaces and pcurves (plan P4b §4.2; embedding layer) */
+  SurfaceKind,          /* .f.surface is not a live, valid surface of an accepted kind */
+  PcurveKind,           /* a pcurve of the wrong kind for its edge, one on a coedge of an
+                         * unsurfaced face, or one missing on a surfaced face */
+  PcurveRange,          /* the pcurve's domain doesn't cover the edge's range, or it leaves
+                         * the surface's u domain */
+  PcurveVertex,         /* S(pcurve) misses the coedge's end vertex beyond the tolerance */
+  PcurveDeviation,      /* the edge leaves S(pcurve) beyond the tolerance, or the bound is
+                         * inconclusive within the subdivision cap */
+  SurfaceLink,          /* no single piece (road3 link) holds all of the face's pcurves */
+  SurfaceOrientation,   /* .f.flags Reversed disagrees with the surface normal */
 };
 
 const char *validate_code_name(ValidateCode c);
@@ -169,10 +180,16 @@ template <geom::CoordType C>
 void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateFilter *filter = nullptr);
 
 /** The embedding layer's curve checks (validate_curves.cc): CurveKind,
- * CurveRange, CurveEndpoint, GeometryUnsupported. Edges and faces only; the
- * skeleton checks stay on the chords (plan P4a OI-P4a-1). */
+ * CurveRange, CurveEndpoint, GeometryUnsupported. Edges only. */
 template <geom::CoordType C>
 void validate_curves(const Complex<C> &k, ValidationReport &rep, const ValidateFilter *filter = nullptr);
+
+/** The embedding layer's surface checks (validate_surfaces.cc, plan P4b
+ * §4.2): SurfaceKind, PcurveKind, PcurveRange, SurfaceLink, PcurveVertex,
+ * PcurveDeviation, SurfaceOrientation. With a filter: its faces and the
+ * faces around its edges. */
+template <geom::CoordType C>
+void validate_surfaces(const Complex<C> &k, ValidationReport &rep, const ValidateFilter *filter = nullptr);
 
 /** The global layer restricted to @p filter, over @p grid (validate_grid.cc). */
 template <geom::CoordType C>

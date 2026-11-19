@@ -779,3 +779,58 @@ same ids.
     |num|·2Be/d_min² with |num| ≤ D_d and D_d ≥ d_min, already covers that, so
     the bound stays sound without the numerator term. The code keeps the
     numerator term because each EB step bounds its own inputs.
+
+**W4:**
+- **`validate_surfaces.cc`** runs inside the embedding layer, after
+  `validate_curves`. The face-level checks run in order: kinds and ranges, then
+  the link, vertices, deviation and orientation. A failure stops the face's
+  later checks, so each corruption reports one code. Coedge-level codes
+  (`PcurveKind`, `PcurveRange`, `PcurveVertex`, `PcurveDeviation`) are reported
+  per coedge. With a filter, it checks the listed faces and the faces around the
+  listed edges.
+- **Pieces in v.** `SurfaceEval` gained `piece_count`, `piece_at`, `eval_piece`
+  and `deriv_bound_piece`. The validator evaluates and bounds the face's own
+  link and never infers it from a point. `deriv_bound`'s box-middle choice can
+  pick a neighbouring link for a box near a border, which would make the
+  second-order bound unsound. `eval_piece` agrees bit for bit with `eval`
+  wherever `eval` picks that piece.
+- **Link rule.** A `graph2` that is bitwise border j may lie in links j − 1 and
+  j. Any other pcurve is tested against each link with `Fn1D::range`
+  enclosures of the link's borders over subranges, bisected up to 2⁸ pieces.
+  ε is the tolerance itself, because |S_t| ≥ |N| = 1 on `road3`.
+- **The structural pass** needs three things: the carrier's offset equals the
+  pcurve's f, f equals border j (j = link or link + 1), and the carrier's z
+  equals Z_j. A carrier over the reference itself needs f ≡ 0. The test drops
+  each condition in turn.
+- **The general pass** cuts at the carrier's, the pcurve's and the surface's
+  special parameters, mapped through a slanted `segment2` with an allowance of
+  a few ulps of λ for the mapping. It bounds |u′|, |v′|, |u″| and |v″| per
+  pcurve kind: `graph2` has u′ = 1 and u″ = 0, and `segment2` has constant
+  derivatives. So a cross edge at constant s has (S∘γ)″ = S_tt·v′² = 0 and
+  passes on its first range.
+- **Orientation** reads the face's axis and front sign: the projection axis for
+  a projected face, the frame for a planar one. The sign of (S_u × S_v) along
+  that axis, at the first pcurve's middle on the face's piece, must agree with
+  `Reversed`, beyond its evaluation error.
+- **`GeometryUnsupported`** now covers only non-zero `.e.geom_flags`. In
+  `test_edit_curves`, a non-surface as the surface is now `SurfaceKind`, and a
+  pcurve on an unsurfaced face is `PcurveKind`.
+- **Tests:** `test_validate_surfaces` uses the superelevation reference with
+  three links as a 4 × 3 sheet of projected faces. It corrupts the sheet once
+  per code, then restores it. A twisted straight road (S_st is the only non-zero
+  second partial) with a diagonal straight edge catches a 5 cm sag that only
+  the cross and Peano terms reveal. Surfaces and pcurves are written straight
+  into the columns, because `intern_curve` refuses surfaces until W5.
+- **Mutations:** 16 W4 mutants. They cover §9 items 14–19 (item 15 as three
+  mutants, one per structural condition), the orientation sign, the border's
+  two links, the unsurfaced check, the filter, the cross term and the hook.
+  14 are killed.
+  - The first run left four survivors. The Peano term was found only because a
+    carrier break inside the bulged edge put a sample on the bulge, and no
+    pcurve moved in both s and t. The twisted-diagonal test kills both.
+  - **Two equivalent survivors:**
+    - The kind comparison in `gather` is redundant: the pool lookup that
+      follows (`Graph2Pool` for curved edges, `Segment2Pool` for straight ones)
+      fails for the wrong kind, and that is also reported as `PcurveKind`.
+    - The definite-failure exit only saves time. Without it, bisection runs to
+      the cap and returns the same failure.

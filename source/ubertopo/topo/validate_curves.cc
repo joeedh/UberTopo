@@ -1,5 +1,6 @@
-/* Embedding layer, curve part (plan P4a §5.3): edge carriers against the
- * vertex skeleton, and the geometry P4a does not support yet. */
+/* Embedding layer, curve part (plan P4a §5.3): edge carriers against their
+ * end vertices, and the reserved .e.geom_flags. Surfaces and pcurves are
+ * validate_surfaces.cc's. */
 
 #include <bit>
 #include <cmath>
@@ -18,8 +19,6 @@ void validate_curves(const Complex<C> &k, ValidationReport &rep, const ValidateF
   const auto &curve = k.edges.template get<".e.curve">();
   const auto &range = k.edges.template get<".e.range">();
   const auto &gflags = k.edges.template get<".e.geom_flags">();
-  const auto &pcurve = k.coedges.template get<".c.pcurve">();
-  const auto &surface = k.faces.template get<".f.surface">();
   const double curve_tol = k.global.template get<".g.curve_tol">()[0];
 
   auto edge = [&](uint32_t e) {
@@ -30,11 +29,6 @@ void validate_curves(const Complex<C> &k, ValidationReport &rep, const ValidateF
     if (gflags[e] != 0) {
       rep.add(VC::GeometryUnsupported, ElemKind::Edge, e);
     }
-    k.for_each_radial(er, [&](CoedgeRef c) {
-      if (!pcurve[c.i].none()) {
-        rep.add(VC::GeometryUnsupported, ElemKind::Coedge, c.i);
-      }
-    });
     const attr::PoolRef r = curve[e];
     const double t0 = range[e][0], t1 = range[e][1];
     if (r.none()) {
@@ -57,29 +51,16 @@ void validate_curves(const Complex<C> &k, ValidationReport &rep, const ValidateF
       rep.add(VC::CurveEndpoint, ElemKind::Edge, e);
     }
   };
-  auto face = [&](uint32_t f) {
-    if (k.faces.live(f) && !surface[f].none()) {
-      rep.add(VC::GeometryUnsupported, ElemKind::Face, f);
-    }
-  };
   if (flt) {
     for (uint32_t e : flt->edges) {
       if (e < k.edges.capacity()) {
         edge(e);
       }
     }
-    for (uint32_t f : flt->faces) {
-      if (f < k.faces.capacity()) {
-        face(f);
-      }
-    }
     return;
   }
   for (uint32_t e = 0; e < k.edges.capacity(); e++) {
     edge(e);
-  }
-  for (uint32_t f = 0; f < k.faces.capacity(); f++) {
-    face(f);
   }
 }
 

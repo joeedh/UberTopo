@@ -399,12 +399,12 @@ template <geom::CoordType C> void test_validate_direct()
   curve.set(e.i, PoolRef{});
   range.set(e.i, litestl::math::double2(0, 0));
   UT_CHECK(fx.valid());
-  fx.k.faces.template get<".f.surface">().set(f.i, plane);
-  UT_CHECK(issue() == ValidateCode::GeometryUnsupported);
+  fx.k.faces.template get<".f.surface">().set(f.i, plane); /* not a surface kind (P4b) */
+  UT_CHECK(issue() == ValidateCode::SurfaceKind);
   fx.k.faces.template get<".f.surface">().set(f.i, PoolRef{});
   const CoedgeRef c = fx.k.edge_coedge(e);
-  fx.k.coedges.template get<".c.pcurve">().set(c.i, plane);
-  UT_CHECK(issue() == ValidateCode::GeometryUnsupported);
+  fx.k.coedges.template get<".c.pcurve">().set(c.i, plane); /* on an unsurfaced face */
+  UT_CHECK(issue() == ValidateCode::PcurveKind);
   fx.k.coedges.template get<".c.pcurve">().set(c.i, PoolRef{});
   UT_CHECK(fx.valid());
 }

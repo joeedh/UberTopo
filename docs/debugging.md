@@ -396,3 +396,15 @@ Entry format:
   usually agrees with the order about the chord. A test that makes them differ
   needs faces that are close in angle near the edge and are separated by their
   heights.
+
+## Carriers interned before `Builder::build` are "not live"
+- **Symptom:** a test interned a road (`build_road`) into `k.geom` and then built
+  the faces with `Builder::build(k, ...)`. Every following `set_edge_curve` failed
+  with `BadArgument`: "the carrier is not live or not a 3D curve kind".
+- **Cause:** `Builder::build` replaces the whole complex, and its geometry store
+  with it. Refs interned earlier point into the store that was dropped.
+- **Fix / technique:** intern into the complex only after `build`. If the
+  geometry is also needed to place the vertices, build it twice: once in a
+  scratch `PoolStore` (`register_pools` first) to compute positions, then again
+  in `k.geom`. `build_road` is deterministic, so both copies agree bit for bit
+  (`test_validate_surfaces`).

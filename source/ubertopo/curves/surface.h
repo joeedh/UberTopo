@@ -11,8 +11,8 @@
  *  - deriv_eval_error(k): the same for every partial of order k <= 2;
  *  - deriv_bound(box, i, j): max |d^(i+j) S / du^i dv^j| over the box. A
  *    kind with creases in v (road3's borders) extends one smooth piece over
- *    the whole box, so a box that touches a crease is still covered for the
- *    piece the caller names (side_v).
+ *    the whole box: the piece at the box's middle on side sv, or the one
+ *    deriv_bound_piece names.
  *
  * An evaluator may point into its store's entries: it is valid until the
  * next intern, collect, canonicalize or assignment of that store. */
@@ -41,6 +41,32 @@ public:
   virtual double deriv_bound(const ParamBox &box, int i, int j, Side sv = Side::Above) const = 0;
   /** Breaks in u within [u0, u1], sorted (as CurveEval::special_params). */
   virtual void special_u(double u0, double u1, util::Vector<SpecialParam> &out) const = 0;
+
+  /* Pieces in v. A kind with creases in v (road3's borders) splits its
+   * domain into smooth pieces, numbered from the lowest v (road3: piece k is
+   * link k). The piece calls name one piece explicitly, so a caller that
+   * knows which piece a face lies on (the validator) needn't infer it from
+   * a point. A piece extends smoothly past its creases; eval_error and
+   * deriv_eval_error cover points on the piece's closed range. */
+  virtual int piece_count() const
+  {
+    return 1;
+  }
+  /** The piece eval would use at (u, v). */
+  virtual int piece_at(double, double, Side = Side::Above, Side = Side::Above) const
+  {
+    return 0;
+  }
+  /** eval on @p piece (bitwise eval's result wherever eval picks it). */
+  virtual void eval_piece(double u, double v, int n, Vec<3> *out, int, Side su = Side::Above) const
+  {
+    eval(u, v, n, out, su);
+  }
+  /** deriv_bound for @p piece extended over the box. */
+  virtual double deriv_bound_piece(const ParamBox &box, int i, int j, int) const
+  {
+    return deriv_bound(box, i, j);
+  }
 };
 
 class SurfaceKindOps : public KindOps {
