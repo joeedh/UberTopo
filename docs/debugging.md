@@ -233,3 +233,8 @@ Entry format:
 - **Symptom:** after P3b W8, tests that built a wire inside a face with `make_edge` followed by `embed_edge` started failing at the `make_edge` step with `Invalid`, and the report named `WireCrossesFace`.
 - **Cause:** between the two calls the wire is a free wire lying in the face's plane. The validator treats a free wire as crossing any face it touches away from a shared endpoint, so the first primitive leaves the complex invalid.
 - **Fix / technique:** create the wire already embedded, with the `in` argument: `make_edge(a, b, id, &e, EmbedTarget::face(f))`. Use the same pattern whenever an intermediate state would be invalid. Do it inside one primitive, or in a transaction validated on commit, never as two primitives each validated on its own.
+
+## A mutation "survives" because the test binary was never rebuilt
+- **Symptom:** a planted bug in the grid's rollback path left `test_edit_random` passing, so the new grid check looked useless.
+- **Cause:** an earlier edit had broken the test file. A heredoc turned a `\n` escape into a real line break, so the file no longer compiled. The command sent ninja's output to `/dev/null` and then ran the test anyway, which executed the previous binary: no grid check and no mutant.
+- **Fix / technique:** make every build-then-run command stop when the build fails. For example, `(ninja t > /tmp/b.log 2>&1 || { echo BUILD FAILED; exit 1; }) && ./t`. Treat a mutation that survives as a reason to check the build first, before concluding anything about the test.

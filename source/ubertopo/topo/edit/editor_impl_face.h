@@ -643,6 +643,7 @@ template <geom::CoordType C> EditCode Editor<C>::run_barrier(OpKind kind)
   c = commit_internal(redoing_);
   idx_.invalidate();
   idx_.flush(k_); /* eagerly, inside the barrier (C13) */
+  grid_.rebuild_if_used(k_);
   sync_index_stamp();
   return c;
 }

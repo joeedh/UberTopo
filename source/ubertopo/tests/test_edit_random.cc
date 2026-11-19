@@ -70,6 +70,7 @@ template <geom::CoordType C> bool build_model(Complex<C> &k)
 }
 
 struct Stats {
+  std::map<EditCode, uint32_t> group_codes; /* commits of group transactions */
   std::map<EditCode, uint32_t> codes;
   std::map<std::string, uint32_t> detail; /* validation / region codes of Invalid and RegionsFailed */
   uint32_t ok = 0, steps = 0;
@@ -241,13 +242,23 @@ template <geom::CoordType C> struct Run {
   }
 
   /** The whole run; returns the final content hash. */
-  PersistentId run(uint64_t seed, uint32_t steps, PersistentId *topo, ValidateMode mode)
+  PersistentId run(uint64_t seed, uint32_t steps, PersistentId *topo, ValidateMode mode, uint32_t group = 0)
   {
     UT_CHECK(build_model(k));
     const PersistentId h0 = content_hash(k);
     Editor<C> ed(k, &j, nullptr, EditorOptions{mode});
+    ed.options().verify_redo = true; /* redo checks its result against the stored hash (P3b C11) */
     litestl::test::SplitMix64 r(seed);
+    /* group > 0: every `group` steps share one transaction (OnCommit runs,
+     * plan P3b C12); states inside it may be invalid */
+    bool in_txn = false;
+    PersistentId txn_pre{};
     for (uint32_t n = 0; n < steps; n++) {
+      if (group && n % group == 0) {
+        UT_CHECK(ed.begin("group") == EditCode::Ok);
+        in_txn = true;
+        txn_pre = content_hash(k);
+      }
       const PersistentId pre = content_hash(k);
       const uint32_t undos = j.undo_count(), redos = j.redo_count();
       const EditCode c = step(ed, r, n);
@@ -276,8 +287,16 @@ template <geom::CoordType C> struct Run {
         fprintf(stderr, "  step %u: editor index diverged after %s\n", n, edit_code_name(c));
         return {};
       }
-      /* Local mode: the full validator must agree after every commit */
-      if (n % 40 == 39 || (mode == ValidateMode::Local && c == EditCode::Ok)) {
+      /* the editor's dirty-row face-box grid equals a rebuilt one (P3b W5, C6) */
+      if (!ed.grid_consistent()) {
+        UT_CHECK(false);
+        fprintf(stderr, "  step %u: editor grid diverged after %s\n", n, edit_code_name(c));
+        return {};
+      }
+      /* Local and OnCommit modes: the full validator must agree after every
+       * commit (inside a group transaction the state may be invalid) */
+      const bool local = mode == ValidateMode::Local || mode == ValidateMode::OnCommit;
+      if (!in_txn && (n % 40 == 39 || (local && c == EditCode::Ok))) {
         const ValidationReport rep = validate(k, ValidateLevel::Global);
         UT_CHECK(rep.ok());
         if (!rep.ok()) {
@@ -286,6 +305,23 @@ template <geom::CoordType C> struct Run {
           return {};
         }
       }
+      if (in_txn && (n % group == group - 1 || n + 1 == steps)) {
+        in_txn = false;
+        const EditCode cc = ed.commit();
+        if (cc == EditCode::Ok) {
+          const ValidationReport rep = validate(k, ValidateLevel::Global);
+          UT_CHECK(rep.ok());
+          if (!rep.ok()) {
+            fprintf(stderr, "  step %u: invalid after a group commit\n", n);
+            rep.print(stderr);
+            return {};
+          }
+        }
+        else {
+          UT_CHECK(cc == EditCode::Invalid && content_hash(k) == txn_pre);
+        }
+        st.group_codes[cc]++;
+      }
     }
     const PersistentId h_end = content_hash(k);
     const uint32_t applied = j.undo_count();
@@ -293,7 +329,7 @@ template <geom::CoordType C> struct Run {
       UT_CHECK(ed.undo() == EditCode::Ok);
     }
     UT_CHECK(content_hash(k) == h0);
-    UT_CHECK(ed.index_consistent());
+    UT_CHECK(ed.index_consistent() && ed.grid_consistent());
     const uint32_t redos = j.redo_count();
     for (uint32_t i = 0; i < redos; i++) {
       const EditCode c = ed.redo();
@@ -325,10 +361,23 @@ uint32_t scaled(uint32_t n)
 }
 
 template <geom::CoordType C>
-PersistentId run_one(uint64_t seed, uint32_t steps, PersistentId *topo, bool print, ValidateMode mode = ValidateMode::Full)
+PersistentId run_one(uint64_t seed,
+                     uint32_t steps,
+                     PersistentId *topo,
+                     bool print,
+                     ValidateMode mode = ValidateMode::Full,
+                     uint32_t group = 0)
 {
   Run<C> run;
-  const PersistentId h = run.run(seed, steps, topo, mode);
+  const PersistentId h = run.run(seed, steps, topo, mode, group);
+  if (group) {
+    printf("edit_random grouped (%s, seed %llu, %u per transaction): commits", geom::CoordTraits<C>::key,
+           (unsigned long long)seed, group);
+    for (const auto &[code, cnt] : run.st.group_codes) {
+      printf(" %s=%u", edit_code_name(code), cnt);
+    }
+    printf("\n");
+  }
   if (print) {
     printf("edit_random (%s, seed %llu): %u steps, %u committed;", geom::CoordTraits<C>::key,
            (unsigned long long)seed, run.st.steps, run.st.ok);
@@ -366,6 +415,13 @@ int main()
        * sequence: the same final state, and full validity after each commit */
       PersistentId tloc;
       UT_CHECK(run_one<double>(seed, steps, &tloc, false, ValidateMode::Local) == hd);
+      /* OnCommit with one primitive per transaction: the same again (C12) */
+      PersistentId toc;
+      UT_CHECK(run_one<double>(seed, steps, &toc, false, ValidateMode::OnCommit) == hd);
+      /* OnCommit with several primitives per transaction: every commit is
+       * fully valid, and a refused one restores the state before it */
+      PersistentId tgrp;
+      run_one<double>(seed, steps, &tgrp, false, ValidateMode::OnCommit, 8);
     }
     if (seed == 1 && steps == 600) {
       if (getenv("LITESTL_PRINT_GOLDENS")) {

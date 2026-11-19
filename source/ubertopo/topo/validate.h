@@ -12,6 +12,7 @@
 #include <cstdint>
 
 #include "litestl/util/vector.h"
+#include "ubertopo/geom/predicates.h"
 #include "ubertopo/ident/id.h"
 #include "ubertopo/ident/ref.h"
 #include "ubertopo/topo/complex.h"
@@ -116,9 +117,24 @@ void validate_combinatorial(const ComplexBase &k, const VertexTopoView &v, Valid
  * pair with at least one listed face; containers for listed vertices and
  * edges; radial order for listed edges. RegionsStale runs only if
  * @p regions is set. */
+class FaceGrid;
+
+/** Counts live elements holding a persistent ID (the editor's index): lets
+ * the local combinatorial layer check ID uniqueness without a scan. */
+struct IdOracle {
+  virtual ~IdOracle() = default;
+  /** @p kind: Vertex, Edge or Face. */
+  virtual uint32_t count(ident::ElemKind kind, ident::PersistentId id) const = 0;
+};
+
 struct ValidateFilter {
   litestl::util::Vector<uint32_t> faces, edges, verts;
   bool regions = false;
+  /** The editor's face-box grid, flushed (else a filtered global layer
+   * builds one: O(N)). */
+  const FaceGrid *grid = nullptr;
+  /** The editor's ID index (else the combinatorial layer runs in full). */
+  const IdOracle *ids = nullptr;
 
   static bool has(const litestl::util::Vector<uint32_t> &v, uint32_t i)
   {
@@ -144,6 +160,20 @@ template <geom::CoordType C>
 void validate_embedding(const Complex<C> &k, ValidationReport &rep, const ValidateFilter *filter = nullptr);
 template <geom::CoordType C>
 void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateFilter *filter = nullptr);
+
+/** The global layer restricted to @p filter, over @p grid (validate_grid.cc). */
+template <geom::CoordType C>
+void validate_global_grid(const Complex<C> &k, ValidationReport &rep, const ValidateFilter &filter, const FaceGrid &grid);
+/** Winding of @p p about region 0's boundary: one ray through @p grid. */
+template <geom::CoordType C>
+geom::RayResult region0_winding_grid(const Complex<C> &k, const geom::Point<C> &p, const FaceGrid &grid);
+
+/** Combinatorial layer restricted to @p filter and its one-ring (plan P3b
+ * C9; validate_local.cc). Needs filter.ids. */
+void validate_combinatorial_local(const ComplexBase &k,
+                                  const VertexTopoView &v,
+                                  const ValidateFilter &filter,
+                                  ValidationReport &rep);
 
 template <geom::CoordType C> ValidationReport validate(const Complex<C> &k, ValidateLevel level = ValidateLevel::Combinatorial)
 {
@@ -173,7 +203,12 @@ template <geom::CoordType C> ValidationReport validate_local(const Complex<C> &k
                          k.verts.template get<".id">(),
                          k.verts.template get<".live">(),
                          k.verts.capacity()};
-  validate_combinatorial(k, v, rep);
+  if (filter.ids) {
+    validate_combinatorial_local(k, v, filter, rep);
+  }
+  else {
+    validate_combinatorial(k, v, rep);
+  }
   if (rep.ok()) {
     validate_embedding(k, rep, &filter);
   }
@@ -189,5 +224,13 @@ extern template void validate_embedding<geom::Lattice>(const Complex<geom::Latti
 extern template void validate_global<double>(const Complex<double> &, ValidationReport &, const ValidateFilter *);
 extern template void validate_global<float>(const Complex<float> &, ValidationReport &, const ValidateFilter *);
 extern template void validate_global<geom::Lattice>(const Complex<geom::Lattice> &, ValidationReport &, const ValidateFilter *);
+#define UT_VGRID_EXTERN(C)                                                                                            \
+  extern template void validate_global_grid<C>(const Complex<C> &, ValidationReport &, const ValidateFilter &,        \
+                                               const FaceGrid &);                                                     \
+  extern template geom::RayResult region0_winding_grid<C>(const Complex<C> &, const geom::Point<C> &, const FaceGrid &);
+UT_VGRID_EXTERN(double)
+UT_VGRID_EXTERN(float)
+UT_VGRID_EXTERN(geom::Lattice)
+#undef UT_VGRID_EXTERN
 
 } // namespace ubertopo::topo

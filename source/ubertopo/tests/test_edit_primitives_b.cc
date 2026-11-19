@@ -705,6 +705,61 @@ template <geom::CoordType C> void test_wire_face()
   UT_CHECK(hk(fx.k) == h0);
 }
 
+/* ---- W5: OnCommit validation (plan P3b §3.5, C12) ---- */
+
+template <geom::CoordType C> void test_on_commit()
+{
+  Fixture<C> fx;
+  UT_CHECK(fx.box());
+  Editor<C> ed(fx.k, &fx.j);
+  const VertRef corner = fx.vert_at({0, 0, 4});
+  const PersistentId h0 = hk(fx.k);
+  /* Local refuses, at once, a vertex on a box corner embedded in region 0
+   * (a point on the room's boundary is not strictly outside it): the
+   * region-0 ray through the grid reports the boundary */
+  ed.options().validate = ValidateMode::Local;
+  VertRef tmp;
+  EXPECT_EDIT(ed, ed.make_vertex(pt<C>({0, 0, 4}), hid("snap_tmp"), &tmp), EditCode::Ok);
+  EXPECT_EDIT(ed, ed.embed_vertex(tmp, EmbedTarget::region(RegionRef(0))), EditCode::Invalid);
+  UT_CHECK(reports(ed, ValidateCode::ContainerGeometry));
+  EXPECT_EDIT(ed, ed.kill_vertex(tmp), EditCode::Ok);
+  /* OnCommit: the same vertex, a wire to it, and the weld that removes the
+   * coincidence, in one transaction */
+  ed.options().validate = ValidateMode::OnCommit;
+  UT_CHECK(ed.begin("snap") == EditCode::Ok);
+  VertRef top, end;
+  EXPECT_EDIT(ed, ed.make_vertex(pt<C>({0, 0, 9}), hid("snap_top"), &top), EditCode::Ok);
+  EXPECT_EDIT(ed, ed.make_vertex(pt<C>({0, 0, 4}), hid("snap_end"), &end), EditCode::Ok);
+  EXPECT_EDIT(ed, ed.embed_vertex(end, EmbedTarget::region(RegionRef(0))), EditCode::Ok); /* invalid for now */
+  EdgeRef wire;
+  EXPECT_EDIT(ed, ed.make_edge(top, end, ident::kNoId, &wire), EditCode::Ok);
+  const std::pair<VertRef, VertRef> snap[1] = {{corner, end}};
+  EXPECT_EDIT(ed, ed.weld(std::span<const std::pair<VertRef, VertRef>>(snap, 1)), EditCode::Ok);
+  EXPECT_EDIT(ed, ed.commit(), EditCode::Ok);
+  UT_CHECK(fx.valid() && fx.j.undo_count() == 3);
+  UT_CHECK(fx.k.verts.template get<".v.container">()[corner.i].is_none()); /* a face vertex again */
+  const PersistentId h1 = hk(fx.k);
+  /* a transaction that ends invalid is refused whole, and the journal keeps
+   * only the first */
+  UT_CHECK(ed.begin("bad") == EditCode::Ok);
+  VertRef a, b;
+  EXPECT_EDIT(ed, ed.make_vertex(pt<C>({2, -2, 2}), hid("pierce_a"), &a), EditCode::Ok);
+  EXPECT_EDIT(ed, ed.make_vertex(pt<C>({2, 2, 2}), hid("pierce_b"), &b), EditCode::Ok);
+  EXPECT_EDIT(ed, ed.make_edge(a, b), EditCode::Ok); /* through the wall y = 0 */
+  EXPECT_EDIT(ed, ed.commit(), EditCode::Invalid);
+  UT_CHECK(reports(ed, ValidateCode::WireCrossesFace));
+  UT_CHECK(hk(fx.k) == h1 && fx.j.undo_count() == 3 && ed.index_consistent() && ed.grid_consistent());
+  /* undo and redo of the committed transaction; redo does not validate */
+  EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+  EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+  EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+  UT_CHECK(hk(fx.k) == h0);
+  EXPECT_EDIT(ed, ed.redo(), EditCode::Ok);
+  EXPECT_EDIT(ed, ed.redo(), EditCode::Ok);
+  EXPECT_EDIT(ed, ed.redo(), EditCode::Ok);
+  UT_CHECK(hk(fx.k) == h1 && fx.valid());
+}
+
 } // namespace
 
 int main()
@@ -722,6 +777,8 @@ int main()
   test_weld<geom::Lattice>();
   test_wire_face<double>();
   test_wire_face<geom::Lattice>();
+  test_on_commit<double>();
+  test_on_commit<geom::Lattice>();
   UT_CHECK(litestl::alloc::getMemorySize() == baseline);
   return ut_test_end();
 }

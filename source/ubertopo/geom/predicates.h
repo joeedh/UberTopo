@@ -430,7 +430,76 @@ bool far_point(const Point<C> &p, const Point<C> &lo, const Point<C> &hi, const 
   }
   return false;
 }
+
+/** far_point for a box given in doubles: q is beyond it on the dominant
+ * axis by at least a small margin. */
+template <CoordType C>
+bool far_point_box(const Point<C> &p, const double lo[3], const double hi[3], const int64_t (&d)[3], Point<C> &q)
+{
+  using T = CoordTraits<C>;
+  int m = 0;
+  for (int i = 1; i < 3; i++) {
+    if ((d[i] < 0 ? -d[i] : d[i]) > (d[m] < 0 ? -d[m] : d[m])) {
+      m = i;
+    }
+  }
+  const double pm = T::to_double(p[m]);
+  const double edge = d[m] > 0 ? std::max(hi[m], pm) : std::min(lo[m], pm);
+  const double margin = 1.0 + 1e-6 * (std::abs(edge) + std::abs(hi[m] - lo[m]));
+  const double span = std::abs(edge - pm) + margin;
+  const double dm = double(d[m] < 0 ? -d[m] : d[m]);
+  int L = span > dm ? int(std::ceil(std::log2(span / dm))) : 0;
+  L = L < 0 ? 0 : L;
+  for (int attempt = 0; attempt < 4; attempt++, L++) {
+    bool ok = true;
+    for (int i = 0; i < 3 && ok; i++) {
+      C off;
+      ok = T::from_int_pow2(d[i], L, off);
+      if (ok) {
+        q[i] = p[i] + off;
+      }
+    }
+    if (!ok || !T::ext_ok(q)) {
+      return false;
+    }
+    const double qm = T::to_double(q[m]);
+    if (d[m] > 0 ? qm >= edge + margin : qm <= edge - margin) {
+      return true;
+    }
+  }
+  return false;
+}
 } // namespace detail
+
+/** Crossings of segment (p, q) with the oriented triangles @p s (3 points
+ * each): Ok with the winding in @p w, Boundary if p lies on a triangle, or
+ * Degenerate if the segment meets an edge, a vertex or a plane (try another
+ * q). q must lie outside everything the triangles bound. */
+template <CoordType C> RayStatus ray_segment_winding(const Point<C> &p, const Point<C> &q, std::span<const Point<C>> s, int &w)
+{
+  w = 0;
+  const size_t nt = s.size() / 3;
+  for (size_t t = 0; t < nt; t++) {
+    const Point<C> &a = s[3 * t], &b = s[3 * t + 1], &c = s[3 * t + 2];
+    const int sp = vol3_ext<C>(a, b, c, p), sq = vol3_ext<C>(a, b, c, q);
+    if (sp == sq && sp != 0) {
+      continue; /* both on one side */
+    }
+    const int e1 = vol3_ext<C>(p, q, a, b), e2 = vol3_ext<C>(p, q, b, c), e3 = vol3_ext<C>(p, q, c, a);
+    const bool pos = e1 > 0 || e2 > 0 || e3 > 0, neg = e1 < 0 || e2 < 0 || e3 < 0;
+    if (pos && neg) {
+      continue; /* the line misses the closed triangle */
+    }
+    if (sp == 0 && sq != 0) {
+      return RayStatus::Boundary; /* the line meets the plane only at p, inside the closed triangle */
+    }
+    if (e1 == 0 || e2 == 0 || e3 == 0 || sq == 0) {
+      return RayStatus::Degenerate; /* through an edge or a vertex, or in the plane */
+    }
+    w += sq; /* crossing from the back (sp < 0) to the front adds +1 */
+  }
+  return RayStatus::Ok;
+}
 
 /** 4x the interior point (a + b + 2c) / 4 of a non-degenerate triangle;
  * false if not exactly representable (double inputs off a dyadic grid). */
@@ -492,31 +561,13 @@ template <CoordType C> RayResult ray_winding(const Point<C> &p, std::span<const 
       continue;
     }
     int w = 0;
-    bool degenerate = false;
-    for (size_t t = 0; t < nt && !degenerate; t++) {
-      const Point<C> &a = s[3 * t], &b = s[3 * t + 1], &c = s[3 * t + 2];
-      const int sp = vol3_ext<C>(a, b, c, p), sq = vol3_ext<C>(a, b, c, q);
-      if (sp == sq && sp != 0) {
-        continue; /* both on one side */
-      }
-      const int e1 = vol3_ext<C>(p, q, a, b), e2 = vol3_ext<C>(p, q, b, c), e3 = vol3_ext<C>(p, q, c, a);
-      const bool pos = e1 > 0 || e2 > 0 || e3 > 0, neg = e1 < 0 || e2 < 0 || e3 < 0;
-      if (pos && neg) {
-        continue; /* the line misses the closed triangle */
-      }
-      if (sp == 0 && sq != 0) {
-        /* the line meets the plane only at p, inside the closed triangle */
-        res.status = RayStatus::Boundary;
-        res.winding = 0;
-        return res;
-      }
-      if (e1 == 0 || e2 == 0 || e3 == 0 || sq == 0) {
-        degenerate = true; /* through an edge or a vertex, or in the plane */
-        break;
-      }
-      w += sq; /* crossing from the back (sp < 0) to the front adds +1 */
+    const RayStatus st = ray_segment_winding<C>(p, q, std::span<const Point<C>>(s.data(), s.size()), w);
+    if (st == RayStatus::Boundary) {
+      res.status = RayStatus::Boundary;
+      res.winding = 0;
+      return res;
     }
-    if (!degenerate) {
+    if (st == RayStatus::Ok) {
       res.status = RayStatus::Ok;
       res.winding = w;
       return res;

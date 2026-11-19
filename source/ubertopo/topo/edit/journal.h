@@ -73,6 +73,8 @@ template <geom::CoordType C> struct Txn {
   TxnLog log;
   std::unique_ptr<Complex<C>> snapshot; /* barrier: the complex before */
   uint64_t schema_ver[kGroupCount] = {}; /* column sets after the transaction */
+  /** content_hash after commit, when EditorOptions::verify_redo is set (C11) */
+  ident::PersistentId post_hash{};
   std::vector<RefCol> ref_cols[kGroupCount];
 };
 

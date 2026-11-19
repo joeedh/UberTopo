@@ -39,6 +39,7 @@
 #include "litestl/util/vector.h"
 #include "ubertopo/topo/complex.h"
 #include "ubertopo/topo/edit/edit_types.h"
+#include "ubertopo/topo/edit/editor_grid.h"
 #include "ubertopo/topo/edit/editor_index.h"
 #include "ubertopo/topo/edit/journal.h"
 #include "ubertopo/topo/edit/propagate.h"
@@ -46,13 +47,23 @@
 namespace ubertopo::topo {
 
 enum class ValidateMode : uint8_t {
-  Full,  /* validate(k, Global) after every primitive (the oracle) */
-  Local, /* validate_local on the touched elements (W6) */
-  None,  /* no validation: the caller guarantees validity (tests, bulk tools) */
+  Full,     /* validate(k, Global) after every primitive (the oracle) */
+  Local,    /* validate_local on the elements each primitive touched */
+  None,     /* no validation: the caller guarantees validity (tests, bulk tools) */
+  OnCommit, /* validate_local once, on everything the outermost transaction
+             * touched; intermediate states may be invalid (plan P3b §3.5) */
 };
 
 struct EditorOptions {
   ValidateMode validate = ValidateMode::Full;
+  /** Redo re-executes without validating; with this set it compares the
+   * result's content hash with the one stored at commit and fails with
+   * JournalStale on a mismatch (plan P3b C11). Costs O(N) per commit. */
+#ifdef NDEBUG
+  bool verify_redo = false;
+#else
+  bool verify_redo = true;
+#endif
 };
 
 /** A container for embed(): a face, a region (by index; needs current
@@ -179,6 +190,12 @@ public:
     idx_.flush(k_);
     return !idx_.valid() || idx_.same_as(fresh);
   }
+  /** Test hook: the kept face-box grid equals one rebuilt from scratch. */
+  bool grid_consistent() const
+  {
+    grid_.flush(k_);
+    return grid_.same_as_fresh(k_);
+  }
   /** The edge joining @p a and @p b, if any. */
   EdgeRef find_edge(VertRef a, VertRef b) const;
 
@@ -229,8 +246,8 @@ private:
   void drop_hole(FaceRef f, LoopRef hole);
   /** rebuild_regions() / compact(): a snapshot transaction of its own. */
   EditCode run_barrier(OpKind kind);
-  EditCode validate_now();
-  void touched_filter(ValidateFilter &flt) const;
+  EditCode validate_now(const litestl::util::Vector<uint32_t> *touched);
+  void touched_filter(ValidateFilter &flt, const litestl::util::Vector<uint32_t> *touched) const;
 
   /* ---- write helpers: capture first, then write (editor.cc) ---- */
   void touch(Grp g, uint32_t row);
@@ -316,8 +333,22 @@ private:
   uint32_t epoch_ = 0;
   bool in_prim_ = false;
   bool redoing_ = false;
-  /* rows written or allocated by the current outer primitive (local validation) */
+  /* rows written or allocated by the current outer primitive (Local), and
+   * by the whole outermost transaction (OnCommit; rows freed and re-used
+   * stay in it) */
   litestl::util::Vector<uint32_t> touched_[kGroupCount];
+  litestl::util::Vector<uint32_t> txn_touched_[kGroupCount];
+  /* the face-box grid (editor_grid.h), kept like the index */
+  mutable EditGrid<C> grid_;
+  /** The index as an IdOracle for validate_local. */
+  struct IndexIds final : IdOracle {
+    const EditIndex<C> *idx = nullptr;
+    uint32_t count(ident::ElemKind kind, ident::PersistentId id) const override
+    {
+      const uint32_t slot = kind == ident::ElemKind::Vertex ? 0 : kind == ident::ElemKind::Edge ? 1 : 2;
+      return idx->id_count(slot, id);
+    }
+  };
 
   /* derived indices (editor_index.h); idx_stamp_ is the complex version
    * they were last consistent with, apart from rows marked dirty */
@@ -334,6 +365,7 @@ private:
   {
     if (k_.version() != idx_stamp_) {
       idx_.invalidate();
+      grid_.invalidate();
     }
   }
 };

@@ -115,6 +115,9 @@ template <geom::CoordType C> EditCode Editor<C>::begin_internal(std::string_view
     lineage_.clear();
     label_ = std::string(label);
     captured_.clear();
+    for (auto &t : txn_touched_) {
+      t.clear();
+    }
     for (uint32_t g = 0; g < kGroupCount; g++) {
       const litestl::attr::AttrGroup &gr = group_of(k_, Grp(g));
       log_.start_size[g] = gr.size();
@@ -146,6 +149,15 @@ template <geom::CoordType C> EditCode Editor<C>::commit()
   if (sp_.size() > 1) {
     sp_.pop_back();
     return EditCode::Ok;
+  }
+  if (opt_.validate == ValidateMode::OnCommit && !redoing_ && !barrier_snapshot_) {
+    const EditCode v = validate_now(txn_touched_);
+    if (v != EditCode::Ok) {
+      const EditReport keep = rep_;
+      rollback();
+      rep_ = keep;
+      return v;
+    }
   }
   return commit_internal(redoing_);
 }
@@ -187,6 +199,9 @@ template <geom::CoordType C> EditCode Editor<C>::commit_internal(bool from_redo)
       }
     }
     t.snapshot = std::move(barrier_snapshot_);
+    if (opt_.verify_redo) {
+      t.post_hash = content_hash(k_);
+    }
     for (uint32_t g = 0; g < kGroupCount; g++) {
       const litestl::attr::AttrGroup &gr = group_of(k_, Grp(g));
       t.schema_ver[g] = gr.schema_version();
@@ -232,6 +247,7 @@ template <geom::CoordType C> EditCode Editor<C>::rollback()
       barrier_snapshot_.reset();
       idx_.invalidate();
       idx_.flush(k_); /* eagerly, inside the barrier (C13) */
+      grid_.rebuild_if_used(k_);
     }
     log_ = TxnLog{};
     captured_.clear();
@@ -254,6 +270,7 @@ void Editor<C>::restore(TxnLog &log, uint32_t rows_mark, uint32_t alloc_mark, co
     const RowCapture &rc = log.rows[int(i)];
     litestl::attr::AttrGroup &g = group_of(k_, Grp(rc.g));
     idx_.mark(Grp(rc.g), rc.row);
+    grid_.mark(Grp(rc.g), rc.row);
     const uint8_t *p = log.bytes.data() + rc.off;
     for (uint32_t c = 0; c < g.column_count(); c++) {
       litestl::attr::ColumnBase &col = g.column(c);
@@ -276,6 +293,7 @@ void Editor<C>::restore(TxnLog &log, uint32_t rows_mark, uint32_t alloc_mark, co
     litestl::attr::AttrGroup &gr = group_of(k_, Grp(g));
     for (uint32_t r = sizes[g]; r < gr.size(); r++) {
       idx_.mark(Grp(g), r); /* appended rows, dropped */
+      grid_.mark(Grp(g), r);
     }
     if (gr.size() != sizes[g]) {
       gr.resize(sizes[g]);
@@ -326,6 +344,7 @@ template <geom::CoordType C> EditCode Editor<C>::undo()
     k_ = std::move(*t.snapshot);
     idx_.invalidate();
     idx_.flush(k_);
+    grid_.rebuild_if_used(k_);
   }
   else {
     restore(t.log, 0, 0, t.log.start_size, t.log.regions_dirty);
@@ -333,6 +352,7 @@ template <geom::CoordType C> EditCode Editor<C>::undo()
   Txn<C> u;
   u.label = std::move(t.label);
   u.ops = std::move(t.ops);
+  u.post_hash = t.post_hash;
   for (uint32_t g = 0; g < kGroupCount; g++) {
     u.ref_cols[g] = std::move(t.ref_cols[g]); /* SetAttr payloads stay roots */
   }
@@ -363,15 +383,26 @@ template <geom::CoordType C> EditCode Editor<C>::redo()
   journal_->undone_.pop_back();
   redoing_ = true;
   EditCode c;
+  const bool verify = opt_.verify_redo && !(t.post_hash == ident::PersistentId{});
+  bool mismatch = false;
   if (t.ops.size() == 1 && (t.ops[0].kind == OpKind::RebuildRegions || t.ops[0].kind == OpKind::Compact)) {
     c = run_barrier(t.ops[0].kind);
+    if (c == EditCode::Ok && verify && !(content_hash(k_) == t.post_hash)) {
+      redoing_ = false;
+      undo();
+      mismatch = true;
+    }
   }
   else {
     c = begin_internal(t.label);
     for (size_t i = 0; i < t.ops.size() && c == EditCode::Ok; i++) {
       c = apply_op(t.ops[i]);
     }
-    if (c == EditCode::Ok) {
+    if (c == EditCode::Ok && verify && !(content_hash(k_) == t.post_hash)) {
+      rollback();
+      mismatch = true;
+    }
+    else if (c == EditCode::Ok) {
       c = commit_internal(true);
     }
     else {
@@ -381,6 +412,13 @@ template <geom::CoordType C> EditCode Editor<C>::redo()
     }
   }
   redoing_ = false;
+  if (mismatch) {
+    journal_->clear();
+    rep_ = EditReport{};
+    rep_.code = EditCode::JournalStale;
+    rep_.detail = "redo produced a different state";
+    return EditCode::JournalStale;
+  }
   if (c != EditCode::Ok) {
     journal_->undone_.push_back(std::move(t));
   }
@@ -518,8 +556,8 @@ EditCode Editor<C>::Prim::fail(EditCode c, ident::ElemKind kind, uint32_t index,
 
 template <geom::CoordType C> EditCode Editor<C>::Prim::finish()
 {
-  if (outer && ed.opt_.validate != ValidateMode::None) {
-    const EditCode v = ed.validate_now();
+  if (outer && !ed.redoing_ && (ed.opt_.validate == ValidateMode::Full || ed.opt_.validate == ValidateMode::Local)) {
+    const EditCode v = ed.validate_now(ed.touched_);
     if (v != EditCode::Ok) {
       return fail(v, ed.rep_.kind, ed.rep_.index);
     }
@@ -539,7 +577,8 @@ template <geom::CoordType C> EditCode Editor<C>::Prim::finish()
   return c;
 }
 
-template <geom::CoordType C> void Editor<C>::touched_filter(ValidateFilter &flt) const
+template <geom::CoordType C>
+void Editor<C>::touched_filter(ValidateFilter &flt, const litestl::util::Vector<uint32_t> *touched_) const
 {
   /* the elements this primitive wrote, plus (C14) the edges of touched faces
    * and coedges, and the inclusions of touched faces (C3) */
@@ -565,17 +604,36 @@ template <geom::CoordType C> void Editor<C>::touched_filter(ValidateFilter &flt)
       add(flt.faces, k_.face_of(CoedgeRef(c)).i);
       add(flt.edges, k_.edge_of(CoedgeRef(c)).i);
     }
+    else if (c < k_.coedges.capacity()) {
+      /* a freed coedge still names its edge: that radial cycle changed */
+      const EdgeRef e = k_.edge_of(CoedgeRef(c));
+      if (e.i < k_.edges.capacity() && k_.edges.live(e.i)) {
+        add(flt.edges, e.i);
+      }
+    }
   }
   for (uint32_t e : touched_[uint32_t(Grp::Edges)]) {
     if (e < k_.edges.capacity() && k_.edges.live(e)) {
       add(flt.edges, e);
     }
+    else if (e < k_.edges.capacity()) {
+      /* a freed edge still names its vertices: their disks changed */
+      for (const VertRef v : k_.edge_verts(EdgeRef(e))) {
+        if (v.i < k_.verts.capacity() && k_.verts.live(v.i)) {
+          add(flt.verts, v.i);
+        }
+      }
+    }
   }
   for (uint32_t v : touched_[uint32_t(Grp::Verts)]) {
     if (v < k_.verts.capacity() && k_.verts.live(v)) {
       add(flt.verts, v);
-      /* a moved vertex: its edges' radial orders and wires' containers */
-      k_.for_each_edge_at(VertRef(v), [&](EdgeRef e) { add(flt.edges, e.i); });
+      /* a moved vertex: its edges' radial orders, wires' containers, and
+       * the faces around it (their geometry) */
+      k_.for_each_edge_at(VertRef(v), [&](EdgeRef e) {
+        add(flt.edges, e.i);
+        k_.for_each_radial(e, [&](CoedgeRef c) { add(flt.faces, k_.face_of(c).i); });
+      });
     }
   }
   auto uniq = [](litestl::util::Vector<uint32_t> &v) {
@@ -598,12 +656,18 @@ template <geom::CoordType C> void Editor<C>::touched_filter(ValidateFilter &flt)
   flt.regions = false; /* regions are dirty, or the primitive kept them by construction */
 }
 
-template <geom::CoordType C> EditCode Editor<C>::validate_now()
+template <geom::CoordType C> EditCode Editor<C>::validate_now(const litestl::util::Vector<uint32_t> *touched)
 {
   ValidationReport r;
-  if (opt_.validate == ValidateMode::Local) {
+  if (opt_.validate == ValidateMode::Local || opt_.validate == ValidateMode::OnCommit) {
     ValidateFilter flt;
-    touched_filter(flt);
+    touched_filter(flt, touched);
+    idx_.flush(k_);
+    grid_.flush(k_);
+    IndexIds ids;
+    ids.idx = &idx_;
+    flt.ids = &ids;
+    flt.grid = &grid_.grid();
     r = validate_local(k_, flt);
   }
   else {
@@ -632,7 +696,9 @@ template <geom::CoordType C> void Editor<C>::touch(Grp g, uint32_t row)
     abort();
   }
   touched_[uint32_t(g)].append(row);
+  txn_touched_[uint32_t(g)].append(row);
   idx_.mark(g, row);
+  grid_.mark(g, row);
   const Savepoint &s = sp_.back();
   if (row >= s.size[uint32_t(g)]) {
     return; /* appended inside this savepoint: dropped by rollback */
@@ -671,7 +737,9 @@ template <geom::CoordType C> uint32_t Editor<C>::alloc(Grp g)
     }
     else {
       touched_[uint32_t(g)].append(i);
+      txn_touched_[uint32_t(g)].append(i);
       idx_.mark(g, i);
+      grid_.mark(g, i);
     }
     out = d.alloc();
     log_.alloc.append(AllocEvent{out, uint8_t(g), from_free ? AllocKind::FromFree : AllocKind::Append});

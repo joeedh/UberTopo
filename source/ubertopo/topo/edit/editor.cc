@@ -2,6 +2,7 @@
  * editor_impl_*.h headers, which only this file includes. */
 
 #include "ubertopo/topo/edit/editor.h"
+#include "ubertopo/topo/io.h"
 
 #include "ubertopo/topo/edit/editor_impl_cycles.h"
 #include "ubertopo/topo/edit/editor_impl_face.h"
