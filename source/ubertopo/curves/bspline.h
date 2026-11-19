@@ -53,6 +53,11 @@ public:
                           const util::Vector<double, 48> &ctrl, attr::PoolRef source, double src_t0, double src_t1,
                           double max_error, BSpline &out);
 
+  /** Inserts knot u once (Boehm), strictly inside the domain and below
+   * multiplicity p. The result is a primary spline (no source): the same
+   * curve up to the rounding of the new control points. */
+  static const char *insert_knot(const BSpline &b, double u, BSpline &out);
+
   /* pool member protocol */
   void hash_into(hash::Hasher128 &h) const;
   bool equal(const BSpline &b) const;

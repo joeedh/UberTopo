@@ -276,6 +276,48 @@ const char *BSpline::make(int dim, int degree, const util::Vector<double, 16> &k
   return nullptr;
 }
 
+const char *BSpline::insert_knot(const BSpline &b, double u, BSpline &out)
+{
+  const int p = b.degree, n = b.count(), D = b.dim;
+  if (!(u > b.lo() && u < b.hi())) {
+    return "bspline: inserted knot outside the domain";
+  }
+  int mult = 0;
+  for (double k : b.knots) {
+    mult += k == u;
+  }
+  if (mult >= p) {
+    return "bspline: inserted knot would exceed multiplicity p";
+  }
+  const int k = find_span(b, u, Side::Above);
+  util::Vector<double, 16> knots;
+  util::Vector<double, 48> ctrl;
+  for (int i = 0; i <= k; i++) {
+    knots.append(b.knots[i]);
+  }
+  knots.append(u);
+  for (int i = k + 1; i < b.knots.size(); i++) {
+    knots.append(b.knots[i]);
+  }
+  for (int i = 0; i <= n; i++) {
+    for (int c = 0; c < D; c++) {
+      double v;
+      if (i <= k - p) {
+        v = b.ctrl[i * D + c];
+      }
+      else if (i <= k - mult) {
+        const double a = (u - b.knots[i]) / (b.knots[i + p] - b.knots[i]);
+        v = (1 - a) * b.ctrl[(i - 1) * D + c] + a * b.ctrl[i * D + c];
+      }
+      else {
+        v = b.ctrl[(i - 1) * D + c];
+      }
+      ctrl.append(v);
+    }
+  }
+  return make(D, p, knots, ctrl, attr::kNoRef, 0, 0, 0, out);
+}
+
 void BSpline::hash_into(hash::Hasher128 &h) const
 {
   h.u32(dim).u32(degree).u32(uint32_t(count()));

@@ -61,6 +61,15 @@ public:
   double eval(double s, int k = 0, Side side = Side::Above, double *err = nullptr) const;
   /** The k-th derivative's polynomial on piece i, in sigma. */
   Poly piece_deriv(int i, int k) const;
+  /** Continuity at interior break b (1 <= b < pieces): -1 if the values
+   * differ provably, else k - 1 for the first derivative order k that
+   * differs provably, kSmoothBreak if none does. */
+  static constexpr int kSmoothBreak = 255;
+  int continuity_at(int b) const;
+  /** Bound on |value(below) - value(above)| over every break. */
+  double max_jump() const;
+  /** Bound on eval()'s rounding of the k-th derivative anywhere. */
+  double eval_error(int k = 0) const;
   /** Enclosure of the k-th derivative over [s0, s1] (within the domain). */
   Range range(double s0, double s1, int k = 0) const;
 

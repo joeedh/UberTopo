@@ -12,7 +12,11 @@
 #include "support/cesaro_fixtures.h"
 #include "support/splitmix64.h"
 #include "ubertopo/curves/approx.h"
+#include "ubertopo/curves/alignment.h"
+#include "ubertopo/curves/catenary.h"
 #include "ubertopo/curves/cesaro.h"
+#include "ubertopo/curves/offset.h"
+#include "ubertopo/curves/polyline.h"
 #include "ut_test.h"
 
 using namespace ubertopo::curves;
@@ -77,6 +81,42 @@ util::Vector<Named> make_curves(attr::PoolStore &s)
   /* 3D polyline as a degree-1 spline: corners (C0) */
   v.append({"bspline3_poly", add_bspline(s, 3, 1, {0, 0, 1, 2.5, 3, 4, 4},
                                          {0, 0, 0, 10, 0, 1, 10, 10, 2, 0, 10, 3, 0, 0, 4})});
+  /* offsets: a constant width on the arc, a varying one on the chain */
+  v.append({"offset_arc", intern_offset(s, v[1].ref, Fn1D::constant(3.5, 0, 200))});
+  {
+    const double L = s.get<Cesaro2Pool>(v[8].ref).length();
+    v.append({"offset_chain", intern_offset(s, v[8].ref, Fn1D::linear(-1.75, -5.25, 0, L))});
+  }
+  /* alignment: the s-curve with a two-piece C1 profile, over an offset */
+  {
+    util::Vector<double, 2> br;
+    br.append(0);
+    br.append(50);
+    br.append(100);
+    util::Vector<Poly, 1> pcs;
+    pcs.append(Poly::exact({10.0, 0.02, 1e-4}));
+    pcs.append(Poly::exact({10.0 + 50 * (0.02 + 50 * 1e-4), 0.02 + 2e-4 * 50}));
+    Fn1D z;
+    UT_CHECK(Fn1D::make(br, pcs, z) == nullptr);
+    Alignment3 a;
+    UT_CHECK(Alignment3::make(s, intern_offset(s, v[5].ref, Fn1D::constant(2.0, 0, 100)), z, a) == nullptr);
+    v.append({"alignment", s.intern<Alignment3Pool>(pool_id(alignment3_kind()), std::move(a))});
+  }
+  {
+    const double A[3] = {5, -3, 20}, B[3] = {305, 197, -40};
+    Catenary3 k;
+    UT_CHECK(Catenary3::make(A, B, 150, k) == nullptr);
+    v.append({"catenary", s.intern<Catenary3Pool>(pool_id(catenary3_kind()), std::move(k))});
+  }
+  {
+    util::Vector<double, 12> pts;
+    for (double x : {0.0, 0.0, 0.0, 10.0, 0.0, 1.0, 10.0, 10.0, 2.0, 0.0, 10.0, 3.0, -5.0, 2.0, 3.5}) {
+      pts.append(x);
+    }
+    Polyline3 p;
+    UT_CHECK(Polyline3::make(pts, p) == nullptr);
+    v.append({"polyline", s.intern<Polyline3Pool>(pool_id(polyline3_kind()), std::move(p))});
+  }
   /* 2D quintic, uniform knots */
   v.append({"bspline2_quintic", add_bspline(s, 2, 5, {0, 0, 0, 0, 0, 0, 1, 2, 3, 3, 3, 3, 3, 3},
                                             {0, 0, 1, 2, 3, 1, 4, 4, 5, 2, 7, 1, 8, 3, 9, 0})});
@@ -302,6 +342,9 @@ void check_approx(attr::PoolStore &s, const std::string &name, attr::PoolRef src
     UT_CHECK(m4 == 1);
   }
   if (name == "bspline3_poly") {
+    UT_CHECK(m5 == 3);
+  }
+  if (name == "polyline") {
     UT_CHECK(m5 == 3);
   }
 }

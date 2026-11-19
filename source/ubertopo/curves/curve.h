@@ -45,6 +45,7 @@ enum class ParamKind : uint8_t { ArcLength, Station, General };
  * the curve is C-infinity (an inflection, a curvature extremum): a place,
  * not a break. */
 inline constexpr uint8_t kSmooth = 255;
+static_assert(Fn1D::kSmoothBreak == kSmooth);
 struct SpecialParam {
   double t;
   uint8_t continuity;

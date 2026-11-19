@@ -160,6 +160,42 @@ double Fn1D::eval(double s, int k, Side side, double *err) const
   return r;
 }
 
+int Fn1D::continuity_at(int b) const
+{
+  const double s = breaks[b];
+  for (int k = 0; k <= kMaxDegree; k++) {
+    double el, er;
+    const double vl = eval(s, k, Side::Below, &el), vr = eval(s, k, Side::Above, &er);
+    if (std::fabs(vl - vr) > el + er) {
+      return k - 1;
+    }
+  }
+  return kSmoothBreak;
+}
+
+double Fn1D::max_jump() const
+{
+  double j = 0;
+  for (int b = 1; b < pieces.size(); b++) {
+    double el, er;
+    const double vl = eval(breaks[b], 0, Side::Below, &el), vr = eval(breaks[b], 0, Side::Above, &er);
+    j = std::max(j, up(std::fabs(vl - vr) + el + er));
+  }
+  return j;
+}
+
+double Fn1D::eval_error(int k) const
+{
+  /* the Horner bound grows with |sigma|: take each piece at its far end */
+  double e = 0;
+  for (int i = 0; i < pieces.size(); i++) {
+    double ei;
+    eval(breaks[i + 1], k, Side::Below, &ei);
+    e = std::max(e, ei);
+  }
+  return e;
+}
+
 Range Fn1D::range(double s0, double s1, int k) const
 {
   const int i0 = piece_at(s0, Side::Above), i1 = piece_at(s1, Side::Below);

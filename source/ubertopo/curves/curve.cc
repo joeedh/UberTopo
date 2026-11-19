@@ -1,8 +1,12 @@
 /* Curve kind registry (curve.h). */
 
 #include "ubertopo/curves/curve.h"
+#include "ubertopo/curves/alignment.h"
 #include "ubertopo/curves/bspline.h"
+#include "ubertopo/curves/catenary.h"
 #include "ubertopo/curves/cesaro.h"
+#include "ubertopo/curves/offset.h"
+#include "ubertopo/curves/polyline.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -15,9 +19,8 @@ namespace ubertopo::curves {
  * every stored ref, depend on it). */
 util::span<const KindOps *const> kinds()
 {
-  /* CLAUDENOTE: W4 inserts offset2, alignment3, catenary3 and polyline3
-   * between these two, so bspline ends at pool id 6 as the plan fixes. */
-  static const KindOps *const list[] = {&cesaro2_kind(), &bspline_kind()};
+  static const KindOps *const list[] = {&cesaro2_kind(),   &offset2_kind(),   &alignment3_kind(),
+                                        &catenary3_kind(), &polyline3_kind(), &bspline_kind()};
   return util::span<const KindOps *const>(list, sizeof(list) / sizeof(list[0]));
 }
 
