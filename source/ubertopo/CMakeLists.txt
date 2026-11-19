@@ -11,6 +11,16 @@ add_library(ubertopo_ident INTERFACE)
 target_include_directories(ubertopo_ident INTERFACE ${PROJECT_SOURCE_DIR}/source)
 target_link_libraries(ubertopo_ident INTERFACE util)
 
+# curves/: exact curves with certified bounds (plan P4a); evaluated in double,
+# not templated on the coordinate type. detmath: deterministic transcendentals.
+add_library(ubertopo_curves STATIC
+  curves/poly.cc
+  curves/fn1d.cc
+  curves/curve.cc
+)
+target_include_directories(ubertopo_curves PUBLIC ${PROJECT_SOURCE_DIR}/source)
+target_link_libraries(ubertopo_curves PUBLIC detmath attr math util)
+
 # topo/: domains, schemas, Complex<C>, builder, regions, validator.
 add_library(ubertopo_topo STATIC
   topo/schema.cc
