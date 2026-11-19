@@ -107,12 +107,14 @@ template <geom::CoordType C> struct Run {
   EditCode step(Editor<C> &ed, litestl::test::SplitMix64 &r, uint32_t n)
   {
     using test::gen::gpt;
-    const uint32_t op = uint32_t(r.below(100));
-    static const char *names[] = {"split_edge", "join_edge", "split_face", "join_faces", "flip", "wire", "kill_edge",
-                                  "kill_vertex", "kill_face", "remake", "set_position", "embed", "undo", "redo",
-                                  "regions"};
-    static const uint32_t bounds[] = {14, 24, 38, 48, 53, 59, 64, 68, 72, 78, 84, 88, 93, 97, 100};
-    for (int i = 0; i < 15; i++) {
+    const uint32_t op = uint32_t(r.below(120));
+    static const char *names[] = {"split_edge", "join_edge", "split_face", "join_faces", "flip",      "wire",
+                                  "kill_edge",  "kill_vertex", "kill_face", "remake",   "set_position", "embed",
+                                  "undo",       "redo",      "regions",    "imprint",  "unimprint",  "hole",
+                                  "remove_hole", "weld",     "compact"};
+    static const uint32_t bounds[] = {14, 24, 38, 48, 53, 59, 64, 68, 72, 78, 84, 88, 93, 97, 100,
+                                      104, 107, 111, 113, 117, 120};
+    for (int i = 0; i < 21; i++) {
       if (op < bounds[i]) {
         last = names[i];
         break;
@@ -238,7 +240,133 @@ template <geom::CoordType C> struct Run {
     if (op < 97) {
       return ed.redo();
     }
-    return ed.rebuild_regions();
+    if (op < 100) {
+      return ed.rebuild_regions();
+    }
+    return step_p3b(ed, r, n, op);
+  }
+
+  /* P3b primitives (plan P3b §4): each builds its input in the same
+   * transaction, so a refusal anywhere rolls the whole step back */
+  EditCode step_p3b(Editor<C> &ed, litestl::test::SplitMix64 &r, uint32_t n, uint32_t op)
+  {
+    using test::gen::gpt;
+    auto vid = [&](uint32_t i) { return ident::derive(ident::tag::TestOnly, std::string_view("p3b"), n, i); };
+    auto finish = [&](EditCode c) {
+      if (c == EditCode::Ok) {
+        return ed.commit();
+      }
+      ed.rollback();
+      return c;
+    };
+    /* three consecutive corners of a face's first loop */
+    auto corners = [&](FaceRef f, I3 out[3]) {
+      std::vector<I3> lv;
+      k.for_each_coedge(k.first_loop(f), [&](CoedgeRef c) { lv.push_back(grid<C>(k.pos(k.start_vert(c)))); });
+      const size_t i = r.below(lv.size());
+      for (int j = 0; j < 3; j++) {
+        out[j] = lv[(i + j) % lv.size()];
+      }
+    };
+    if (op < 104) { /* imprint a two-edge chord a -> m -> b through a face */
+      const uint32_t f = pick(k.faces, r);
+      if (f == NONE) {
+        return EditCode::BadArgument;
+      }
+      std::vector<VertRef> lv;
+      k.for_each_coedge(k.first_loop(FaceRef(f)), [&](CoedgeRef c) { lv.push_back(k.start_vert(c)); });
+      const VertRef a = lv[r.below(lv.size())], b = lv[r.below(lv.size())];
+      const I3 ga = grid<C>(k.pos(a)), gb = grid<C>(k.pos(b));
+      for (int i = 0; i < 3; i++) {
+        if ((ga[i] + gb[i]) & 1) {
+          return EditCode::BadArgument;
+        }
+      }
+      const EmbedTarget in = EmbedTarget::face(FaceRef(f));
+      ed.begin("imprint");
+      VertRef m;
+      EdgeRef e1, e2;
+      EditCode c = ed.make_vertex(gpt<C>({(ga[0] + gb[0]) / 2, (ga[1] + gb[1]) / 2, (ga[2] + gb[2]) / 2}), vid(0), &m);
+      if (c == EditCode::Ok) {
+        c = ed.embed_vertex(m, in);
+      }
+      if (c == EditCode::Ok) {
+        c = ed.make_edge(a, m, ident::kNoId, &e1, in);
+      }
+      if (c == EditCode::Ok) {
+        c = ed.make_edge(m, b, ident::kNoId, &e2, in);
+      }
+      if (c == EditCode::Ok) {
+        const EdgeRef chain[2] = {e1, e2};
+        c = ed.imprint(FaceRef(f), std::span<const EdgeRef>(chain, 2));
+      }
+      return finish(c);
+    }
+    if (op < 107) {
+      const uint32_t e = pick(k.edges, r);
+      return e == NONE ? EditCode::BadArgument : ed.unimprint(EdgeRef(e));
+    }
+    if (op < 111) { /* an inner triangle of three corners: a hole, or an island */
+      const uint32_t f = pick(k.faces, r);
+      if (f == NONE) {
+        return EditCode::BadArgument;
+      }
+      I3 t[3];
+      corners(FaceRef(f), t);
+      I3 q[3];
+      for (int j = 0; j < 3; j++) {
+        for (int i = 0; i < 3; i++) {
+          const int64_t s4 = t[0][i] + t[1][i] + t[2][i] + t[j][i];
+          if (s4 % 4) {
+            return EditCode::BadArgument;
+          }
+          q[j][i] = s4 / 4;
+        }
+      }
+      const EmbedTarget in = EmbedTarget::face(FaceRef(f));
+      const bool island = r.below(2) == 0;
+      ed.begin(island ? "island" : "hole");
+      VertRef v[3];
+      EdgeRef es[3];
+      EditCode c = EditCode::Ok;
+      for (int j = 0; j < 3 && c == EditCode::Ok; j++) {
+        c = ed.make_vertex(gpt<C>(q[j]), vid(uint32_t(j)), &v[j]);
+        if (c == EditCode::Ok) {
+          c = ed.embed_vertex(v[j], in);
+        }
+      }
+      for (int j = 0; j < 3 && c == EditCode::Ok; j++) {
+        c = ed.make_edge(v[j], v[(j + 1) % 3], ident::kNoId, &es[j], in);
+      }
+      if (c == EditCode::Ok) {
+        c = island ? ed.imprint(FaceRef(f), std::span<const EdgeRef>(es, 3))
+                   : ed.add_hole(FaceRef(f), std::span<const EdgeRef>(es, 3));
+      }
+      return finish(c);
+    }
+    if (op < 113) {
+      const uint32_t f = pick(k.faces, r);
+      if (f == NONE) {
+        return EditCode::BadArgument;
+      }
+      const LoopRef first = k.first_loop(FaceRef(f));
+      const LoopRef hole = first ? k.next_loop(first) : LoopRef();
+      return hole ? ed.remove_hole(FaceRef(f), hole) : EditCode::BadArgument;
+    }
+    if (op < 117) { /* snap a wire end onto another vertex and weld them */
+      const uint32_t u = pick(k.verts, r), w = pick(k.verts, r);
+      if (u == NONE || w == NONE || u == w) {
+        return EditCode::BadArgument;
+      }
+      ed.begin("weld");
+      EditCode c = ed.set_position(VertRef(u), k.pos(VertRef(w)));
+      if (c == EditCode::Ok) {
+        const std::pair<VertRef, VertRef> pr[1] = {{VertRef(w), VertRef(u)}};
+        c = ed.weld(std::span<const std::pair<VertRef, VertRef>>(pr, 1));
+      }
+      return finish(c);
+    }
+    return ed.compact();
   }
 
   /** The whole run; returns the final content hash. */
@@ -384,6 +512,7 @@ PersistentId run_one(uint64_t seed,
     for (const auto &[code, cnt] : run.st.codes) {
       printf(" %s=%u", edit_code_name(code), cnt);
     }
+    printf("\n  final: %u faces, %u regions", run.k.faces.live_count(), run.k.regions.live_count());
     printf("\n  causes:");
     for (const auto &[what, cnt] : run.st.detail) {
       printf(" %s=%u", what.c_str(), cnt);
@@ -415,22 +544,31 @@ int main()
        * sequence: the same final state, and full validity after each commit */
       PersistentId tloc;
       UT_CHECK(run_one<double>(seed, steps, &tloc, false, ValidateMode::Local) == hd);
-      /* OnCommit with one primitive per transaction: the same again (C12) */
+      /* OnCommit: the step mix has multi-primitive transactions (wire,
+       * remake, imprint, hole, weld) whose intermediate states Full refuses,
+       * so hashes are not compared (plan P3b C12); the run checks full
+       * validity after every commit instead */
       PersistentId toc;
-      UT_CHECK(run_one<double>(seed, steps, &toc, false, ValidateMode::OnCommit) == hd);
+      run_one<double>(seed, steps, &toc, false, ValidateMode::OnCommit);
       /* OnCommit with several primitives per transaction: every commit is
        * fully valid, and a refused one restores the state before it */
       PersistentId tgrp;
       run_one<double>(seed, steps, &tgrp, false, ValidateMode::OnCommit, 8);
     }
-    if (seed == 1 && steps == 600) {
+    if (steps == 600) {
       if (getenv("LITESTL_PRINT_GOLDENS")) {
-        printf("golden: {0x%016llxull, 0x%016llxull}\n", (unsigned long long)hd.lo, (unsigned long long)hd.hi);
+        printf("golden %llu: {0x%016llxull, 0x%016llxull}\n", (unsigned long long)seed, (unsigned long long)hd.lo,
+               (unsigned long long)hd.hi);
       }
-      /* re-pinned for P3b §3.1: region rebuilds now advance the generations
-       * of shells and regions that changed */
-      const PersistentId golden{0x37c3bba3b4fa51aaull, 0xb13bfad872f1c346ull};
-      UT_CHECK(hd == golden);
+      /* re-pinned for P3b W9: the step mix gained imprint, unimprint, holes,
+       * weld and compact (and earlier, §3.1: region rebuilds advance the
+       * generations of shells and regions that changed). Seeds 2 and 3 end
+       * with hinted rooms, so their goldens cover region IDs (DEC-017);
+       * seed 1 ends with region 0 only. */
+      const PersistentId goldens[3] = {PersistentId{0xd232bb3c173ca918ull, 0xf365153588a08e2cull},
+                                       PersistentId{0x75bccfc9fd30c4fbull, 0x0f75f4b7fd6a4b1cull},
+                                       PersistentId{0x7c4ccbaea916883aull, 0xacddf65e683a064aull}};
+      UT_CHECK(hd == goldens[seed - 1]);
     }
   }
   UT_CHECK(litestl::alloc::getMemorySize() == baseline);
