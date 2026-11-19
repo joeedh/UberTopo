@@ -238,3 +238,13 @@ Entry format:
 - **Symptom:** a planted bug in the grid's rollback path left `test_edit_random` passing, so the new grid check looked useless.
 - **Cause:** an earlier edit had broken the test file. A heredoc turned a `\n` escape into a real line break, so the file no longer compiled. The command sent ninja's output to `/dev/null` and then ran the test anyway, which executed the previous binary: no grid check and no mutant.
 - **Fix / technique:** make every build-then-run command stop when the build fails. For example, `(ninja t > /tmp/b.log 2>&1 || { echo BUILD FAILED; exit 1; }) && ./t`. Treat a mutation that survives as a reason to check the build first, before concluding anything about the test.
+
+## An evaluator returns garbage made of tiny doubles (`alloc::New` copies its arguments)
+- **Symptom:** a curve evaluator built with `litestl::alloc::New<T>(tag, *this)` reported `eval_error()` values such as 5.4e-323, which are small integers read as doubles. Positions were wrong too.
+- **Cause:** `alloc::New(const char *tag, Args... args)` takes its constructor arguments **by value**. The evaluator stores a `const Entry &` member, which bound to the by-value copy inside `New`, and that copy is destroyed when `New` returns.
+- **Fix / technique:** pass a pointer (`New<T>(tag, this)` with a `const Entry *` constructor). Never pass an object that the constructed object will keep a reference to through `alloc::New` or `util::make_unique`.
+
+## A curve's pieces bisect forever ("too many pieces")
+- **Symptom:** `Cesaro2::make` refused simple curves (a 60 m cubic spiral, a 10 km chain) with "too many pieces", after bisecting to the depth limit.
+- **Cause:** pieces were accepted only when their whole certified error was at most `kPieceTol·h`. Some terms are proportional to h, chiefly the heading uncertainty at the piece midpoint (δθ·h), so bisection cannot make them smaller relative to h. Once δθ is about 1e-14 rad, which a heading of 2.5 rad reaches through rounding alone, no piece can pass.
+- **Fix / technique:** split an error budget into the terms bisection reduces faster than h (Taylor tail, coefficient uncertainty, recurrence rounding) and the terms proportional to h. Accept a piece on the first group, and keep both groups in the certified bound.

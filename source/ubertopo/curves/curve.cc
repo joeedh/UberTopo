@@ -1,6 +1,7 @@
 /* Curve kind registry (curve.h). */
 
 #include "ubertopo/curves/curve.h"
+#include "ubertopo/curves/cesaro.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -13,8 +14,8 @@ namespace ubertopo::curves {
  * every stored ref, depend on it). */
 util::span<const KindOps *const> kinds()
 {
-  static const KindOps *const list[] = {nullptr};
-  return util::span<const KindOps *const>(list, 0);
+  static const KindOps *const list[] = {&cesaro2_kind()};
+  return util::span<const KindOps *const>(list, sizeof(list) / sizeof(list[0]));
 }
 
 void register_pools(attr::PoolStore &s)

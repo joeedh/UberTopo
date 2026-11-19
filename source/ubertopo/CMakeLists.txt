@@ -17,6 +17,7 @@ add_library(ubertopo_curves STATIC
   curves/poly.cc
   curves/fn1d.cc
   curves/curve.cc
+  curves/cesaro.cc
 )
 target_include_directories(ubertopo_curves PUBLIC ${PROJECT_SOURCE_DIR}/source)
 target_link_libraries(ubertopo_curves PUBLIC detmath attr math util)
