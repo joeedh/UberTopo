@@ -66,7 +66,10 @@ void test_oracle()
     printf("%-15s pieces %5d  eval_error %.3g  worst position err/bound %.3g  tangent %.3g\n", fx[i].name,
            int(c.pieces.size()), ev->eval_error(), worst, worst_t);
     UT_CHECK(bad == 0);
-    UT_CHECK(ev->eval_error() > 0);
+    UT_CHECK(ev->eval_error() > 0 && std::isfinite(ev->eval_error()));
+    for (const CesaroPiece &p : c.pieces) {
+      UT_CHECK(std::isfinite(p.err)); /* a NaN piece bound passes every comparison above */
+    }
     if (std::string_view(fx[i].name) == "chain_10km") {
       UT_CHECK(ev->eval_error() <= 1e-9);
     }
@@ -256,8 +259,101 @@ void test_canonical()
 
 } // namespace
 
+/* The bound's terms one by one (OI-P4a-5): the oracle test can't see a single
+ * term, the slack absorbs it. On every piece, against long-double
+ * recomputations from the segment's heading polynomial:
+ *  - the majorant bend is at least sum_j |q_j| r^j (signs ignored);
+ *  - the series tail covers the remainder of e^{iQ} past kTaylorOrder;
+ *  - the coefficient term covers the rounding of the shift q(u) = th(m + u),
+ *    and local_err covers it on top of the other terms. */
+void test_piece_terms()
+{
+  if (sizeof(long double) == sizeof(double)) {
+    printf("piece terms: skipped (long double is double here)\n");
+    return;
+  }
+  using LD = long double;
+  auto fx = ubertopo::test::cesaro_fixtures();
+  /* right turns: negative heading coefficients */
+  fx.push_back({"right_arc", 0.0, 0.0, 0.4, {{200.0, -1.0 / 50, 0, 0, 0}}, {}});
+  fx.push_back({"right_clothoid", 100.0, -40.0, 2.0, {{1500.0, -1e-4, -1.0 / (300.0 * 1500.0), 0, 0}}, {}});
+  constexpr int kN = Cesaro2::kTaylorOrder;
+  int pieces = 0, with_coeff = 0, with_tail = 0, with_neg = 0;
+  for (const auto &f : fx) {
+    const Cesaro2 c = build(f);
+    for (int s = 0; s + 1 < c.seg_piece.size(); s++) {
+      const Poly &th = c.theta[s];
+      for (uint32_t pi = c.seg_piece[s]; pi < c.seg_piece[s + 1]; pi++) {
+        const CesaroPiece &p = c.pieces[int(pi)];
+        detail::CesaroPieceTerms t;
+        UT_CHECK(detail::cesaro_piece_terms(th, p.sa, p.sb, t));
+        pieces++;
+        /* the piece's geometry, as the construction computes it */
+        const double m = p.sa + 0.5 * (p.sb - p.sa);
+        const double rr = std::max(std::fabs(p.sa - m), std::fabs(p.sb - m));
+        const Poly qd = th.compose_affine(m, 1.0);
+        /* q_j = sum_i C(i, j) th_i m^(i - j), in long double */
+        const int D = th.size() - 1;
+        LD q[8] = {};
+        for (int i = 0; i <= D; i++) {
+          LD binom = 1, mp = 1;
+          for (int j = i; j >= 0; j--) {
+            q[j] += binom * LD(th.c[i]) * mp;
+            binom = binom * LD(j) / LD(i - j + 1);
+            mp *= LD(m);
+          }
+        }
+        LD bend = 0, coeff = 0, rp = rr;
+        for (int j = 1; j <= D; j++) {
+          bend += std::fabs(q[j]) * rp;
+          coeff += std::fabs(q[j] - LD(j < qd.size() ? qd.c[j] : 0.0)) * rp;
+          with_neg += j == 1 && q[j] < 0 ? 1 : 0;
+          rp *= rr;
+        }
+        coeff *= 2 * LD(rr);
+        /* the remainder of e^{iQ}, Q = sum_{j >= 1} q_j u^j, past order kN */
+        constexpr int kM = kN + 15;
+        LD er[kM + 1] = {1}, ei[kM + 1] = {0};
+        for (int k = 0; k < kM; k++) {
+          LD sr = 0, si = 0;
+          for (int j = 0; j <= std::min(k, D - 1); j++) {
+            sr += LD(j + 1) * q[j + 1] * er[k - j];
+            si += LD(j + 1) * q[j + 1] * ei[k - j];
+          }
+          er[k + 1] = -si / LD(k + 1);
+          ei[k + 1] = sr / LD(k + 1);
+        }
+        LD rem = 0, up = 1;
+        for (int k = 0; k <= kM; k++) {
+          if (k > kN) {
+            rem += std::sqrt(er[k] * er[k] + ei[k] * ei[k]) * up;
+          }
+          up *= LD(rr);
+        }
+        rem *= 2 * LD(rr);
+        const LD slack = 1 - LD(0x1p-50);
+        /* comparisons with NaN are false: finiteness first */
+        UT_CHECK(std::isfinite(t.tail) && std::isfinite(t.rec) && std::isfinite(t.local_err));
+        UT_CHECK(std::isfinite(p.err));
+        UT_CHECK(LD(t.bend) >= bend * slack);
+        UT_CHECK(t.tail >= 0 && t.rec >= 0 && t.coeff >= 0);
+        UT_CHECK(LD(t.tail) >= rem * slack);
+        UT_CHECK(LD(t.coeff) >= coeff * slack);
+        UT_CHECK(LD(t.local_err) >= (LD(t.horner) + LD(t.rot) + LD(t.tail) + coeff) * slack);
+        with_coeff += coeff > 0 ? 1 : 0;
+        with_tail += rem > 0 ? 1 : 0;
+      }
+    }
+  }
+  printf("piece terms: %d pieces, %d with shift rounding, %d with a series remainder, %d turning right\n", pieces,
+         with_coeff, with_tail, with_neg);
+  /* the checks bite only where the measured quantities are non-zero */
+  UT_CHECK(with_coeff > 100 && with_tail > 100 && with_neg > 10);
+}
+
 int main()
 {
+  test_piece_terms();
   test_oracle();
   test_deriv_bounds();
   test_invariance();

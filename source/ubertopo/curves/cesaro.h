@@ -98,6 +98,28 @@ public:
 
 using Cesaro2Pool = attr::InternPool<Cesaro2>;
 
+namespace detail {
+
+/** Test hook (plan P4a OI-P4a-5): the error terms of one piece [sa, sb] of a
+ * segment with heading polynomial th, as the evaluator's construction
+ * computes them. The oracle test can't see a single term (the bound's slack
+ * absorbs it), so test_curves_cesaro checks each term against an
+ * independent computation. False if the piece's bend exceeds kMaxBend (only
+ * bend is set then). */
+struct CesaroPieceTerms {
+  double bend = 0;      /* majorant sum_j |q_j| r^j */
+  double tail = 0;      /* series truncation, beyond kTaylorOrder */
+  double coeff = 0;     /* rounding of the shifted heading coefficients */
+  double rec = 0;       /* rounding of the series recurrence */
+  double horner = 0;    /* evaluation of the position polynomial */
+  double rot = 0;       /* rotation by e^{i theta(m)} */
+  double local_err = 0; /* the piece's bound: the sum, rounded up */
+  double reducible = 0; /* the part bisection reduces */
+};
+bool cesaro_piece_terms(const Poly &th, double sa, double sb, CesaroPieceTerms &out);
+
+} // namespace detail
+
 /** The cesaro2 kind's registry entry. */
 const KindOps &cesaro2_kind();
 

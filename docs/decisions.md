@@ -738,8 +738,9 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
   - OI-P4a-2: no automatic collect;
   - OI-P4a-3: κ laws of degree ≤ 3 only;
   - OI-P4a-4: `detmath` speed is reported, not gated;
-  - OI-P4a-5: the `cesaro2` bound's terms are not tested individually. The oracle
-    test's 5–90× slack hides any single dropped term (plan §8 items 2–4 survive).
+  - ~~OI-P4a-5~~ (closed): the `cesaro2` bound's terms are now tested one by one
+    against long-double recomputations. The tests found NaN piece bounds on long pieces,
+    which are fixed (plan §11).
 
 ---
 

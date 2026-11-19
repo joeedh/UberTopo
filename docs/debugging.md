@@ -340,3 +340,20 @@ Entry format:
   - Lesson: run the sanitizer configurations before declaring a wave done. The
     release matrix can't see an out-of-range read that happens to return stable
     garbage.
+
+## A certified bound that is secretly NaN
+- **Symptom:** `test_piece_terms` (the white-box test of `cesaro2`'s error terms)
+  found `tail` and `local_err` NaN on long pieces: `slow_spiral`'s 5 km piece, and a
+  1.5 km clothoid. The oracle test had passed on the same fixtures for weeks.
+- **Cause:**
+  - The majorant series multiplied a coefficient c_k (underflowing to 0) by rr^k
+    (overflowing to ∞), and 0·∞ = NaN.
+  - The NaN then hid twice:
+    1. `std::max(max_piece, p.err)` keeps the left operand when the right is NaN, so
+       the curve's `eval_error` came out finite;
+    2. `err > bound` is false when the bound is NaN.
+- **Fix / technique:**
+  - Carry such series scaled (`c_k rr^k`, bounded by e^bend).
+  - Refuse non-finite bounds where they are assembled.
+  - In tests, check `std::isfinite` before any comparison with a bound. Every
+    comparison against NaN passes vacuously.

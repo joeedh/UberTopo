@@ -61,7 +61,13 @@ double horner(const util::Vector<double, 32> &c, double u)
 /* One candidate piece [sa, sb] of a segment with heading polynomial th.
  * Returns false if its bend exceeds kMaxBend; otherwise fills p (except the
  * start point) and its local error bound. */
-bool build_piece(const Poly &th, double sa, double sb, CesaroPiece &p, double &local_err, double &reducible)
+bool build_piece(const Poly &th,
+                 double sa,
+                 double sb,
+                 CesaroPiece &p,
+                 double &local_err,
+                 double &reducible,
+                 detail::CesaroPieceTerms *terms = nullptr)
 {
   const double h = sb - sa;
   const double r = 0.5 * h;
@@ -71,12 +77,17 @@ bool build_piece(const Poly &th, double sa, double sb, CesaroPiece &p, double &l
   const Poly q = th.compose_affine(m, 1.0);
   const int D = q.size() - 1; /* degree of Q */
   double qhat[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+  double qs[8] = {0, 0, 0, 0, 0, 0, 0, 0}; /* qhat_j rr^j */
   double bend = 0, qerr = 0, rp = rr;
   for (int j = 1; j <= D; j++) {
     qhat[j] = std::fabs(q.c[j]) + q.e[j];
-    bend += qhat[j] * rp;
+    qs[j] = qhat[j] * rp;
+    bend += qs[j];
     qerr += q.e[j] * rp;
     rp *= rr;
+  }
+  if (terms) {
+    terms->bend = bend;
   }
   if (bend > Cesaro2::kMaxBend) {
     return false;
@@ -95,33 +106,34 @@ bool build_piece(const Poly &th, double sa, double sb, CesaroPiece &p, double &l
     er[k + 1] = -si / double(k + 1);
     ei[k + 1] = sr / double(k + 1);
   }
+  /* the majorant's coefficients scaled by rr^k: eh[k] = c_k rr^k, which
+   * stays below e^bend. Unscaled, c_k underflows while rr^k overflows on a
+   * long piece, and their product is NaN (debugging.md). */
   eh[0] = 1;
   for (int k = 0; k < kK; k++) {
     double s = 0;
     for (int j = 0; j <= std::min(k, D - 1); j++) {
-      s += double(j + 1) * qhat[j + 1] * eh[k - j];
+      s += double(j + 1) * qs[j + 1] * eh[k - j];
     }
     eh[k + 1] = s / double(k + 1);
   }
   /* certified error terms (absolute, over the piece) */
   double tail = 0, rec = 0, mag = 0;
-  rp = 1;
   for (int k = 0; k <= kK; k++) {
     if (k > kN) {
-      tail += eh[k] * rp;
+      tail += eh[k];
     }
     else {
-      rec += gamma_n(6 * k + 6) * eh[k] * 2 * rp * rr / double(k + 1);
-      mag += eh[k] * rp * rr / double(k + 1);
+      rec += gamma_n(6 * k + 6) * eh[k] * 2 * rr / double(k + 1);
+      mag += eh[k] * rr / double(k + 1);
     }
-    rp *= rr;
   }
   {
-    const double R = 4 * rr;
-    double qR = 0, Rp = R;
+    /* Q^ at R = 4 rr: sum_j qhat_j rr^j 4^j */
+    double qR = 0, f4 = 4;
     for (int j = 1; j <= D; j++) {
-      qR += qhat[j] * Rp;
-      Rp *= R;
+      qR += qs[j] * f4;
+      f4 *= 4;
     }
     /* (rr / R)^(K+1) / (1 - rr / R) = 4^-(K+1) * 4/3 */
     const double cauchy = up(dm::exp(qR) * (1 + 8 * kUnit)) * std::ldexp(4.0 / 3.0, -2 * (kK + 1));
@@ -167,6 +179,15 @@ bool build_piece(const Poly &th, double sa, double sb, CesaroPiece &p, double &l
   /* the part bisection reduces faster than h; the rest (heading uncertainty,
    * Horner and rotation rounding) is proportional to h and stays in the bound */
   reducible = up(tail + up(2 * rr * qerr) + rec);
+  if (terms) {
+    terms->tail = tail;
+    terms->coeff = up(2 * rr * qerr);
+    terms->rec = rec;
+    terms->horner = horner_err;
+    terms->rot = rot;
+    terms->local_err = local_err;
+    terms->reducible = reducible;
+  }
   return true;
 }
 
@@ -339,6 +360,11 @@ const char *Cesaro2::make(double x0, double y0, double theta0, const util::Vecto
   const double L = c.length();
   /* output rounding (two coordinates), parameter rounding (|r'| = 1) */
   c.eval_err = up(max_piece + 2 * kUnit * 2 * b.max_abs + 4 * kUnit * L);
+  for (const CesaroPiece &p : c.pieces) {
+    if (!std::isfinite(p.err)) {
+      return "cesaro2: a piece's error bound is not finite"; /* std::max above would hide a NaN */
+    }
+  }
   c.deriv_err[0] = c.eval_err;
   c.deriv_err[1] = up(max_theta_err + max_kappa * 4 * kUnit * L + 2 * dm::kSinCosAbs);
   c.deriv_err[2] = up(max_kappa_err + join_mismatch + max_kappa * (c.deriv_err[1] + 4 * kUnit));
@@ -631,5 +657,16 @@ const KindOps &cesaro2_kind()
   static const Cesaro2Kind k;
   return k;
 }
+
+namespace detail {
+
+bool cesaro_piece_terms(const Poly &th, double sa, double sb, CesaroPieceTerms &out)
+{
+  CesaroPiece p;
+  double err = 0, reducible = 0;
+  return build_piece(th, sa, sb, p, err, reducible, &out);
+}
+
+} // namespace detail
 
 } // namespace ubertopo::curves
