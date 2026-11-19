@@ -31,8 +31,10 @@ public:
   }
 
   /** Validates against the store: a live cesaro2 reference; 2..kMaxBorders
-   * borders with as many heights; one common domain inside the reference's.
-   * CLAUDENOTE: W3 adds the border-order and fold checks (plan §3.2). */
+   * borders with as many heights; one common domain inside the reference's;
+   * borders and heights without provable jumps; borders provably ordered
+   * (b_(k+1) - b_k > 0 by a certified enclosure); no fold at the outer
+   * borders (1 - t kappa > 0 for t = b_0 and t = b_m, by offset_valid). */
   static const char *make(const attr::PoolStore &s,
                           attr::PoolRef reference,
                           const util::Vector<Fn1D, 2> &borders,
@@ -56,5 +58,28 @@ public:
 using Road3Pool = attr::InternPool<Road3>;
 
 const KindOps &road3_kind();
+
+namespace detail {
+
+/** The evaluator's error terms (white-box test, plan P4b §3.2): xy, the
+ * horizontal part r + t N; w, the link coordinate; z, the height; r3, the
+ * error of the reference's third derivative as evaluated (the cesaro
+ * certifies none); e0..e2, the certified eval_error and
+ * deriv_eval_error(1, 2) that use them. */
+struct Road3Terms {
+  double xy = 0, w = 0, z = 0, r3 = 0;
+  double e0 = 0, e1 = 0, e2 = 0;
+};
+/** Computed values at (s, t) beside the terms: the link and its w, as eval
+ * forms them. */
+struct Road3Probe {
+  Road3Terms terms;
+  int link = -1;
+  double w = 0, z = 0;
+};
+/** False if r is not a valid road3 entry. */
+bool road3_probe(const attr::PoolStore &s, attr::PoolRef r, double u, double v, Side su, Side sv, Road3Probe &out);
+
+} // namespace detail
 
 } // namespace ubertopo::curves

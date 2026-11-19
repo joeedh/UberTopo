@@ -166,6 +166,52 @@ void test_road3_definition()
   UT_CHECK(curve_dim(st, gr) == 2 && !surface_kind_of(st, gr));
 }
 
+/* Fn1D::mul (plan P4b §3.1): merged breakpoints; exact products where every
+ * value is a short dyadic (a == b exactly); refusals; a general product
+ * against long double within its rounding */
+void test_fn1d_mul()
+{
+  auto fn = [](std::initializer_list<double> br, std::initializer_list<std::initializer_list<double>> ps) {
+    util::Vector<double, 2> b;
+    for (double x : br) {
+      b.append(x);
+    }
+    util::Vector<Poly, 1> p;
+    for (auto c : ps) {
+      p.append(Poly::exact(c));
+    }
+    Fn1D f;
+    UT_CHECK(Fn1D::make(b, p, f) == nullptr);
+    return f;
+  };
+  /* a: 1 + s/2 on [0, 1], then 1.5 - s'/4 + s'^2/8 on [1, 4]; b: 2 - s/4 on
+   * [0, 2], then 1.5 + s'/2 on [2, 4] */
+  const Fn1D a = fn({0, 1, 4}, {{1, 0.5}, {1.5, -0.25, 0.125}});
+  const Fn1D b = fn({0, 2, 4}, {{2, -0.25}, {1.5, 0.5}});
+  Fn1D p;
+  UT_CHECK(Fn1D::mul(a, b, p) == nullptr);
+  UT_CHECK(p.breaks.size() == 4 && p.breaks[0] == 0 && p.breaks[1] == 1 && p.breaks[2] == 2 && p.breaks[3] == 4);
+  UT_CHECK(p.pieces.size() == 3 && p.pieces[1].degree() == 3);
+  for (int i = 0; i <= 64; i++) {
+    const double s = 4.0 * i / 64;
+    for (const Side sd : {Side::Below, Side::Above}) {
+      UT_CHECK(p.eval(s, 0, sd) == a.eval(s, 0, sd) * b.eval(s, 0, sd));
+    }
+  }
+  /* refusals: degree 4 x degree 4 > kMaxDegree, different domains */
+  const Fn1D q4 = fn({0, 4}, {{1, 0, 0, 0, 0.5}});
+  UT_CHECK(Fn1D::mul(q4, q4, p) != nullptr);
+  UT_CHECK(Fn1D::mul(a, fn({0, 3}, {{1}}), p) != nullptr);
+  /* a general product: the sample function times a linear one */
+  const Fn1D f = sample_fn(), g = Fn1D::linear(0.3, -1.7, 0, 60);
+  UT_CHECK(Fn1D::mul(f, g, p) == nullptr);
+  for (int i = 0; i <= 240; i++) {
+    const double s = 60.0 * i / 240;
+    const LD want = exact_f(s, 0) * (LD(0.3) + (LD(-1.7) - LD(0.3)) * LD(s) / 60);
+    UT_CHECK(std::fabs(LD(p.eval(s)) - want) <= 1e-12L);
+  }
+}
+
 } // namespace
 
 int main()
@@ -173,5 +219,6 @@ int main()
   test_graph2();
   test_segment2();
   test_road3_definition();
+  test_fn1d_mul();
   return ut_test_end();
 }

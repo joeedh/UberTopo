@@ -727,3 +727,55 @@ same ids.
     belongs with the W5 editor tests.
   - The mutation runner now pushes file times forward on every write, after one
     batch reported a stale build as a survivor.
+
+**W3:**
+- **`Fn1D::mul`** shares `Fn1D::shifted_pieces` with `add` (merged breaks, each
+  piece shifted with its rounding bounds). `add`'s rounding is unchanged.
+- **`Road3::make` and `valid()`** check, in order: shape and domain; no provable
+  jump in a border or height; borders ordered by a certified enclosure of
+  b_(k+1) − b_k (shifted pieces subtracted as `Poly`s, so the bound covers the
+  shift's rounding); no fold at b_0 or b_m (`Offset2View::offset_valid` on a local
+  `Offset2`). `valid()` runs the same checks, so a file read with an unordered
+  entry gets no evaluator.
+- **Evaluation** follows §3.2. The xy expression and operation order are
+  `Offset2View::eval`'s. Partials use N' = (−r''_y, r''_x) and N'' from r''', so
+  the reference is evaluated to order n + 1 ≤ 3.
+- **Bitwise borders hold up to the sign of zero.** A border that is zero over the
+  whole reference uses the reference itself as its carrier. There, x − 0·T_y
+  turns a −0.0 coordinate into +0.0. The tests compare bits after adding +0.0.
+- **Certified errors** come from a magnitude/error pair per quantity: one bound
+  operation per evaluation step, in the code's own order. r''' has no cesaro
+  `deriv_eval_error`, so its error is bounded from the cesaro's per-segment
+  derivative polynomials, as `Offset2View` bounds its Q_j.
+- **`deriv_bound`** extends the link named by the box's middle and `sv` over the
+  box. It returns 0 for ∂²/∂t², and +∞ where a border or height enclosure can't
+  separate the link's borders.
+- **White-box hook:** `detail::road3_probe` returns the terms (xy, w, z, e0..e2)
+  and eval's link, w and z at a point. The test checks xy against the oracle,
+  and w and z against `long double` from the same data, each within its own term.
+- **Oracle:** `tools/curve_oracle/road_oracle.cc` writes
+  `tests/data/road_oracle.inc` from `tests/support/road_fixtures.h`. There are
+  four fixtures: a crowned straight, a superelevated spiral–arc–spiral, a
+  parabolic widening on a right arc, and borders crossing the reference. The
+  cesaro quad integration moved to `tools/curve_oracle/quad_cesaro.h`, shared with
+  `curve_oracle.cc`, whose output is byte-identical after the move. Observed
+  error is 0.1 % to 3 % of the certified bound.
+- **`road_build.h`:** `build_road(store, intern, reference, z, section, out)` with
+  `RoadSection{left, right}` of `RoadLink{width, crossfall}`. The interner is a
+  parameter, so generators pass `store_interner(store)` and the editor can pass
+  its journaled `intern_curve`. Borders run from the rightmost to the leftmost,
+  with `pivot` at t = 0.
+- **`Fn1D::mul`** doesn't check the product's degree itself: `make` refuses
+  degree above `kMaxDegree`, and the test exercises that path.
+- **Mutations:** 26 W3 mutants. They cover §9 items 1–7 and 9 (item 8 was done
+  in W1), each error term, the partials, link selection, `special_u`, the jump
+  check and the builder. 25 are killed.
+  - The first run left nine survivors. Each was killed by a new test:
+    `test_term_requirements` (roads where a single error source dominates, so a
+    missing term shows), `test_link_sides`, `test_bound_dz` and `test_special_u`.
+  - **One equivalent survivor:** removing the border error from the w term's
+    numerator. To first order, a border error moves w by
+    |(1 − w)δ_k + wδ_(k+1)|/Δ ≤ Be/d_min. The denominator's share of the bound,
+    |num|·2Be/d_min² with |num| ≤ D_d and D_d ≥ d_min, already covers that, so
+    the bound stays sound without the numerator term. The code keeps the
+    numerator term because each EB step bounds its own inputs.

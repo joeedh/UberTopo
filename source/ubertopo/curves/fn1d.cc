@@ -211,11 +211,11 @@ Range Fn1D::range(double s0, double s1, int k) const
   return out;
 }
 
-const char *Fn1D::add(const Fn1D &a, const Fn1D &b, Fn1D &out)
+namespace {
+
+/* the union of a's and b's breakpoints, sorted */
+util::Vector<double, 2> merged_breaks(const Fn1D &a, const Fn1D &b)
 {
-  if (a.empty() || b.empty() || a.lo() != b.lo() || a.hi() != b.hi()) {
-    return "Fn1D::add: domains differ";
-  }
   util::Vector<double, 2> br;
   int i = 0, j = 0;
   while (i < a.breaks.size() || j < b.breaks.size()) {
@@ -232,13 +232,49 @@ const char *Fn1D::add(const Fn1D &a, const Fn1D &b, Fn1D &out)
     }
     br.append(x);
   }
-  util::Vector<Poly, 1> ps;
+  return br;
+}
+
+} // namespace
+
+void Fn1D::shifted_pieces(const Fn1D &a, const Fn1D &b, util::Vector<double, 2> &br, util::Vector<Poly, 1> &pa,
+                          util::Vector<Poly, 1> &pb)
+{
+  br = merged_breaks(a, b);
+  pa.clear();
+  pb.clear();
   for (int k = 0; k + 1 < br.size(); k++) {
     const double s = br[k];
     const int ia = a.piece_at(s, Side::Above), ib = b.piece_at(s, Side::Above);
-    Poly pa = a.pieces[ia].compose_affine(s - a.breaks[ia], 1.0);
-    Poly pb = b.pieces[ib].compose_affine(s - b.breaks[ib], 1.0);
-    ps.append(pa + pb);
+    pa.append(a.pieces[ia].compose_affine(s - a.breaks[ia], 1.0));
+    pb.append(b.pieces[ib].compose_affine(s - b.breaks[ib], 1.0));
+  }
+}
+
+const char *Fn1D::add(const Fn1D &a, const Fn1D &b, Fn1D &out)
+{
+  if (a.empty() || b.empty() || a.lo() != b.lo() || a.hi() != b.hi()) {
+    return "Fn1D::add: domains differ";
+  }
+  util::Vector<double, 2> br;
+  util::Vector<Poly, 1> pa, pb, ps;
+  shifted_pieces(a, b, br, pa, pb);
+  for (int k = 0; k < pa.size(); k++) {
+    ps.append(pa[k] + pb[k]);
+  }
+  return make(br, ps, out);
+}
+
+const char *Fn1D::mul(const Fn1D &a, const Fn1D &b, Fn1D &out)
+{
+  if (a.empty() || b.empty() || a.lo() != b.lo() || a.hi() != b.hi()) {
+    return "Fn1D::mul: domains differ";
+  }
+  util::Vector<double, 2> br;
+  util::Vector<Poly, 1> pa, pb, ps;
+  shifted_pieces(a, b, br, pa, pb);
+  for (int k = 0; k < pa.size(); k++) {
+    ps.append(pa[k] * pb[k]); /* make refuses a degree above kMaxDegree */
   }
   return make(br, ps, out);
 }

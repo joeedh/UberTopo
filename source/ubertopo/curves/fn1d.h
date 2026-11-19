@@ -76,6 +76,16 @@ public:
   /** Sum (breakpoints merged; coefficients shifted with rounding). Both must
    * cover the same domain. */
   static const char *add(const Fn1D &a, const Fn1D &b, Fn1D &out);
+  /** Product (plan P4b §3.1), as add: breakpoints merged, each piece's
+   * product with rounding; the result is a new exact definition near the
+   * true product. Refused if a product piece has degree above kMaxDegree. */
+  static const char *mul(const Fn1D &a, const Fn1D &b, Fn1D &out);
+  /** a's and b's pieces over their merged breakpoints br, shifted to each
+   * merged piece's start (with the rounding bounds in Poly::e): the common
+   * step of add and mul, and of certified enclosures of a - b. Both must
+   * cover the same domain. */
+  static void shifted_pieces(const Fn1D &a, const Fn1D &b, util::Vector<double, 2> &br, util::Vector<Poly, 1> &pa,
+                             util::Vector<Poly, 1> &pb);
 
   /* pool member protocol helpers (bitwise) */
   void hash_into(hash::Hasher128 &h) const;
