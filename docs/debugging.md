@@ -269,3 +269,21 @@ Entry format:
   accept const callables.
 - **Fix / technique:** declare the lambda without `const` (`auto keep = ...`), or pass
   it as a temporary.
+
+## A carrier fails `CurveEndpoint` at the end the test didn't build
+- **Symptom:** a clothoid wire built as `make_vertex(a)`, `make_vertex(b)` at c(L),
+  `make_edge(a, b)`, `set_edge_curve(e, ref, 0, L)` fails `CurveEndpoint` for some seeds,
+  although b lies exactly on c(L).
+- **Cause:** `make_edge` stores the ends in its own order, so `edge_verts(e)[0]` is not
+  always `a`. The range (t0, t1) refers to `vs[0]` and `vs[1]`.
+- **Fix / technique:** read `k.edge_verts(e)` and pass (L, 0) when `vs[0] != a`. To
+  diagnose, print the carrier at both range ends next to both stored vertices: the end
+  that matches exactly is not the failing one.
+
+## Windows PowerShell's `Set-Content -Encoding utf8` writes a BOM
+- **Symptom:** a header rewritten with
+  `(Get-Content f -Raw) -replace ... | Set-Content -Encoding utf8 f` starts with
+  `EF BB BF`.
+- **Cause:** in PowerShell 5.1, `utf8` means UTF-8 with a BOM.
+- **Fix / technique:** edit source files with the editor tools or a Python patch script,
+  not PowerShell. Check with `head -c 3 f | od -c`.

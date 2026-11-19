@@ -4,6 +4,7 @@
 #include "ubertopo/topo/edit/editor.h"
 #include "ubertopo/topo/io.h"
 
+#include "ubertopo/topo/edit/editor_impl_curves.h"
 #include "ubertopo/topo/edit/editor_impl_cycles.h"
 #include "ubertopo/topo/edit/editor_impl_face.h"
 #include "ubertopo/topo/edit/editor_impl_imprint.h"
@@ -52,6 +53,7 @@ const char *edit_code_name(EditCode c)
     UT_CASE(InclusionOnChord)
     UT_CASE(HoleOnChord)
     UT_CASE(BadRule)
+    UT_CASE(CurvedEdge)
     UT_CASE(NonPlanarFace)
     UT_CASE(NotProjectable)
     UT_CASE(HoleOrientation)

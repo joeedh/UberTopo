@@ -243,7 +243,7 @@ template <geom::CoordType C> EditCode Editor<C>::rollback()
   lineage_.erase(lineage_.begin() + s.lineage, lineage_.end());
   if (sp_.empty()) {
     if (barrier_snapshot_) {
-      k_ = std::move(*barrier_snapshot_);
+      restore_snapshot(std::move(*barrier_snapshot_));
       barrier_snapshot_.reset();
       idx_.invalidate();
       idx_.flush(k_); /* eagerly, inside the barrier (C13) */
@@ -341,7 +341,7 @@ template <geom::CoordType C> EditCode Editor<C>::undo()
   }
   check_index_stamp();
   if (t.snapshot) {
-    k_ = std::move(*t.snapshot);
+    restore_snapshot(std::move(*t.snapshot));
     idx_.invalidate();
     idx_.flush(k_);
     grid_.rebuild_if_used(k_);
@@ -493,6 +493,13 @@ template <geom::CoordType C> EditCode Editor<C>::apply_op(const OpRecord<C> &op)
       }
       return weld(std::span<const std::pair<VertRef, VertRef>>(ps.data(), ps.size()));
     }
+    case OpKind::SetEdgeCurve:
+      return set_edge_curve(EdgeRef(u[0]),
+                            litestl::attr::PoolRef{u[1], u[2]},
+                            edit_detail::get_f64(u.data() + 3),
+                            edit_detail::get_f64(u.data() + 5));
+    case OpKind::SplitEdgeAt:
+      return split_edge_at(EdgeRef(u[0]), edit_detail::get_f64(u.data() + 1));
     case OpKind::RebuildRegions:
     case OpKind::Compact:
       return EditCode::OpenTransaction; /* barriers are replayed on their own (redo) */

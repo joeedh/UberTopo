@@ -48,6 +48,7 @@ void validate_embedding(const Complex<C> &k, ValidationReport &rep, const Valida
   /* per-call stores are sparse: a filter touches only the faces it lists and
    * their neighbours (plan P3b C13) */
   std::unordered_map<uint32_t, FaceFrame> frames;
+  validate_curves(k, rep, flt);
   for_rows(flt, flt ? &flt->faces : nullptr, k.faces.capacity(), [&](uint32_t f) {
     if (!k.faces.live(f)) {
       return;

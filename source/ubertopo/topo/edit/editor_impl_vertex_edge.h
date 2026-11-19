@@ -3,6 +3,7 @@
 /* Editor<C>: vertex, edge and wire primitives (plan P3 §3.4, C1, C5, C6,
  * C8, C10, C11). Template definitions, included only by editor.cc. */
 
+#include <bit>
 #include <cmath>
 
 #include "ubertopo/topo/edit/editor.h"
@@ -278,12 +279,29 @@ EditCode Editor<C>::split_edge(EdgeRef e, const Point &p, VertRef *v_out, EdgeRe
   if (!k_.edges.live(e.i)) {
     return pr.fail(EditCode::DeadElement, ident::ElemKind::Edge, e.i);
   }
+  if (!k_.edges.template get<".e.curve">()[e.i].none()) {
+    return pr.fail(EditCode::CurvedEdge, ident::ElemKind::Edge, e.i);
+  }
   const auto vs = k_.edge_verts(e);
-  const VertRef a = vs[0], b = vs[1];
-  const Point pa = k_.pos(a), pb = k_.pos(b);
+  const Point pa = k_.pos(vs[0]), pb = k_.pos(vs[1]);
   if (!edit_detail::strictly_inside<C>(p, pa, pb)) {
     return pr.fail(EditCode::NotOnEdge, ident::ElemKind::Edge, e.i);
   }
+  const EditCode c = split_impl(pr, e, p, edit_detail::fraction<C>(p, pa, pb), nullptr, v_out, e_out);
+  if (c != EditCode::Ok) {
+    return c;
+  }
+  pr.op.u.append(e.i);
+  pr.op.pts.append(p);
+  return pr.finish();
+}
+
+template <geom::CoordType C>
+EditCode Editor<C>::split_impl(
+    Prim &pr, EdgeRef e, const Point &p, const double t, const double *tc, VertRef *v_out, EdgeRef *e_out)
+{
+  const auto vs = k_.edge_verts(e);
+  const VertRef a = vs[0], b = vs[1];
   /* IDs: half r = 0 is the one at the endpoint with the smaller vertex ID */
   const ident::PersistentId eid = k_.edge_id(e);
   const uint32_t r_e = k_.vert_id(a) < k_.vert_id(b) ? 0 : 1;
@@ -294,7 +312,6 @@ EditCode Editor<C>::split_edge(EdgeRef e, const Point &p, VertRef *v_out, EdgeRe
   if (id_used(Grp::Verts, id_v) || id_used(Grp::Edges, id_e) || id_used(Grp::Edges, id_e2)) {
     return pr.fail(EditCode::DuplicateId, ident::ElemKind::Edge, e.i);
   }
-  const double t = edit_detail::fraction<C>(p, pa, pb);
   const bool wire = !k_.edge_coedge(e);
 
   /* the new vertex (C1: a wire's container and hint carry over) */
@@ -312,6 +329,13 @@ EditCode Editor<C>::split_edge(EdgeRef e, const Point &p, VertRef *v_out, EdgeRe
   setE<".e.container">(e2, k_.edges.template get<".e.container">()[e.i]);
   setE<".e.container_hint">(e2, k_.edges.template get<".e.container_hint">()[e.i]);
   setE<".e.curve">(e2, k_.edges.template get<".e.curve">()[e.i]);
+  setE<".e.geom_flags">(e2, k_.edges.template get<".e.geom_flags">()[e.i]);
+  if (tc) {
+    /* the carrier's ranges: (t0, t) and (t, t1) (plan P4a §5.2) */
+    const auto rg = k_.edges.template get<".e.range">()[e.i];
+    setE<".e.range">(e2, litestl::math::double2(*tc, rg[1]));
+    setE<".e.range">(e, litestl::math::double2(rg[0], *tc));
+  }
   disk_replace(e, 1, e2, 1);
   setE<".e.vs">(e, U32x2{a.i, v.i});
   setE<".id">(e, id_e);
@@ -385,15 +409,13 @@ EditCode Editor<C>::split_edge(EdgeRef e, const Point &p, VertRef *v_out, EdgeRe
   lineage_.push_back({eid, id_e, ident::ElemKind::Edge, LineageKind::Split});
   lineage_.push_back({eid, id_e2, ident::ElemKind::Edge, LineageKind::Split});
   lineage_.push_back({eid, id_v, ident::ElemKind::Vertex, LineageKind::Split});
-  pr.op.u.append(e.i);
-  pr.op.pts.append(p);
   if (v_out) {
     *v_out = v;
   }
   if (e_out) {
     *e_out = e2;
   }
-  return pr.finish();
+  return EditCode::Ok;
 }
 
 template <geom::CoordType C> EditCode Editor<C>::join_edge(VertRef v, EdgeRef *survivor)
@@ -419,14 +441,28 @@ template <geom::CoordType C> EditCode Editor<C>::join_edge(VertRef v, EdgeRef *s
   if (a == b || find_edge(a, b)) {
     return pr.fail(EditCode::EdgeExists, ident::ElemKind::Vertex, v.i);
   }
-  if (!edit_detail::strictly_inside<C>(k_.pos(v), k_.pos(a), k_.pos(b))) {
-    return pr.fail(EditCode::NotJoinable, ident::ElemKind::Vertex, v.i, "not collinear");
-  }
   const auto &ec = k_.edges.template get<".e.container">();
   const auto &eh = k_.edges.template get<".e.container_hint">();
   const auto &ev = k_.edges.template get<".e.curve">();
-  if (!(ec[e1.i] == ec[e2.i]) || !(eh[e1.i] == eh[e2.i]) || !(ev[e1.i] == ev[e2.i])) {
+  const auto &eg = k_.edges.template get<".e.geom_flags">();
+  if (!(ec[e1.i] == ec[e2.i]) || !(eh[e1.i] == eh[e2.i]) || !(ev[e1.i] == ev[e2.i]) || eg[e1.i] != eg[e2.i]) {
     return pr.fail(EditCode::Incompatible, ident::ElemKind::Edge, e2.i);
+  }
+  /* curved (plan P4a §5.2): the same carrier, ranges meeting at v's
+   * parameter and running on in the same direction; straight: collinear */
+  const bool curved = !ev[e1.i].none();
+  double pa = 0, pv = 0, pb = 0;
+  if (curved) {
+    const auto r1 = k_.edges.template get<".e.range">()[e1.i], r2 = k_.edges.template get<".e.range">()[e2.i];
+    pa = r1[1 - s1];
+    pv = r1[s1];
+    pb = r2[1 - s2];
+    if (std::bit_cast<uint64_t>(pv) != std::bit_cast<uint64_t>(r2[s2]) || !((pa < pv && pv < pb) || (pa > pv && pv > pb))) {
+      return pr.fail(EditCode::Incompatible, ident::ElemKind::Vertex, v.i, "the carrier ranges don't continue at v");
+    }
+  }
+  else if (!edit_detail::strictly_inside<C>(k_.pos(v), k_.pos(a), k_.pos(b))) {
+    return pr.fail(EditCode::NotJoinable, ident::ElemKind::Vertex, v.i, "not collinear");
   }
   /* v may only carry the edges' own container (a split wire's vertex, C1) */
   if (!(k_.vert_container(v) == ec[e1.i]) || !(k_.verts.template get<".v.container_hint">()[v.i] == eh[e1.i])) {
@@ -449,7 +485,9 @@ template <geom::CoordType C> EditCode Editor<C>::join_edge(VertRef v, EdgeRef *s
       return pr.fail(EditCode::NotJoinable, ident::ElemKind::Coedge, c1.i);
     }
   }
-  const double l1 = edit_detail::dist<C>(k_.pos(v), k_.pos(a)), l2 = edit_detail::dist<C>(k_.pos(v), k_.pos(b));
+  /* propagation weights: parameter lengths on a carrier, chord lengths otherwise */
+  const double l1 = curved ? std::fabs(pv - pa) : edit_detail::dist<C>(k_.pos(v), k_.pos(a));
+  const double l2 = curved ? std::fabs(pb - pv) : edit_detail::dist<C>(k_.pos(v), k_.pos(b));
   const ident::PersistentId id1 = k_.edge_id(e1), id2 = k_.edge_id(e2), idv = k_.vert_id(v);
 
   /* coedges: drop each c2, splicing its loop (C8) */
@@ -489,6 +527,11 @@ template <geom::CoordType C> EditCode Editor<C>::join_edge(VertRef v, EdgeRef *s
   U32x2 vs1 = k_.edges.template get<".e.vs">()[e1.i];
   vs1[s1] = b.i;
   setE<".e.vs">(e1, vs1);
+  if (curved) {
+    auto r1 = k_.edges.template get<".e.range">()[e1.i];
+    r1[s1] = pb;
+    setE<".e.range">(e1, r1);
+  }
 
   MixBuild em;
   em.add(e1.i, {{e1.i, l1}, {e2.i, l2}});
@@ -497,6 +540,9 @@ template <geom::CoordType C> EditCode Editor<C>::join_edge(VertRef v, EdgeRef *s
   }
   free(Grp::Edges, e2.i);
   free(Grp::Verts, v.i);
+  if (curved && pairs.size()) {
+    set_dirty(); /* a corner left the skeleton */
+  }
   if (projected) {
     set_dirty();
     for (const auto &pc : pairs) {

@@ -23,6 +23,13 @@
  * Undoing a barrier (rebuild_regions) restores a snapshot of the whole
  * complex: pointers to dynamic columns taken before it must be fetched again.
  *
+ * Curves (plan P4a §5.2): intern_curve adds definitions to the complex's
+ * geometry store without journaling; set_edge_curve and split_edge_at are
+ * journaled. The editor never renumbers the live store: undoing a barrier
+ * restores the groups and keeps the store, and the journal roots every ref
+ * it holds (JournalRoots), so collects (collect_geometry, and every barrier
+ * after it commits) never free an entry undo or redo could bring back.
+ *
  * Writes from outside the editor are allowed between transactions, but they
  * truncate the journal (undo can't cross them). A frozen complex is refused;
  * thaw it first. Columns may not be added or removed inside a transaction. */
@@ -36,8 +43,11 @@
 #include <utility>
 #include <vector>
 
+#include "litestl/io/bytes.h"
 #include "litestl/util/vector.h"
+#include "ubertopo/curves/curve.h"
 #include "ubertopo/topo/complex.h"
+#include "ubertopo/topo/geom_store.h"
 #include "ubertopo/topo/edit/edit_types.h"
 #include "ubertopo/topo/edit/editor_grid.h"
 #include "ubertopo/topo/edit/editor_index.h"
@@ -182,6 +192,32 @@ public:
    * is nothing to drop. */
   EditCode compact();
 
+  /* ---- curves (P4a W6; editor_impl_curves.h) ---- */
+  /** Interns @p def, a definition of @p kind (T is the kind's value type),
+   * into the complex's store. It is re-validated by its kind's write/read
+   * round trip (read re-runs the kind's checks and refuses non-canonical or
+   * non-finite definitions), its inner refs must be live and of kinds the
+   * holder accepts, and its evaluator must build. Not journaled and not a
+   * write: version() is unchanged, and an entry nothing references never
+   * changes a hash. Refused on a frozen complex. */
+  template <typename T>
+  EditCode intern_curve(const curves::KindOps &kind, const T &def, litestl::attr::PoolRef *out);
+  /** Sets the carrier of @p e: vertex vs[0] at carrier(t0), vs[1] at
+   * carrier(t1) (plan P4a §5.1). @p ref NONE makes e straight, with range
+   * (0, 0). Checks the kind and the range here; the endpoint rule is the
+   * validator's (CurveEndpoint). */
+  EditCode set_edge_curve(EdgeRef e, litestl::attr::PoolRef ref, double t0, double t1);
+  /** Splits a curved edge at carrier parameter @p t, strictly inside its
+   * range: the new vertex at round_C(carrier(t)), the two halves sharing
+   * the carrier with ranges (t0, t) and (t, t1). IDs and slots as in
+   * split_edge; the chord skeleton changes, so incident planar faces must
+   * stay planar (NonPlanarFace) and regions become dirty. */
+  EditCode split_edge_at(EdgeRef e, double t, VertRef *v_out = nullptr, EdgeRef *e_out = nullptr);
+  /** Frees the store entries that neither the complex, the journal nor
+   * @p extra reach. Outside transactions only; a journal invalidated by an
+   * outside write is dropped first. */
+  EditCode collect_geometry(std::span<litestl::attr::RefRoot *const> extra = {});
+
   /** Test hook: the maintained index equals one rebuilt from scratch. */
   bool index_consistent() const
   {
@@ -246,6 +282,13 @@ private:
   void drop_hole(FaceRef f, LoopRef hole);
   /** rebuild_regions() / compact(): a snapshot transaction of its own. */
   EditCode run_barrier(OpKind kind);
+  /** k_ = snapshot, keeping the live geometry store (plan P4a §5.2). */
+  void restore_snapshot(Complex<C> &&snapshot);
+  /** The collect behind collect_geometry and barriers. */
+  bool collect_internal(std::span<litestl::attr::RefRoot *const> extra, const char **err);
+  /** split_edge's body after its checks: @p frac is the propagation
+   * fraction from vs[0]; @p t non-null for a curved split at *t. */
+  EditCode split_impl(Prim &pr, EdgeRef e, const Point &p, double frac, const double *tc, VertRef *v_out, EdgeRef *e_out);
   EditCode validate_now(const litestl::util::Vector<uint32_t> *touched);
   void touched_filter(ValidateFilter &flt, const litestl::util::Vector<uint32_t> *touched) const;
 
@@ -369,6 +412,57 @@ private:
     }
   }
 };
+
+template <geom::CoordType C>
+template <typename T>
+EditCode Editor<C>::intern_curve(const curves::KindOps &kind, const T &def, litestl::attr::PoolRef *out)
+{
+  namespace attr = litestl::attr;
+  rep_ = EditReport{};
+  auto fail = [&](EditCode c, const char *d) {
+    rep_.code = c;
+    rep_.detail = d;
+    return c;
+  };
+  if (k_.frozen()) {
+    return fail(EditCode::Frozen, nullptr);
+  }
+  using P = attr::InternPool<T>;
+  const uint32_t pool = curves::pool_id(kind);
+  if (pool == 0 || pool > k_.geom.pool_count() || k_.geom.pool_any(pool).class_tag() != P::static_tag()) {
+    return fail(EditCode::BadArgument, "the definition's type is not the kind's");
+  }
+  bool inner_ok = true;
+  attr::PoolTraits<T>::for_each_ref(def, [&](attr::PoolRef r) {
+    attr::RefSite site;
+    site.kind = attr::RefSite::Inner;
+    site.a = pool;
+    if (!attr::well_formed(r) || (!r.none() && (!k_.geom.live(r) || !accept_geom_ref(k_.geom, site, r)))) {
+      inner_ok = false;
+    }
+  });
+  if (!inner_ok) {
+    return fail(EditCode::BadArgument, "an inner ref is dead or of a kind the holder refuses");
+  }
+  litestl::io::ByteWriter w;
+  def.write(w);
+  litestl::io::ByteReader r(w.data(), w.size());
+  T v;
+  if (!T::read(r, v, attr::PoolReadLimits{})) { /* every kind's read re-runs make: canonical and valid */
+    return fail(EditCode::BadArgument, "the definition is not canonical or not valid");
+  }
+  const attr::PoolRef ref = k_.geom.template intern<P>(pool, std::move(v));
+  const bool builds = curves::curve_dim(k_.geom, ref) == 3 ? bool(curves::curve3(k_.geom, ref))
+                                                            : bool(curves::curve2(k_.geom, ref));
+  if (!builds) {
+    /* the entry stays until the next collect; nothing references it */
+    return fail(EditCode::BadArgument, "the definition's evaluator does not build");
+  }
+  if (out) {
+    *out = ref;
+  }
+  return EditCode::Ok;
+}
 
 extern template class Editor<double>;
 extern template class Editor<float>;

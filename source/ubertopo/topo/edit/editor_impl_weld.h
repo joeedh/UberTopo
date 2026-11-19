@@ -6,6 +6,7 @@
  * a valid result. Included only by editor.cc. */
 
 #include <algorithm>
+#include <bit>
 #include <map>
 
 #include "ubertopo/topo/edit/editor.h"
@@ -110,6 +111,25 @@ template <geom::CoordType C> EditCode Editor<C>::weld(std::span<const std::pair<
                 [&](uint32_t a, uint32_t b) { return k_.edge_id(EdgeRef(a)) < k_.edge_id(EdgeRef(b)); });
       const EdgeRef e(group[0]);
       const U32x2 evs = k_.edges.template get<".e.vs">()[e.i];
+      /* fused edges: both straight, or the same carrier between the same
+       * vertices (plan P4a §5.1; no curved digons, OI-P4a-1) */
+      {
+        const auto &cv = k_.edges.template get<".e.curve">();
+        const auto &rg = k_.edges.template get<".e.range">();
+        const auto &gf = k_.edges.template get<".e.geom_flags">();
+        auto bits = [](double x) { return std::bit_cast<uint64_t>(x); };
+        for (int gi = 1; gi < group.size(); gi++) {
+          const uint32_t y = group[gi];
+          const U32x2 yvs = k_.edges.template get<".e.vs">()[y];
+          const bool same_dir = yvs[0] == evs[0];
+          const auto re = rg[e.i], ry = rg[y];
+          const bool ranges = same_dir ? bits(re[0]) == bits(ry[0]) && bits(re[1]) == bits(ry[1])
+                                       : bits(re[0]) == bits(ry[1]) && bits(re[1]) == bits(ry[0]);
+          if (!(cv[e.i] == cv[y]) || gf[e.i] != gf[y] || (!cv[e.i].none() && !ranges)) {
+            return pr.fail(EditCode::Incompatible, ElemKind::Edge, y, "fused edges with different carriers");
+          }
+        }
+      }
       litestl::util::Vector<uint32_t, 8> extra;
       MixBuild em; /* equal weights over the whole group */
       em.targets.append(e.i);

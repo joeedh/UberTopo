@@ -53,6 +53,11 @@ enum class ValidateCode : uint16_t {
   HoleWinding,          /* a planar face's hole winds like its outer loop */
   RadialOrder,          /* the stored radial order differs from the geometric one */
   ContainerGeometry,    /* an included vertex or wire is not inside its container */
+  CurveKind,            /* .e.curve is not live, or not a kind edges accept (P4a) */
+  CurveRange,           /* .e.range outside the domain, equal ends, across an offset fold,
+                         * or non-zero with no carrier */
+  CurveEndpoint,        /* an end vertex lies off the carrier (beyond the §2 tolerance) */
+  GeometryUnsupported,  /* a pcurve, a surface or .e.geom_flags: not in P4a */
   /* global layer */
   LoopIntersection,     /* a loop self-intersects, or two loops of a face meet */
   HoleOutside,          /* a hole is not inside its face's outer loop */
@@ -160,6 +165,12 @@ template <geom::CoordType C>
 void validate_embedding(const Complex<C> &k, ValidationReport &rep, const ValidateFilter *filter = nullptr);
 template <geom::CoordType C>
 void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateFilter *filter = nullptr);
+
+/** The embedding layer's curve checks (validate_curves.cc): CurveKind,
+ * CurveRange, CurveEndpoint, GeometryUnsupported. Edges and faces only; the
+ * skeleton checks stay on the chords (plan P4a OI-P4a-1). */
+template <geom::CoordType C>
+void validate_curves(const Complex<C> &k, ValidationReport &rep, const ValidateFilter *filter = nullptr);
 
 /** The global layer restricted to @p filter, over @p grid (validate_grid.cc). */
 template <geom::CoordType C>

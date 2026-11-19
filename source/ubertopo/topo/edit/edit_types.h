@@ -54,6 +54,7 @@ enum class EditCode : uint16_t {
   InclusionOnChord,  /* split_face: an embedded element lies on the chord */
   HoleOnChord,       /* split_face: a hole touches a child's outer loop */
   BadRule,           /* a propagation rule doesn't fit the column type */
+  CurvedEdge,        /* split_edge on an edge with a carrier: use split_edge_at (P4a) */
   /* geometry */
   NonPlanarFace,
   NotProjectable,
@@ -109,11 +110,14 @@ enum class OpKind : uint8_t {
   AddHole,
   RemoveHole,
   Weld,
+  /* P4a W6 */
+  SetEdgeCurve, /* u: e, pool, slot, t0 lo, t0 hi, t1 lo, t1 hi (doubles as two words) */
+  SplitEdgeAt,  /* u: e, t lo, t hi */
 };
 
-/** Arguments of one operation: indices, IDs, points and raw bytes. P3a
- * payloads never hold PoolRefs except SetAttr bytes, which JournalRoots
- * visits through the column (plan P3 C9). */
+/** Arguments of one operation: indices, IDs, points and raw bytes. The
+ * payloads that hold PoolRefs: SetAttr bytes, which JournalRoots visits
+ * through the column (plan P3 C9), and SetEdgeCurve's u[1], u[2]. */
 template <geom::CoordType C> struct OpRecord {
   OpKind kind;
   litestl::util::Vector<uint32_t, 8> u;

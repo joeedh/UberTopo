@@ -37,10 +37,14 @@ inline bool is_geometry_column(std::string_view n)
          n == ".g.curve_tol";
 }
 
-template <geom::CoordType C> ident::PersistentId structure_hash(const topo::Complex<C> &k)
+/* @p coord_free leaves out the coordinate key and "pos" too: equal for the
+ * same edits on complexes of different coordinate types */
+template <geom::CoordType C> ident::PersistentId structure_hash(const topo::Complex<C> &k, bool coord_free = false)
 {
   ident::Hasher128 h(ident::DomainTag::Content);
-  h.str(geom::CoordTraits<C>::key);
+  if (!coord_free) {
+    h.str(geom::CoordTraits<C>::key);
+  }
   h.f64_bits(k.frame.origin[0]).f64_bits(k.frame.origin[1]).f64_bits(k.frame.origin[2]);
   h.i32(k.frame.quantum_log2).u64(k.frame.frame_id);
   h.boolean(k.regions_dirty);
@@ -58,7 +62,7 @@ template <geom::CoordType C> ident::PersistentId structure_hash(const topo::Comp
       const litestl::attr::ColumnBase &c = g->column(uint32_t(i));
       using litestl::attr::ColumnFlags;
       if (is_geometry_column(g->name(uint32_t(i))) || has_flag(c.flags(), ColumnFlags::Temp) ||
-          has_flag(c.flags(), ColumnFlags::Derived))
+          has_flag(c.flags(), ColumnFlags::Derived) || (coord_free && g->name(uint32_t(i)) == "pos"))
       {
         continue;
       }

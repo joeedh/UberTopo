@@ -645,6 +645,11 @@ template <geom::CoordType C> EditCode Editor<C>::run_barrier(OpKind kind)
   idx_.flush(k_); /* eagerly, inside the barrier (C13) */
   grid_.rebuild_if_used(k_);
   sync_index_stamp();
+  if (c == EditCode::Ok) {
+    /* barriers collect after they commit (plan P4a §5.2): the snapshot is
+     * in the journal by now, so its refs are roots */
+    (void)collect_internal({}, nullptr);
+  }
   return c;
 }
 

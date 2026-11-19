@@ -20,6 +20,7 @@
 #include "gen/buildings.h"
 #include "litestl/util/alloc.h"
 #include "litestl/util/task.h"
+#include "support/curve_fixture.h"
 #include "support/legacy_fixture.h"
 #include "support/splitmix64.h"
 #include "ut_test.h"
@@ -109,14 +110,15 @@ template <geom::CoordType C> struct Run {
   EditCode step(Editor<C> &ed, litestl::test::SplitMix64 &r, uint32_t n)
   {
     using test::gen::gpt;
-    const uint32_t op = uint32_t(r.below(120));
+    const uint32_t op = uint32_t(r.below(133));
     static const char *names[] = {"split_edge", "join_edge", "split_face", "join_faces", "flip",      "wire",
                                   "kill_edge",  "kill_vertex", "kill_face", "remake",   "set_position", "embed",
                                   "undo",       "redo",      "regions",    "imprint",  "unimprint",  "hole",
-                                  "remove_hole", "weld",     "compact"};
+                                  "remove_hole", "weld",     "compact",    "arc",      "curved_wire", "clear_curve",
+                                  "split_at",   "curve_join"};
     static const uint32_t bounds[] = {14, 24, 38, 48, 53, 59, 64, 68, 72, 78, 84, 88, 93, 97, 100,
-                                      104, 107, 111, 113, 117, 120};
-    for (int i = 0; i < 21; i++) {
+                                      104, 107, 111, 113, 117, 120, 124, 127, 128, 131, 133};
+    for (int i = 0; i < 26; i++) {
       if (op < bounds[i]) {
         last = names[i];
         break;
@@ -368,7 +370,103 @@ template <geom::CoordType C> struct Run {
       }
       return finish(c);
     }
-    return ed.compact();
+    if (op < 120) {
+      return ed.compact();
+    }
+    return step_curves(ed, r, n, op);
+  }
+
+  /* P4a W6 (plan §6.3): carriers on edges, curved wires, splits and joins */
+  EditCode step_curves(Editor<C> &ed, litestl::test::SplitMix64 &r, uint32_t n, uint32_t op)
+  {
+    using test::gen::gpt;
+    const auto &curve = k.edges.template get<".e.curve">();
+    auto finish = [&](EditCode c) {
+      if (c == EditCode::Ok) {
+        return ed.commit();
+      }
+      ed.rollback();
+      return c;
+    };
+    /* a curved edge, or NONE */
+    auto pick_curved = [&]() {
+      const uint32_t e = pick(k.edges, r);
+      return e != NONE && !curve[e].none() ? e : NONE;
+    };
+    if (op < 124) { /* an arc carrier between an edge's endpoints */
+      const uint32_t e = pick(k.edges, r);
+      if (e == NONE) {
+        return EditCode::BadArgument;
+      }
+      const double alpha = (r.below(2) ? 1 : -1) * 0.1 * double(1 + r.below(5));
+      const auto vs = k.edge_verts(EdgeRef(e));
+      litestl::attr::PoolRef ref;
+      double s = 0;
+      const EditCode c = test::arc_carrier(ed, vs[0], vs[1], alpha, &ref, &s);
+      return c != EditCode::Ok ? c : ed.set_edge_curve(EdgeRef(e), ref, 0, s);
+    }
+    if (op < 127) { /* a clothoid wire in the air: start vertex, end at round_C(c(L)) */
+      const double unit = geom::to_double3<C>(gpt<C>({1, 0, 0}))[0]; /* frame units per grid unit */
+      const I3 p = {int64_t(r.range(-20, 20)) * 100, int64_t(r.range(-20, 20)) * 100, 4000 + int64_t(r.below(10)) * 100};
+      const double theta = 0.25 * double(r.range(-12, 12));
+      const double k0 = 0.001 * double(r.range(-4, 4)) / unit, k1 = 0.001 * double(r.range(-4, 4)) / unit;
+      const double len = double(150 + 50 * r.below(6)) * unit;
+      const auto pd = geom::to_double3<C>(gpt<C>(p));
+      curves::Cesaro2 hz;
+      if (curves::Cesaro2::clothoid(pd[0], pd[1], theta, k0, k1, len, hz)) {
+        return EditCode::BadArgument;
+      }
+      litestl::attr::PoolRef hr, ar;
+      EditCode c = ed.intern_curve(curves::cesaro2_kind(), hz, &hr);
+      curves::Alignment3 al;
+      if (c == EditCode::Ok && curves::Alignment3::make(k.geom, hr, curves::Fn1D::constant(pd[2], 0, len), al)) {
+        return EditCode::BadArgument;
+      }
+      if (c == EditCode::Ok) {
+        c = ed.intern_curve(curves::alignment3_kind(), al, &ar);
+      }
+      if (c != EditCode::Ok) {
+        return c;
+      }
+      curves::Vec<3> x;
+      curves::curve3(k.geom, ar)->eval(len, 0, &x);
+      VertRef a, b;
+      EdgeRef e;
+      ed.begin("curved_wire");
+      c = ed.make_vertex(gpt<C>(p), ident::derive(ident::tag::TestOnly, std::string_view("cw"), n, 0), &a);
+      if (c == EditCode::Ok) {
+        c = ed.make_vertex(test::fpt<C>(x[0], x[1], x[2]), ident::derive(ident::tag::TestOnly, std::string_view("cw"), n, 1),
+                           &b);
+      }
+      if (c == EditCode::Ok) {
+        c = ed.make_edge(a, b, ident::kNoId, &e);
+      }
+      if (c == EditCode::Ok) {
+        /* make_edge may store the ends in either order: vs[0] is at t0 */
+        const bool fwd = k.edge_verts(e)[0] == a;
+        c = ed.set_edge_curve(e, ar, fwd ? 0 : len, fwd ? len : 0);
+      }
+      return finish(c);
+    }
+    if (op < 128) { /* clear a carrier */
+      const uint32_t e = pick_curved();
+      return e == NONE ? EditCode::BadArgument : ed.set_edge_curve(EdgeRef(e), litestl::attr::PoolRef{}, 0, 0);
+    }
+    if (op < 131) { /* split a curved edge at a quarter of its range */
+      const uint32_t e = pick_curved();
+      if (e == NONE) {
+        return EditCode::BadArgument;
+      }
+      const auto rg = k.edges.template get<".e.range">()[e];
+      const double q = 0.25 * double(1 + r.below(3));
+      return ed.split_edge_at(EdgeRef(e), rg[0] + (rg[1] - rg[0]) * q);
+    }
+    /* join a curved edge at one of its ends */
+    const uint32_t e = pick_curved();
+    if (e == NONE) {
+      return EditCode::BadArgument;
+    }
+    return ed.join_edge(k.edge_verts(EdgeRef(e))[r.below(2)]);
   }
 
   /** The whole run; returns the final content hash. */
@@ -435,6 +533,12 @@ template <geom::CoordType C> struct Run {
           return {};
         }
       }
+      /* collect between transactions (plan P4a §6.3): never changes the
+       * hash, and later undo / redo still find every entry they need */
+      if (!in_txn && n % 50 == 49) {
+        const PersistentId before = content_hash(k);
+        UT_CHECK(ed.collect_geometry() == EditCode::Ok && content_hash(k) == before);
+      }
       if (in_txn && (n % group == group - 1 || n + 1 == steps)) {
         in_txn = false;
         const EditCode cc = ed.commit();
@@ -477,7 +581,9 @@ template <geom::CoordType C> struct Run {
     }
     UT_CHECK(validate(k, ValidateLevel::Global).ok());
     if (topo) {
-      *topo = topology_hash(k);
+      /* carriers are in frame units, which differ between coordinate types:
+       * compare the structure without positions and geometry columns */
+      *topo = test::structure_hash(k, true);
     }
     structure = test::structure_hash(k);
     return content_hash(k);
@@ -540,7 +646,7 @@ int main()
     PersistentId td, tl, sd;
     const PersistentId hd = run_one<double>(seed, steps, &td, true, ValidateMode::Full, 0, &sd);
     run_one<geom::Lattice>(seed, steps, &tl, true);
-    UT_CHECK(td == tl); /* same topology, IDs and attributes in both coordinate types */
+    UT_CHECK(td == tl); /* same topology, IDs and attributes in both coordinate types (geometry aside) */
     {
       litestl::task::ScopedBandCount scope(4);
       PersistentId t4;
@@ -569,24 +675,28 @@ int main()
         printf("structure golden %llu: {0x%016llxull, 0x%016llxull}\n", (unsigned long long)seed,
                (unsigned long long)sd.lo, (unsigned long long)sd.hi);
       }
-      /* re-pinned for P4a W5: the geometry store's PoolRef Geom columns,
-       * .e.range, .e.geom_flags and .g.curve_tol (format 3); the structure
-       * goldens below are unchanged, so nothing else changed. Earlier, P3b
-       * W9: the step mix gained imprint, unimprint, holes, weld and compact
-       * (and §3.1: region rebuilds advance the generations of shells and
-       * regions that changed). Seeds 2 and 3 end with hinted rooms, so their
-       * goldens cover region IDs (DEC-017); seed 1 ends with region 0 only. */
-      const PersistentId goldens[3] = {PersistentId{0x530458424ac186a9ull, 0x7ca59d2d57e5d1d1ull},
-                                       PersistentId{0x7cb72ae1e192ca43ull, 0x5d1a3663bcccaeddull},
-                                       PersistentId{0xfacd1364227e0117ull, 0xb8b5e75892a3a346ull}};
+      /* re-pinned for P4a W6: the step mix gained curve steps (arcs,
+       * clothoid wires, clearing, split_edge_at, curved joins), which changes
+       * the random sequence. W5 values, for the record (the geometry store's
+       * columns, structure unchanged): {0x530458424ac186a9, 0x7ca59d2d57e5d1d1},
+       * {0x7cb72ae1e192ca43, 0x5d1a3663bcccaedd}, {0xfacd1364227e0117,
+       * 0xb8b5e75892a3a346}. Earlier, P3b W9: imprint, unimprint, holes, weld
+       * and compact joined the mix (and §3.1: region rebuilds advance the
+       * generations of shells and regions that changed). Seeds 2 and 3 end
+       * with hinted rooms, so their goldens cover region IDs (DEC-017). */
+      const PersistentId goldens[3] = {PersistentId{0x7ce5ffd466d9054bull, 0x670cb9e60e3d5bb2ull},
+                                       PersistentId{0x6c72c409e108ce3bull, 0x65dcb1c54131ecf4ull},
+                                       PersistentId{0xaa60a8a7e5aa9661ull, 0xe6a3903c669fef9aull}};
       UT_CHECK(hd == goldens[seed - 1]);
-      /* the structure hash leaves out the geometry columns: pinned with the
-       * format-2 code before the P4a geometry store, and unchanged by it, it
-       * shows that a content-golden re-pin in P4a W5 changed geometry
-       * columns only (plan P4a §5.4) */
-      const PersistentId structure[3] = {PersistentId{0x312bf4c14cd7cc33ull, 0xde5a81cf3970cca5ull},
-                                         PersistentId{0x95af9a0f06132fffull, 0xae2d7fbb428b6b96ull},
-                                         PersistentId{0x6d9b2bccf6f70c48ull, 0xb63b38dcdf26f9e6ull}};
+      /* the structure hash leaves out the geometry columns. Pinned with the
+       * format-2 code and unchanged by the P4a W5 store, it showed that W5's
+       * content re-pin changed geometry columns only (plan P4a §5.4; those
+       * values: {0x312bf4c14cd7cc33, 0xde5a81cf3970cca5}, {0x95af9a0f06132fff,
+       * 0xae2d7fbb428b6b96}, {0x6d9b2bccf6f70c48, 0xb63b38dcdf26f9e6}).
+       * Re-pinned for W6: the curve steps change the random sequence. */
+      const PersistentId structure[3] = {PersistentId{0x87019c85d025cd98ull, 0x00cdbd6afe4b6663ull},
+                                         PersistentId{0x918bc20da10b0c36ull, 0xadab290c82009bbcull},
+                                         PersistentId{0x42aeec0fb1eab127ull, 0x3117e834d4be2d8eull}};
       UT_CHECK(sd == structure[seed - 1]);
     }
   }

@@ -43,6 +43,8 @@ add_library(ubertopo_topo STATIC
   topo/io.cc
   topo/io_legacy.cc
   topo/geom_store.cc
+  topo/curve_geom.cc
+  topo/validate_curves.cc
   topo/edit/editor.cc
 )
 target_link_libraries(ubertopo_topo PUBLIC ubertopo_curves ubertopo_geom ubertopo_ident attr util)

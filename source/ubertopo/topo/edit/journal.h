@@ -19,7 +19,9 @@
  * changed. A new transaction after undos drops the redo tail.
  *
  * JournalRoots registers everything the journal holds with a PoolStore
- * (DEC-015): captured row bytes, barrier snapshots and SetAttr payloads. */
+ * (DEC-015): captured row bytes, barrier snapshots, SetAttr payloads and
+ * SetEdgeCurve payloads (plan P4a §5.2). A barrier snapshot's own store is
+ * not used: undo keeps the live store. */
 
 #include <cstdint>
 #include <memory>
@@ -176,12 +178,23 @@ public:
   void visit_refs(litestl::attr::RefVisitor &v) const override
   {
     each([&](const litestl::attr::ColumnBase &col, uint8_t *bytes) { col.visit_elem_refs(bytes, v); },
-         [&](litestl::attr::ColumnBase &col) { col.visit_refs(v); });
+         [&](litestl::attr::ColumnBase &col) { col.visit_refs(v); },
+         [&](uint32_t *pool_slot) {
+           const litestl::attr::PoolRef r{pool_slot[0], pool_slot[1]};
+           if (!r.none()) {
+             v.visit(r, 1);
+           }
+         });
   }
   void remap_refs(const litestl::attr::RefRemap &m) override
   {
     each([&](const litestl::attr::ColumnBase &col, uint8_t *bytes) { col.remap_elem_refs(bytes, m); },
-         [&](litestl::attr::ColumnBase &col) { col.remap_refs(m); });
+         [&](litestl::attr::ColumnBase &col) { col.remap_refs(m); },
+         [&](uint32_t *pool_slot) {
+           const litestl::attr::PoolRef r = m.map(litestl::attr::PoolRef{pool_slot[0], pool_slot[1]});
+           pool_slot[0] = r.pool;
+           pool_slot[1] = r.slot;
+         });
   }
 
 private:
@@ -192,7 +205,7 @@ private:
     return c && &c->type() == rc.type ? c : nullptr;
   }
 
-  template <typename ElemFn, typename ColFn> void each(ElemFn &&elem, ColFn &&whole) const
+  template <typename ElemFn, typename ColFn, typename RefFn> void each(ElemFn &&elem, ColFn &&whole, RefFn &&raw) const
   {
     for (auto *list : {&j_.done_, &j_.undone_}) {
       for (Txn<C> &t : *list) {
@@ -204,6 +217,10 @@ private:
           }
         }
         for (OpRecord<C> &op : t.ops) {
+          if (op.kind == OpKind::SetEdgeCurve && op.u.size() >= 3) {
+            raw(op.u.data() + 1);
+            continue;
+          }
           if (op.kind != OpKind::SetAttr || op.u.size() < 3 || op.u[0] >= kGroupCount) {
             continue;
           }
