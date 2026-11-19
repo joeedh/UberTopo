@@ -22,7 +22,9 @@ add_library(ubertopo_curves STATIC
   curves/offset.cc
   curves/alignment.cc
   curves/catenary.cc
+  curves/pcurve.cc
   curves/polyline.cc
+  curves/road.cc
   curves/approx.cc
 )
 target_include_directories(ubertopo_curves PUBLIC ${PROJECT_SOURCE_DIR}/source)

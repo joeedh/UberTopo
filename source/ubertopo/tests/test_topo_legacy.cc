@@ -5,6 +5,7 @@
  * geometry refs other than NONE are refused. */
 
 #include <cstdio>
+#include <cstring>
 #include <string_view>
 #include <vector>
 
@@ -14,6 +15,7 @@
 #include "ubertopo/topo/validate.h"
 #include "ut_test.h"
 
+#include "data/utcx_f3.inc"
 #include "data/utcx_legacy.inc"
 
 using namespace ubertopo;
@@ -135,6 +137,65 @@ template <geom::CoordType C> void one(const test::LegacyFixture &f)
   }
 }
 
+/* Format 3 (plan P4b §2): streams written by the P4a code read into format-4
+ * complexes with the same structure, validation result and geometry (four
+ * curved edges, eight entries); .g.skeleton_tol takes its default; they write
+ * back as format 4 and round-trip; a wrong trailing hash, a hash over all of
+ * today's pools, and a flipped byte are refused. */
+template <geom::CoordType C> void one_f3(const test::LegacyFixture &f)
+{
+  const std::vector<uint8_t> in(f.bytes, f.bytes + f.size);
+  UT_CHECK(in[4] == 3);
+  Complex<C> k;
+  const char *err = nullptr;
+  UT_CHECK(read_bytes(k, in, &err));
+  if (err) {
+    fprintf(stderr, "%s: %s\n", f.name, err);
+    return;
+  }
+  const auto sh = test::structure_hash(k);
+  UT_CHECK(sh.lo == f.structure_lo && sh.hi == f.structure_hi);
+  UT_CHECK(validate(k, ValidateLevel::Combinatorial).total == f.combinatorial_issues);
+  UT_CHECK(validate(k, ValidateLevel::Global).total == f.global_issues);
+  UT_CHECK(k.frozen() && k.geom.live_count() == 8);
+  uint32_t curved = 0;
+  for (uint32_t e = 0; e < k.edges.capacity(); e++) {
+    curved += k.edges.live(e) && !k.edges.template get<".e.curve">()[e].none() ? 1 : 0;
+  }
+  UT_CHECK(curved == 4);
+  UT_CHECK(k.global.template get<".g.curve_tol">()[0] == 0x1p-30);
+  UT_CHECK(k.global.template get<".g.skeleton_tol">()[0] == 0x1p-6);
+  /* the old content hash is not the new one: the pool count and the global
+   * group differ */
+  const auto ch = content_hash(k);
+  UT_CHECK(!(ch.lo == f.content_lo && ch.hi == f.content_hi));
+  const auto th = topology_hash(k);
+  UT_CHECK(!(th.lo == f.topology_lo && th.hi == f.topology_hi));
+  /* format 4 round trip, byte-stable */
+  const std::vector<uint8_t> b4 = bytes_of(k);
+  UT_CHECK(b4[4] == kComplexFormat && kComplexFormat == 4);
+  Complex<C> back;
+  UT_CHECK(read_bytes(back, b4, &err) && content_hash(back) == ch && bytes_of(back) == b4);
+  UT_CHECK(back.frozen() && test::structure_hash(back) == sh);
+  /* refusals */
+  {
+    std::vector<uint8_t> bad = in;
+    bad[bad.size() - 3] ^= 1; /* the trailing hash */
+    Complex<C> x;
+    UT_CHECK(!read_bytes(x, bad, &err) && std::string_view(err).find("hash") != std::string_view::npos);
+    bad = in;
+    bad[bad.size() / 2] ^= 0x40;
+    UT_CHECK(!read_bytes(x, bad, &err));
+    /* the trailing hash replaced by today's hash of the same complex: a
+     * format-3 reader must not accept the format-4 hash */
+    bad = in;
+    const auto now = content_hash(k);
+    std::memcpy(bad.data() + bad.size() - 16, &now.lo, 8);
+    std::memcpy(bad.data() + bad.size() - 8, &now.hi, 8);
+    UT_CHECK(!read_bytes(x, bad, &err));
+  }
+}
+
 } // namespace
 
 int main()
@@ -146,6 +207,14 @@ int main()
     }
     else {
       one<geom::Lattice>(*f);
+    }
+  }
+  for (const test::LegacyFixture *f : kF3Fixtures) {
+    if (std::string_view(f->coord) == "f64") {
+      one_f3<double>(*f);
+    }
+    else {
+      one_f3<geom::Lattice>(*f);
     }
   }
   return ut_test_end();

@@ -6,7 +6,8 @@
  *
  * The structure hash covers the header fields, the generation floors and
  * every group with the geometry columns left out (.e.curve, .c.pcurve,
- * .f.surface and the P4a columns .e.range, .e.geom_flags, .g.curve_tol),
+ * .f.surface, the P4a columns .e.range, .e.geom_flags, .g.curve_tol, and
+ * P4b's .g.skeleton_tol),
  * so the same code computes the same value before and after the switch. It
  * hashes the kept columns itself: AttrGroup's filtered hash also covers the
  * group's builtin count, which the switch changes. */
@@ -34,7 +35,7 @@ struct LegacyFixture {
 inline bool is_geometry_column(std::string_view n)
 {
   return n == ".e.curve" || n == ".c.pcurve" || n == ".f.surface" || n == ".e.range" || n == ".e.geom_flags" ||
-         n == ".g.curve_tol";
+         n == ".g.curve_tol" || n == ".g.skeleton_tol";
 }
 
 /* @p coord_free leaves out the coordinate key and "pos" too: equal for the

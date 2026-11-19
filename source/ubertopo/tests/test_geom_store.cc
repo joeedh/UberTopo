@@ -16,6 +16,8 @@
 #include "ubertopo/curves/bspline.h"
 #include "ubertopo/curves/catenary.h"
 #include "ubertopo/curves/cesaro.h"
+#include "ubertopo/curves/pcurve.h"
+#include "ubertopo/curves/road.h"
 #include "ubertopo/topo/freeze.h"
 #include "ubertopo/topo/geom_store.h"
 #include "ubertopo/topo/io.h"
@@ -78,6 +80,33 @@ PoolRef add_bspline(K &k, int dim)
   BSpline b;
   UT_CHECK(BSpline::make(dim, 3, knots, ctrl, attr::kNoRef, 0, 0, 0, b) == nullptr);
   return k.geom.intern<BSplinePool>(pool_id(bspline_kind()), std::move(b));
+}
+
+PoolRef add_graph(K &k)
+{
+  Graph2 g;
+  UT_CHECK(Graph2::make(Fn1D::linear(1.0, 2.0, 0, 80), g) == nullptr);
+  return k.geom.intern<Graph2Pool>(pool_id(graph2_kind()), std::move(g));
+}
+
+PoolRef add_segment(K &k)
+{
+  Segment2 g;
+  UT_CHECK(Segment2::make(0, 1, 0, 3.5, g) == nullptr);
+  return k.geom.intern<Segment2Pool>(pool_id(segment2_kind()), std::move(g));
+}
+
+/* a road3 whose reference is @p ref, unvalidated (make refuses a reference
+ * that isn't a cesaro2, so the accept rule is tested on a raw entry) */
+PoolRef add_road_raw(K &k, PoolRef ref)
+{
+  Road3 d;
+  d.reference = ref;
+  for (double b : {-3.5, 0.0, 3.5}) {
+    d.borders.append(Fn1D::constant(b, 0, 80));
+    d.heights.append(Fn1D::constant(10.0, 0, 80));
+  }
+  return k.geom.intern<Road3Pool>(pool_id(road3_kind()), std::move(d));
 }
 
 bool collect(K &k, attr::RefRoot *extra = nullptr)
@@ -175,6 +204,48 @@ void test_accept()
   UT_CHECK(!collect(k));
   k.faces.get<".f.surface">().set(0, attr::kNoRef);
   UT_CHECK(collect(k));
+  /* P4b (plan §4.1): .c.pcurve takes graph2 and segment2, .f.surface takes
+   * road3, and neither kind is an edge carrier */
+  auto &pc = k.coedges.get<".c.pcurve">();
+  auto &sf = k.faces.get<".f.surface">();
+  pc.set(0, add_graph(k));
+  pc.set(1, add_segment(k));
+  sf.set(0, add_road_raw(k, add_cesaro(k)));
+  UT_CHECK(collect(k) && k.geom.live_count() == 5); /* bspline, graph, segment, road, its cesaro */
+  sf.set(1, add_graph(k));
+  UT_CHECK(!collect(k));
+  sf.set(1, attr::kNoRef);
+  for (PoolRef bad : {add_graph(k), add_segment(k), add_road_raw(k, add_cesaro(k))}) {
+    curve.set(1, bad);
+    UT_CHECK(!collect(k));
+  }
+  curve.set(1, attr::kNoRef);
+  pc.set(2, add_road_raw(k, add_cesaro(k)));
+  UT_CHECK(!collect(k));
+  pc.set(2, attr::kNoRef);
+  UT_CHECK(collect(k));
+  /* inner refs: a road3 names a cesaro2 only; a bspline's source is never a
+   * pcurve or surface */
+  sf.set(1, add_road_raw(k, add_alignment(k, add_cesaro(k))));
+  UT_CHECK(!collect(k));
+  sf.set(1, attr::kNoRef);
+  UT_CHECK(collect(k));
+  {
+    util::Vector<double, 16> knots;
+    for (double x : {0.0, 0.0, 1.0, 1.0}) {
+      knots.append(x);
+    }
+    util::Vector<double, 48> ctrl;
+    for (double x : {0.0, 0.0, 0.0, 1.0, 2.0, 3.0}) {
+      ctrl.append(x);
+    }
+    BSpline b;
+    UT_CHECK(BSpline::make(3, 1, knots, ctrl, add_graph(k), 0, 80, 0.5, b) == nullptr);
+    curve.set(1, k.geom.intern<BSplinePool>(pool_id(bspline_kind()), std::move(b)));
+    UT_CHECK(!collect(k));
+    curve.set(1, attr::kNoRef);
+    UT_CHECK(collect(k));
+  }
 }
 
 void test_hashes_and_io()

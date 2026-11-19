@@ -154,11 +154,14 @@ static void test_golden()
   grid(b);
   const PersistentId ha = topology_hash(a), hb = topology_hash(b);
   const PersistentId sa = test::structure_hash(a);
-  /* re-pinned for P4a W5 (the geometry store's columns; the structure golden
-   * below is unchanged, so nothing else changed). Earlier, for DEC-017
+  /* re-pinned for P4b W1 (the global group gained .g.skeleton_tol, which the
+   * topology hash leaves out but whose builtin count it still sees; the
+   * structure golden below is unchanged). P4a W5 value: {0x474f0ef45988d192,
+   * 0x4e944de540b23ca0}. Re-pinned for P4a W5 (the geometry store's columns;
+   * the structure golden below is unchanged, so nothing else changed). Earlier, for DEC-017
    * (hinted region IDs from the hint alone): only the region IDs, .f.region,
    * .s.region and .r.shell changed (P3b C8) */
-  const PersistentId golden = {0x474f0ef45988d192ULL, 0x4e944de540b23ca0ULL};
+  const PersistentId golden = {0x2a499b7b7287dea1ULL, 0x2505140161e20813ULL};
   if (getenv("LITESTL_PRINT_GOLDENS")) {
     printf("  topology golden: {0x%016" PRIx64 "ULL, 0x%016" PRIx64 "ULL}\n", ha.lo, ha.hi);
     printf("  structure golden: {0x%016" PRIx64 "ULL, 0x%016" PRIx64 "ULL}\n", sa.lo, sa.hi);

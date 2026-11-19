@@ -649,3 +649,25 @@ each skeleton segment against the face's T(f). Its endpoints are unchanged.
 **The table.** One `SkeletonTable` per validation pass or editor operation: a map from
 (edge, k) to an id, filled on first use, so every face that names an edge sees the
 same ids.
+
+## 13. Implementation notes (changes made while building)
+
+**W1:**
+- **`graph2` and `segment2` were implemented in full**, not as stubs: they are small,
+  and their tests (`test_curves_pcurve`) come with them. `road3` has its definition,
+  pool protocol and structural checks; its evaluator, order and fold checks are W3
+  (the kind's `make_surface` returns null until then).
+- **Surface interface.** `curves/surface.h`: `SurfaceEval` and `SurfaceKindOps`, a
+  `KindOps` whose `as_surface()` returns itself and whose `dim()` is 0. No RTTI.
+- **The topology hash leaves out `.g.skeleton_tol`.** It is in frame units, so a
+  `double` and a `Lattice` build of one model would otherwise differ there (as they
+  would on positions). The DEC-014 topology golden still changed, because the
+  group's filtered hash covers its builtin count; it was re-pinned with its
+  structure golden unchanged, as in P4a W5.
+- **Goldens re-pinned:** `test_edit_random` content (structure goldens unchanged) and
+  the DEC-014 topology golden.
+- **litestl:** `PoolStore::hash_into(h, map, pool_limit)` returns false while a pool
+  past the limit has a reachable entry. Tested in `test_attr_pool`.
+- **Mutation check:** 16 W1 mutants, all killed (the pool-limit guard only after
+  `test_attr_pool` gained its test).
+

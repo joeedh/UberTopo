@@ -19,7 +19,11 @@ namespace {
 /* the groups in stream order, ref columns through the canonical map (raw
  * ref values without one) */
 template <geom::CoordType C>
-void hash_groups(const Complex<C> &k, ident::Hasher128 &h, bool with_pos, const attr::RefRemap *map)
+void hash_groups(const Complex<C> &k,
+                 ident::Hasher128 &h,
+                 bool with_pos,
+                 const attr::RefRemap *map,
+                 const attr::AttrGroup *global = nullptr)
 {
   auto all = [](std::string_view, const attr::ColumnBase &) { return true; };
   auto no_pos = [](std::string_view name, const attr::ColumnBase &) { return name != "pos"; };
@@ -33,10 +37,22 @@ void hash_groups(const Complex<C> &k, ident::Hasher128 &h, bool with_pos, const 
   };
   one(k.verts.group(), !with_pos);
   for (const attr::AttrGroup *g : {&k.edges.group(), &k.coedges.group(), &k.loops.group(), &k.faces.group(),
-                                   &k.faces.sides().group(), &k.shells.group(), &k.regions.group(),
-                                   &k.global.group()})
+                                   &k.faces.sides().group(), &k.shells.group(), &k.regions.group()})
   {
     one(*g, false);
+  }
+  /* the topology hash also leaves out .g.skeleton_tol: in frame units, like
+   * positions, so double and Lattice builds of one model differ there */
+  const attr::AttrGroup &gg = global ? *global : k.global.group();
+  auto no_tol = [](std::string_view name, const attr::ColumnBase &) { return name != ".g.skeleton_tol"; };
+  if (with_pos) {
+    one(gg, false);
+  }
+  else if (map) {
+    gg.hash_into(h, no_tol, *map);
+  }
+  else {
+    gg.hash_into(h, no_tol);
   }
 }
 
@@ -61,6 +77,29 @@ template <geom::CoordType C> void hash_body(const Complex<C> &k, ident::Hasher12
     }
   }
   hash_floors(k, h);
+}
+
+/* The content hash a format-3 writer computed for s (plan P4b §2): the
+ * format-3 global group g3 in place of s's, and the store hashed over its
+ * first kFormat3Pools pools. False if the refs don't validate or a later
+ * pool has a reachable entry. */
+template <geom::CoordType C> bool format3_content_hash(const Complex<C> &s, const attr::AttrGroup &g3, ident::PersistentId &out)
+{
+  ident::Hasher128 h(ident::DomainTag::Content);
+  hash_frame(s, h);
+  h.boolean(s.regions_dirty);
+  const GeomRoots<C> roots(s);
+  attr::PoolStore::CanonicalMap map;
+  if (!s.geom.canonical_map(roots.roots(), map)) {
+    return false;
+  }
+  hash_groups(s, h, true, &map, &g3);
+  if (!s.geom.hash_into(h, map, kFormat3Pools)) {
+    return false;
+  }
+  hash_floors(s, h);
+  out = h.finish();
+  return true;
 }
 
 } // namespace
@@ -171,15 +210,18 @@ template <geom::CoordType C> bool read(Complex<C> &k, litestl::io::ByteReader &r
   if (!s.geom.read(r, {}, &gerr)) {
     return fail(gerr ? gerr : "geometry store read failed");
   }
+  /* format 3: the global group without .g.skeleton_tol, migrated below */
+  attr::TypedGroup<Format3GlobalSchema> g3;
+  attr::AttrGroup &global = format == 3 ? g3.group() : s.global.group();
   if (!s.verts.group().read(r, {}, &gerr) || !s.edges.group().read(r, {}, &gerr) ||
       !s.coedges.group().read(r, {}, &gerr) || !s.loops.group().read(r, {}, &gerr) ||
       !s.faces.group().read(r, {}, &gerr) || !s.faces.sides().group().read(r, {}, &gerr) ||
       !s.shells.group().read(r, {}, &gerr) || !s.regions.group().read(r, {}, &gerr) ||
-      !s.global.group().read(r, {}, &gerr))
+      !global.read(r, {}, &gerr))
   {
     return fail(gerr ? gerr : "group read failed");
   }
-  if (s.faces.sides().size() != 2 * s.faces.capacity() || s.global.size() != 1) {
+  if (s.faces.sides().size() != 2 * s.faces.capacity() || global.size() != 1) {
     return fail("face side or global group size mismatch");
   }
   set_floors(s, floors);
@@ -199,7 +241,17 @@ template <geom::CoordType C> bool read(Complex<C> &k, litestl::io::ByteReader &r
   ident::PersistentId h;
   h.lo = r.u64();
   h.hi = r.u64();
-  if (r.failed() || !(h == content_hash(s))) {
+  if (format == 3) {
+    ident::PersistentId want;
+    if (r.failed() || !format3_content_hash(s, global, want) || !(h == want)) {
+      return fail("content hash mismatch");
+    }
+    auto keep_all = [](std::string_view, const attr::ColumnBase &) { return true; };
+    if (!s.global.group().migrate_from(global, keep_all, &gerr) || s.global.size() != 1) {
+      return fail(gerr ? gerr : "format 3 migration failed");
+    }
+  }
+  else if (r.failed() || !(h == content_hash(s))) {
     return fail("content hash mismatch");
   }
   rebuild_allocators(s);

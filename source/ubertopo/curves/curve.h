@@ -1,6 +1,6 @@
 #pragma once
 
-/* The curve kind interface (plan P4a §3.2).
+/* The curve kind interface (plan P4a §3.2; surfaces: surface.h, plan P4b).
  *
  * A curve kind is a pool value type (the definition, interned in a
  * PoolStore) plus a KindOps object that builds an evaluator for an entry.
@@ -71,6 +71,8 @@ public:
 using Curve2 = CurveEval<2>;
 using Curve3 = CurveEval<3>;
 
+class SurfaceKindOps; /* surface.h */
+
 class KindOps {
 public:
   virtual ~KindOps() = default;
@@ -86,6 +88,11 @@ public:
   virtual util::UniquePtr<Curve3> make3(const attr::PoolStore &, attr::PoolRef) const
   {
     return {};
+  }
+  /** This kind's surface interface, or null for a curve kind. */
+  virtual const SurfaceKindOps *as_surface() const
+  {
+    return nullptr;
   }
 };
 

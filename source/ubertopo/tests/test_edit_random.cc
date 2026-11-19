@@ -675,7 +675,12 @@ int main()
         printf("structure golden %llu: {0x%016llxull, 0x%016llxull}\n", (unsigned long long)seed,
                (unsigned long long)sd.lo, (unsigned long long)sd.hi);
       }
-      /* re-pinned for P4a W6: the step mix gained curve steps (arcs,
+      /* re-pinned for P4b W1: the store gained three pools (the hash covers
+       * the pool count) and the global group .g.skeleton_tol; the structure
+       * goldens below are unchanged, so nothing else changed. P4a W6 values:
+       * {0x7ce5ffd466d9054b, 0x670cb9e60e3d5bb2}, {0x6c72c409e108ce3b,
+       * 0x65dcb1c54131ecf4}, {0xaa60a8a7e5aa9661, 0xe6a3903c669fef9a}.
+       * Re-pinned for P4a W6: the step mix gained curve steps (arcs,
        * clothoid wires, clearing, split_edge_at, curved joins), which changes
        * the random sequence. W5 values, for the record (the geometry store's
        * columns, structure unchanged): {0x530458424ac186a9, 0x7ca59d2d57e5d1d1},
@@ -684,9 +689,9 @@ int main()
        * and compact joined the mix (and §3.1: region rebuilds advance the
        * generations of shells and regions that changed). Seeds 2 and 3 end
        * with hinted rooms, so their goldens cover region IDs (DEC-017). */
-      const PersistentId goldens[3] = {PersistentId{0x7ce5ffd466d9054bull, 0x670cb9e60e3d5bb2ull},
-                                       PersistentId{0x6c72c409e108ce3bull, 0x65dcb1c54131ecf4ull},
-                                       PersistentId{0xaa60a8a7e5aa9661ull, 0xe6a3903c669fef9aull}};
+      const PersistentId goldens[3] = {PersistentId{0xf518e2197d0f31a6ull, 0x7c87c672a07242caull},
+                                       PersistentId{0x6a85b05b76d3d9e6ull, 0xa6df0ee200717093ull},
+                                       PersistentId{0xcf6cdd7508132d31ull, 0x013e813727790612ull}};
       UT_CHECK(hd == goldens[seed - 1]);
       /* the structure hash leaves out the geometry columns. Pinned with the
        * format-2 code and unchanged by the P4a W5 store, it showed that W5's

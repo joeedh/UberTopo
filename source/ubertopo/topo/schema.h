@@ -96,6 +96,16 @@ struct CurveTol : AttrDef<".g.curve_tol", attr::Column<double>, ColumnFlags::Top
   }
 };
 
+/** The flattening tolerance of curved edges in the refined skeleton (plan P4b
+ * §4.3), in frame units: metres for float types, quanta for Lattice, where
+ * generators must set it (OI-P4b-5). */
+struct SkeletonTol : AttrDef<".g.skeleton_tol", attr::Column<double>, ColumnFlags::Topo> {
+  static double default_value()
+  {
+    return 0x1p-6;
+  }
+};
+
 using Id = AttrDef<".id", attr::Column<ident::PersistentId>, ColumnFlags::Topo>;
 using Gen = AttrDef<".gen", attr::Column<uint32_t>, ColumnFlags::Topo>;
 using Live = AttrDef<".live", attr::BoolColumn, ColumnFlags::Topo>;
@@ -161,7 +171,7 @@ using RegionSchema = Schema<Link<".r.shell">, Flags8<".r.flags">, Id, Gen, Live>
  * complex was built with the projectable-faces opt-in (amendment A1); the
  * validator rejects projected faces without it. */
 using AllowsProjectable = AttrDef<".g.allows_projectable", attr::BoolColumn, ColumnFlags::Topo>;
-using GlobalSchema = Schema<AllowsProjectable, CurveTol>;
+using GlobalSchema = Schema<AllowsProjectable, CurveTol, SkeletonTol>;
 
 /** Registers every UberTopo column type with litestl's registry (needed
  * before reading a stream in a process that hasn't created such columns). */

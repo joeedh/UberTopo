@@ -7,7 +7,9 @@
 #include "ubertopo/curves/catenary.h"
 #include "ubertopo/curves/cesaro.h"
 #include "ubertopo/curves/offset.h"
+#include "ubertopo/curves/pcurve.h"
 #include "ubertopo/curves/polyline.h"
+#include "ubertopo/curves/road.h"
 
 namespace ubertopo::topo {
 
@@ -27,10 +29,13 @@ bool accept_geom_ref(const attr::PoolStore &s, const attr::RefSite &site, attr::
         const BSpline *b = k == &bspline_kind() ? s.try_get<BSplinePool>(r) : nullptr;
         return b && b->dim == 3;
       }
-      if ((site.a == kRootCoedges && site.b == attr::TypedGroup<CoedgeSchema>::slot<".c.pcurve">()) ||
-          (site.a == kRootFaces && site.b == attr::TypedGroup<FaceSchema>::slot<".f.surface">()))
-      {
-        return false; /* no pcurves or surfaces in P4a */
+      if (site.a == kRootCoedges && site.b == attr::TypedGroup<CoedgeSchema>::slot<".c.pcurve">()) {
+        /* which of the two fits the edge (curved or straight) is the
+         * validator's PcurveKind (plan P4b §4.1) */
+        return k == &graph2_kind() || k == &segment2_kind();
+      }
+      if (site.a == kRootFaces && site.b == attr::TypedGroup<FaceSchema>::slot<".f.surface">()) {
+        return k == &road3_kind();
       }
       return true;
     case attr::RefSite::Inner: {
@@ -42,7 +47,14 @@ bool accept_geom_ref(const attr::PoolStore &s, const attr::RefSite &site, attr::
       if (holder == &alignment3_kind()) {
         return k == &cesaro2_kind() || k == &offset2_kind();
       }
-      return true; /* a bspline's source: any curve kind */
+      if (holder == &road3_kind()) {
+        return k == &cesaro2_kind();
+      }
+      if (holder == &bspline_kind()) {
+        /* a bspline's source: any curve kind except pcurves and surfaces */
+        return k != &graph2_kind() && k != &segment2_kind() && k != &road3_kind();
+      }
+      return false; /* no other kind holds refs */
     }
     default:
       return true;

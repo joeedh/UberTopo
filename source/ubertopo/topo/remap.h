@@ -90,6 +90,7 @@ UT_REMAP(Flags8<".r.flags">, None)
 /* global */
 UT_REMAP(AllowsProjectable, None)
 UT_REMAP(CurveTol, None)
+UT_REMAP(SkeletonTol, None)
 #undef UT_REMAP
 
 template <typename S> struct SchemaCovered;

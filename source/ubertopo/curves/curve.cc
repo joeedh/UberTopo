@@ -6,7 +6,10 @@
 #include "ubertopo/curves/catenary.h"
 #include "ubertopo/curves/cesaro.h"
 #include "ubertopo/curves/offset.h"
+#include "ubertopo/curves/pcurve.h"
 #include "ubertopo/curves/polyline.h"
+#include "ubertopo/curves/road.h"
+#include "ubertopo/curves/surface.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -20,7 +23,9 @@ namespace ubertopo::curves {
 util::span<const KindOps *const> kinds()
 {
   static const KindOps *const list[] = {&cesaro2_kind(),   &offset2_kind(),   &alignment3_kind(),
-                                        &catenary3_kind(), &polyline3_kind(), &bspline_kind()};
+                                        &catenary3_kind(), &polyline3_kind(), &bspline_kind(),
+                                        /* P4b */
+                                        &graph2_kind(),    &segment2_kind(),  &road3_kind()};
   return util::span<const KindOps *const>(list, sizeof(list) / sizeof(list[0]));
 }
 
@@ -69,6 +74,19 @@ util::UniquePtr<Curve2> curve2(const attr::PoolStore &s, attr::PoolRef r)
     return {};
   }
   return k->make2(s, r);
+}
+
+const SurfaceKindOps *surface_kind_of(const attr::PoolStore &s, attr::PoolRef r)
+{
+  const KindOps *k = kind_of(r);
+  const SurfaceKindOps *sk = k ? k->as_surface() : nullptr;
+  return sk && s.live(r) && sk->valid(s, r) ? sk : nullptr;
+}
+
+util::UniquePtr<SurfaceEval> surface(const attr::PoolStore &s, attr::PoolRef r)
+{
+  const SurfaceKindOps *sk = surface_kind_of(s, r);
+  return sk ? sk->make_surface(s, r) : util::UniquePtr<SurfaceEval>();
 }
 
 util::UniquePtr<Curve3> curve3(const attr::PoolStore &s, attr::PoolRef r)

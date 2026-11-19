@@ -100,6 +100,9 @@ using LegacyFaceSchema = Schema<Link<".f.l">,
 
 using LegacyGlobalSchema = Schema<AllowsProjectable>;
 
+/* format 3's global group: no .g.skeleton_tol (plan P4b §2) */
+using Format3GlobalSchema = Schema<AllowsProjectable, CurveTol>;
+
 struct LegacyGroups {
   attr::TypedGroup<LegacyEdgeSchema> edges;
   attr::TypedGroup<LegacyCoedgeSchema> coedges;
