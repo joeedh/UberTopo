@@ -2,7 +2,8 @@
  * frozen; format 2 with face and edge floors 3 and 5), with their content,
  * topology and structure hashes and validation issue counts, written by the
  * format-2 code at b93f024 (plan P4a W5, before the geometry store), clang and
- * gcc byte-identical. The generator was a one-off program and is gone; these
+ * gcc byte-identical. The structure hashes were recomputed with the format-2
+ * code when structure_hash stopped depending on the builtin column count. The generator was a one-off program and is gone; these
  * bytes are the record of the old format. Do not edit or regenerate. */
 
 static const uint8_t kLegacy0[] = {
@@ -1507,7 +1508,7 @@ static const uint8_t kLegacy0[] = {
   99,90,5,128,230,236,244,238,188,
 };
 static const ubertopo::test::LegacyFixture kLegacyFixture0 = {"city_f1_double", "f64", 1, kLegacy0, sizeof(kLegacy0),
-  0x63079f3b2c2dc978ull, 0xbceef4ece680055aull, 0xd7cb5625255e9a02ull, 0x664dcb12d24b8a6bull, 0x64c6374370c34ef9ull, 0xcd34739729f80b88ull, 0, 0};
+  0x63079f3b2c2dc978ull, 0xbceef4ece680055aull, 0xd7cb5625255e9a02ull, 0x664dcb12d24b8a6bull, 0x657eea2f195e13ebull, 0x5663868c047a6c51ull, 0, 0};
 
 static const uint8_t kLegacy1[] = {
   85,84,67,88,2,0,0,0,3,0,0,0,0,0,0,0,102,54,52,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3012,7 +3013,7 @@ static const uint8_t kLegacy1[] = {
   148,158,225,119,251,
 };
 static const ubertopo::test::LegacyFixture kLegacyFixture1 = {"city_f2_double", "f64", 2, kLegacy1, sizeof(kLegacy1),
-  0x0a27292599d02b24ull, 0xfb77e19e941ee74cull, 0x2e3c97fee511ebb4ull, 0xc5ce91d92bdc4879ull, 0x609b4b20c3a44d27ull, 0x56c71658077532ecull, 0, 0};
+  0x0a27292599d02b24ull, 0xfb77e19e941ee74cull, 0x2e3c97fee511ebb4ull, 0xc5ce91d92bdc4879ull, 0x11f1560c20d49d4dull, 0x72a32f62ecd71fe9ull, 0, 0};
 
 static const uint8_t kLegacy2[] = {
   85,84,67,88,1,0,0,0,3,0,0,0,0,0,0,0,108,97,116,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -4516,7 +4517,7 @@ static const uint8_t kLegacy2[] = {
   245,82,96,21,123,106,234,66,123,
 };
 static const ubertopo::test::LegacyFixture kLegacyFixture2 = {"city_f1_lattice", "lat", 1, kLegacy2, sizeof(kLegacy2),
-  0xf508944ef1a1b75dull, 0x7b42ea6a7b156052ull, 0xd7cb5625255e9a02ull, 0x664dcb12d24b8a6bull, 0xeafa8df25f1e83d1ull, 0xe78b6deb4f1f3fe0ull, 0, 0};
+  0xf508944ef1a1b75dull, 0x7b42ea6a7b156052ull, 0xd7cb5625255e9a02ull, 0x664dcb12d24b8a6bull, 0x73fd53dc866ff9e5ull, 0x19a85c49d732453full, 0, 0};
 
 static const uint8_t kLegacy3[] = {
   85,84,67,88,2,0,0,0,3,0,0,0,0,0,0,0,108,97,116,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -6021,7 +6022,7 @@ static const uint8_t kLegacy3[] = {
   26,246,38,1,98,
 };
 static const ubertopo::test::LegacyFixture kLegacyFixture3 = {"city_f2_lattice", "lat", 2, kLegacy3, sizeof(kLegacy3),
-  0x8d3c8cd192edaf4aull, 0x620126f61aac41f7ull, 0x2e3c97fee511ebb4ull, 0xc5ce91d92bdc4879ull, 0xbb330e63a7a1ff7full, 0x5a55d22227cf1d09ull, 0, 0};
+  0x8d3c8cd192edaf4aull, 0x620126f61aac41f7ull, 0x2e3c97fee511ebb4ull, 0xc5ce91d92bdc4879ull, 0x39bfc6d9e3ef4dd9ull, 0x57bb9b79f79102fcull, 0, 0};
 
 static const ubertopo::test::LegacyFixture *const kLegacyFixtures[] = {
   &kLegacyFixture0, &kLegacyFixture1, &kLegacyFixture2, &kLegacyFixture3};

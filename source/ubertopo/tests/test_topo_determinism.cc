@@ -168,7 +168,7 @@ static void test_golden()
     UT_CHECK(ha == golden);
     /* pinned before the P4a geometry store, which must not change it (the
      * structure hash leaves out the geometry columns; plan P4a §5.4) */
-    UT_CHECK(sa == (PersistentId{0x2034fcac11721f96ULL, 0x8000930c6a9d8b27ULL}));
+    UT_CHECK(sa == (PersistentId{0x08c3729602993f1dULL, 0x252fa539b22a8e15ULL}));
   }
   UT_CHECK(ha == hb);
 }

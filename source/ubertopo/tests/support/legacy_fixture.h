@@ -7,7 +7,9 @@
  * The structure hash covers the header fields, the generation floors and
  * every group with the geometry columns left out (.e.curve, .c.pcurve,
  * .f.surface and the P4a columns .e.range, .e.geom_flags, .g.curve_tol),
- * so the same code computes the same value before and after the switch. */
+ * so the same code computes the same value before and after the switch. It
+ * hashes the kept columns itself: AttrGroup's filtered hash also covers the
+ * group's builtin count, which the switch changes. */
 
 #include <cstddef>
 #include <cstdint>
@@ -47,12 +49,22 @@ template <geom::CoordType C> ident::PersistentId structure_hash(const topo::Comp
   {
     h.u32(f);
   }
-  auto keep = [](std::string_view n, const litestl::attr::ColumnBase &) { return !is_geometry_column(n); };
   for (const litestl::attr::AttrGroup *g :
        {&k.verts.group(), &k.edges.group(), &k.coedges.group(), &k.loops.group(), &k.faces.group(),
         &k.faces.sides().group(), &k.shells.group(), &k.regions.group(), &k.global.group()})
   {
-    g->hash_into(h, keep);
+    h.u32(g->size());
+    for (int i : g->canonical_order()) {
+      const litestl::attr::ColumnBase &c = g->column(uint32_t(i));
+      using litestl::attr::ColumnFlags;
+      if (is_geometry_column(g->name(uint32_t(i))) || has_flag(c.flags(), ColumnFlags::Temp) ||
+          has_flag(c.flags(), ColumnFlags::Derived))
+      {
+        continue;
+      }
+      h.str(g->name(uint32_t(i)));
+      c.hash_into(h);
+    }
   }
   return h.finish();
 }

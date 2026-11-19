@@ -582,9 +582,9 @@ int main()
        * format-2 code before the P4a geometry store, and unchanged by it, it
        * shows that a content-golden re-pin in P4a W5 changed geometry
        * columns only (plan P4a §5.4) */
-      const PersistentId structure[3] = {PersistentId{0xd8fbd4f7fe768190ull, 0xf4b744a7f5c1d50eull},
-                                         PersistentId{0x579258e7a87dcffbull, 0x9673687d947834c5ull},
-                                         PersistentId{0x0b8d523f5c0952c9ull, 0x451d19bf501dd425ull}};
+      const PersistentId structure[3] = {PersistentId{0x312bf4c14cd7cc33ull, 0xde5a81cf3970cca5ull},
+                                         PersistentId{0x95af9a0f06132fffull, 0xae2d7fbb428b6b96ull},
+                                         PersistentId{0x6d9b2bccf6f70c48ull, 0xb63b38dcdf26f9e6ull}};
       UT_CHECK(sd == structure[seed - 1]);
     }
   }
