@@ -357,3 +357,23 @@ Entry format:
   - Refuse non-finite bounds where they are assembled.
   - In tests, check `std::isfinite` before any comparison with a bound. Every
     comparison against NaN passes vacuously.
+
+## WSL builds crawl when the sources live on /mnt/c
+- **Symptom:** the full matrix took far longer than its CPU work suggested. Windows
+  showed WSL at ~6.5 % CPU. Inside WSL, every compiler process sat in state `D`
+  (waiting on I/O) at ~1.5 % CPU, with a load average of ~2.6 on 16 cores, although
+  `nproc` was 16 and `ninja -j 16` was running.
+- **Cause:** the build trees compiled straight from `/mnt/c/dev/UberTopo`. WSL reaches
+  the Windows drive through a slow file-sharing bridge, and every translation unit
+  opens hundreds of headers (Eigen, litestl), once per configuration.
+- **Fix:** mirror the checkout into the Linux filesystem with
+  `rsync -a --delete --exclude=.git /mnt/c/dev/UberTopo/ ~/src/UberTopo/` before
+  each build, and configure the build trees against the mirror. `-a` keeps
+  modification times, so ninja's incremental rebuilds stay correct. With the mirror,
+  the compilers run at 75–97 % CPU each, and the full 13-configuration matrix runs in
+  about 25 minutes from clean build trees.
+- **Notes:**
+  - Edits are made in the Windows checkout. A build only sees them after a sync, so
+    every build script syncs first.
+  - A mutation runner should edit the mirror, not the checkout.
+  - Adding cores through `.wslconfig` doesn't help an I/O-bound build.
