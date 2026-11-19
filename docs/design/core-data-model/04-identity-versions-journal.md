@@ -176,9 +176,15 @@ Compaction runs at freeze, or when tombstones exceed about 25% of a domain:
 - **Handles:** invalidated by the generation bump.
 - **Persistent IDs:** unaffected.
 
-**Status:** freeze compacts (P2). A standalone tombstone compaction and the
-generation floor for re-allocated slots are P3b. Since P3a, `Domain::alloc` takes
-the lowest free slot, so allocation after `read` matches continuing in memory.
+**Status:**
+- Freeze compacts (P2). Since P3a, `Domain::alloc` takes the lowest free slot, so
+  allocation after `read` matches continuing in memory.
+- Since P3b (DEC-017), `compact()` is a journaled barrier, and each domain keeps a
+  **generation floor**: a slot dropped by compaction, freeze or a region rebuild
+  re-allocates at or above it, so no old handle revives. The floors are serialised
+  (UTCX format 2; [07 §15](07-topology-api.md#15-editing-additions-p3b)).
+- Rollback and undo restore generations exactly, so a handle taken inside undone work
+  can resolve again once its slot is reused. Check such handles by persistent ID.
 
 ## 8. Determinism contract
 

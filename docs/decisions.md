@@ -627,6 +627,58 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
 
 ---
 
+## DEC-017 — P3b editing: stable hinted region IDs, generation floor, filtered validation
+
+- **Date:** 2026-11-18
+- **Status:** accepted (implemented in P3b; plan
+  [2026-11-18-p3b-editing.md](plans/2026-11-18-p3b-editing.md) v3, two fresh-context
+  reviews recorded there).
+- **Decisions:**
+  - **Hinted region IDs come from the hint.** A region whose winning hint no other
+    region wins gets `region_id_from_hint(h)`. Splitting its faces therefore doesn't
+    rename it, and a rebuild keeps its attributes. Regions that share a winning hint
+    keep `region_id(h, min side)`. Stability holds for single-hint regions only (plan
+    C8).
+  - **Container hints resolve through carriers (OI-P3-2 closed).** A hint is resolved
+    in this order:
+    1. the unique region that wins it;
+    2. if several regions win it: ambiguous;
+    3. if none does: the unique minority carrier other than region 0.
+  - **Generation floor (closes the DEC-014 limit).**
+    - Slots dropped by compaction, freeze or a region rebuild never revive an old
+      handle.
+    - Appended slots start at the floor.
+    - UTCX format 2 serialises the seven floors. Format 1 reads with floors 0.
+  - **`compact` is a journaled barrier**, refused inside a transaction, like
+    `rebuild_regions`.
+  - **Derived editor state is kept by dirty rows.** The ID and inclusion index and a
+    persistent face-box grid are both maintained this way. `touch`, `alloc` and
+    `restore` mark rows, and barriers rebuild both eagerly.
+  - **Validation:**
+    - `Local` validates the touched rows and their one-ring in all three layers.
+    - The new `OnCommit` mode validates everything an outermost transaction touched,
+      once, at commit.
+    - Redo never validates. `verify_redo` (on by default in debug builds) compares a
+      content hash stored at commit.
+    - The validator reports wires crossing faces (`WireCrossesFace`).
+  - **New primitives:**
+    - `imprint` / `unimprint`;
+    - `add_hole` / `remove_hole`;
+    - `weld`, which merges vertex pairs and fuses the parallel edges that result.
+- **Goldens:**
+  - `test_edit_random` (600 steps, `double`):
+    - seed 1: `{0xd232bb3c173ca918, 0xf365153588a08e2c}`;
+    - seed 2: `{0x75bccfc9fd30c4fb, 0x0f75f4b7fd6a4b1c}`;
+    - seed 3: `{0x7c4ccbaea916883a, 0xacddf65e683a064a}`.
+  - Seeds 2 and 3 end with hinted rooms, so they cover region IDs.
+  - P2 determinism: `{0x824b09e6bbd23a72, 0xf96f12ef6fe48699}`.
+- **Open:**
+  - OI-P3-1 (incremental regions), narrowed;
+  - OI-P3b-1: a cycle around existing holes is refused;
+  - OI-P3b-2: unhinted regions are renamed when their minimum side changes.
+
+---
+
 ## Open questions
 
 - ~~Q-A — WASM target~~ → DEC-005 (native N-API in a Chromium shell).

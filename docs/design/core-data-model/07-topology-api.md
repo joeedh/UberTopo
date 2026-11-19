@@ -386,7 +386,9 @@ the only writer of a complex during editing.
   concerned, a detail string and, for `Invalid`, the validator's report.
 - **Validation modes** (`EditorOptions::validate`):
   - `Full`: `validate(k, Global)` after every primitive;
-  - `Local`: `validate_local` over the touched elements;
+  - `Local`: `validate_local` over the touched elements and their one-ring (P3b, §15);
+  - `OnCommit` (P3b): `validate_local` once, at the outermost commit, over everything
+    the transaction touched;
   - `None`.
 - **Frozen complexes are refused.** Columns may not be added or removed inside a
   transaction.
@@ -436,3 +438,75 @@ allocation sequence therefore depends only on `.live`, both in memory and after
 - compaction and the generation floor;
 - incremental regions;
 - wire–face crossing checks (a gap the P2 validator has too).
+
+## 15. Editing additions (P3b)
+
+Plan [2026-11-18-p3b-editing.md](../../plans/2026-11-18-p3b-editing.md); DEC-017.
+
+**Generation floor** (`topo/domain.h`):
+- Each domain keeps `gen_floor()`. `permute` raises it over the indices it drops, and
+  appended slots start at it, so a handle into a dropped slot never resolves again.
+- `replace_generations(old, same)` (region rebuilds) keeps the generations of rows
+  that are unchanged: shells with the same first side, regions with the same ID.
+- UTCX format 2 serialises the seven floors after the header flags. Format 1 still
+  reads, with floors 0. Floors enter `content_hash` only when one is non-zero.
+- Journaled history is not covered: rollback and undo restore generations exactly.
+
+**Barriers.** `compact()` (`topo/compact.h`) and `rebuild_regions()` are snapshot
+transactions of their own. Both are refused inside a transaction (`OpenTransaction`)
+and both are redone by running them again.
+
+**Regions** (`topo/regions.cc`):
+- **Region IDs.** A hinted region whose winning hint no other region wins gets
+  `region_id_from_hint(h)`. Regions that share a winner keep `region_id(h, min side)`.
+- **Container hints** resolve in this order:
+  1. the unique region that wins the hint;
+  2. if several regions win it: `AmbiguousContainerHint`;
+  3. if none does: the unique minority carrier other than region 0, else ambiguous or
+     unresolved.
+
+**Primitives:**
+- `imprint(f, chain)`: the chain is a path of wires embedded in `f`, given in order.
+  - An open path between two outer-loop vertices splits `f`, with the same IDs and
+    slot rule as `split_face`, which is now its one-edge case.
+  - A closed cycle becomes a hole of `f`, filled by a new face
+    `derive(f, "imprint.island", min chain edge ID)`.
+  - Inclusions inside the cycle move to the new face.
+- `unimprint(e)` walks the maximal two-face chain through `e` and merges the two faces.
+  The chain becomes wires embedded in the survivor (the smaller face ID).
+- `add_hole(f, cycle)` and `remove_hole(f, loop)`. A removed hole's edges and vertices
+  become inclusions of `f`.
+- `weld(pairs)`:
+  - each pair of coincident vertices merges into the smaller ID;
+  - edges that become parallel fuse into the smaller edge ID, with coedge senses
+    recomputed and the radial cycle re-sorted;
+  - a merged vertex's container is none if it is a face vertex, else the face
+    container, else the region container (conflicts are refused).
+- `make_edge(a, b, id, &e, in)` can create the wire already embedded. A wire lying in a
+  face must be made that way, or the validator reports `WireCrossesFace`.
+- New codes: `ChainNotSimple`, `NotEmbedded`, `HoleInside` (OI-P3b-1: cycles around
+  existing holes are refused), `EdgeShared`, `Coincident`.
+
+**Derived editor state** (`edit/editor_index.h`, `edit/editor_grid.h`):
+- **What is kept:** the ID and inclusion index, and a face-box grid
+  (`topo/face_grid.h`).
+- **How:** both are maintained by dirty rows. `touch`, `alloc` and `restore` mark
+  rows; a flush re-reads them from the current state.
+- **Barriers and outside writes:** barriers rebuild both eagerly. A write outside the
+  editor invalidates them, and they are rebuilt on next use.
+- **Grid cells** are the smallest power of two at least the median face-box extent.
+- **Large faces** spanning more than 64 cells are entered by their T(f) triangles.
+- **Wires** are entered along their segment.
+
+**Filtered validation:**
+- **Combinatorial** (`validate_local.cc`): the listed rows and their one-ring. The
+  scope is listed in the file header. IDs go through the index (`IdOracle`).
+- **Embedding:** iterates the filter lists. Region containment costs the region's
+  boundary, except region 0, which uses one ray through the grid.
+- **Global** (`validate_grid.cc`): contact tests against grid neighbours only, with
+  sparse per-call storage.
+- **The oracle:** `validate(k, Global)` stays unfiltered.
+
+**Redo** never validates. `EditorOptions::verify_redo` (on by default in debug builds)
+compares the content hash stored at commit and fails with `JournalStale` on a
+mismatch.

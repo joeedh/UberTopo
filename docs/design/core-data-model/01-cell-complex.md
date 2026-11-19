@@ -263,11 +263,13 @@ records ([04 §6](04-identity-versions-journal.md#6-journal)).
   gone: regions stay derived (§6), and side hints (`set_side_hint`) name them.
 - **Different arguments.** `split_edge` takes an exact point rather than a parameter,
   and `split_face` takes two vertices of the outer loop.
-- **Fast paths deferred (OI-P3-1).** The fast paths of §6 are deferred to P3b,
-  because region IDs derive from minimum face-side IDs. Every face edit sets
-  `regions_dirty`.
-- **Still to come.** `connect_loops`, `add_hole`, `imprint` and `merge_vertices`
-  are P3b.
+- **Fast paths deferred (OI-P3-1, narrowed in P3b).** Every face edit sets
+  `regions_dirty`. Since DEC-017 a hinted region's ID no longer depends on its
+  minimum side, but incremental maintenance still waits for a measured need.
+- **P3b added** `imprint` / `unimprint`, `add_hole` / `remove_hole` and `weld` (which
+  merges vertex pairs; the `merge_vertices` above) — see
+  [07 §15](07-topology-api.md#15-editing-additions-p3b). `connect_loops` is still to
+  come.
 
 **Booleans** are *not* primitives. They are arrangement-and-select passes (merge every
 operand into one arrangement, compute the cells, select by membership). Spike 1 covers
