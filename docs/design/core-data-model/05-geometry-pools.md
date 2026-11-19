@@ -7,6 +7,12 @@ Part of the [core data model design](README.md). Research basis:
 [attributes-and-queries/embedded-geometry-attributes](../../research/attributes-and-queries/embedded-geometry-attributes.md).
 The pool pattern is taken from Sculptcore's `DeformPool`.
 
+> **Status (2026-11-18): P4a is done (DEC-018,
+> [07 §16](07-topology-api.md#16-curves-and-the-geometry-store-p4a)).** `Complex`
+> holds the geometry store, edges carry 3D curves (`cesaro2` horizontals through
+> `alignment3`, `catenary3`, `polyline3`, `bspline`), and the editor splits, joins and
+> welds curved edges. Pcurves, surfaces and `RoadSurface` remain for P4b.
+>
 > **Status (2026-11-18): the generic pool machinery is done (P1b, DEC-015)** in litestl
 > `attr/` (`pool.h`, `pool_store.h`; guide in litestl `documentation/attributes.md`).
 > **It supersedes the refcount design in §2.** The changes:

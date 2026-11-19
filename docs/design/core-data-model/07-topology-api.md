@@ -510,3 +510,72 @@ and both are redone by running them again.
 **Redo** never validates. `EditorOptions::verify_redo` (on by default in debug builds)
 compares the content hash stored at commit and fails with `JournalStale` on a
 mismatch.
+
+## 16. Curves and the geometry store (P4a)
+
+Plan [2026-11-18-p4a-curves.md](../../plans/2026-11-18-p4a-curves.md); DEC-018.
+
+**The store** (`topo/complex.h`, `topo/geom_store.h`):
+- `ComplexBase::geom` is an `attr::PoolStore` with the curve kinds registered in plan
+  order (`curves::register_pools`).
+- `GeomRoots` / `GeomMutRoots` give the store its roots: the domain groups in stream
+  order, plus extra roots such as `JournalRoots` and `ApproxCache`.
+- The accept rule (`accept_geom_ref`):
+  - `.e.curve` takes `alignment3`, `catenary3`, `polyline3` and 3D `bspline`;
+  - `.c.pcurve` and `.f.surface` take nothing yet;
+  - an `offset2` names a `cesaro2`, and an `alignment3` names a `cesaro2` or an
+    `offset2`.
+- `frozen()` also requires the store's version to be the one freeze left. Interning a
+  new entry thaws.
+
+**Columns:**
+- `.e.curve` (`PoolRef`);
+- `.e.range` (`double2`, (0, 0) for a straight edge);
+- `.e.geom_flags` (must be 0 in P4a);
+- `.g.curve_tol` (default 2⁻³⁰ frame units).
+
+All four are Topo.
+
+**Hashes and I/O** (`topo/io.cc`, `topo/io_legacy.cc`):
+- Both hashes map refs through `PoolStore::canonical_map`. `content_hash` adds the
+  store's reachable entries in canonical order.
+- **UTCX format 3:** header, floors, canonical store, groups, trailing hash. `write`
+  works on a canonicalised copy.
+- **`read`:** audit with `require_reachable`, then canonicalize (which must report no
+  change), then the hash check.
+- **Formats 1 and 2** read through the legacy schemas. Their geometry refs must all be
+  NONE, and `AttrGroup::migrate_from` moves the rest into a fresh complex.
+- `freeze` audits the store first (`FreezeResult::GeometryInvalid`) and canonicalises it
+  after the permutes.
+
+**Carriers** (`topo/curve_geom.h`):
+- **`edge_carrier(store, ref, t0, t1)`** checks:
+  - the kind;
+  - the range: inside the domain, distinct ends, no offset fold.
+- **`on_carrier`** applies the endpoint rule: |c(t) − p| ≤ eval_error +
+  √3·rounding_C(p) + curve_tol, with an allowance for the distance computation.
+- **`round_point`** is round_C, the rounding from frame-local doubles to a stored point.
+
+**Editor** (`edit/editor_impl_curves.h`):
+- **`intern_curve(kind, def, &ref)`** validates the definition through the kind's
+  write/read round trip. Its inner refs must be live and accepted, and its evaluator
+  must build. It is not journaled.
+- **`set_edge_curve(e, ref, t0, t1)`:** NONE clears the carrier, with range (0, 0). The
+  endpoint rule is checked by validation.
+- **`split_edge_at(e, t)`:**
+  - the new vertex goes at round_C(c(t)), and the ranges split at t;
+  - incident planar faces must stay planar;
+  - regions become dirty.
+
+  `split_edge` refuses curved edges (`CurvedEdge`).
+- **`join_edge`** joins curved edges on one carrier whose ranges meet bit for bit at the
+  vertex and run on. Their propagation weights are parameter lengths.
+- **`weld`** fuses only straight edges, or the same carrier between the same vertices.
+- **`collect_geometry(extra)`** is refused inside a transaction. Barriers collect after
+  they commit. Barrier undo keeps the live store.
+
+**Validation** (`validate_curves.cc`, at the start of the embedding layer):
+- `CurveKind`;
+- `CurveRange`;
+- `CurveEndpoint`;
+- `GeometryUnsupported` (pcurves, surfaces, non-zero `.e.geom_flags`).

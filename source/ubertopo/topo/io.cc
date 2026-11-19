@@ -16,41 +16,49 @@ using namespace detail;
 
 namespace {
 
-/* the groups in stream order, ref columns through the canonical map */
+/* the groups in stream order, ref columns through the canonical map (raw
+ * ref values without one) */
 template <geom::CoordType C>
-void hash_groups(const Complex<C> &k, ident::Hasher128 &h, bool with_pos, const attr::RefRemap &map)
+void hash_groups(const Complex<C> &k, ident::Hasher128 &h, bool with_pos, const attr::RefRemap *map)
 {
   auto all = [](std::string_view, const attr::ColumnBase &) { return true; };
   auto no_pos = [](std::string_view name, const attr::ColumnBase &) { return name != "pos"; };
-  if (with_pos) {
-    k.verts.group().hash_into(h, all, map);
-  }
-  else {
-    k.verts.group().hash_into(h, no_pos, map);
-  }
+  auto one = [&](const attr::AttrGroup &g, bool skip_pos) {
+    if (map) {
+      skip_pos ? g.hash_into(h, no_pos, *map) : g.hash_into(h, all, *map);
+    }
+    else {
+      skip_pos ? g.hash_into(h, no_pos) : g.hash_into(h, all);
+    }
+  };
+  one(k.verts.group(), !with_pos);
   for (const attr::AttrGroup *g : {&k.edges.group(), &k.coedges.group(), &k.loops.group(), &k.faces.group(),
                                    &k.faces.sides().group(), &k.shells.group(), &k.regions.group(),
                                    &k.global.group()})
   {
-    g->hash_into(h, all, map);
+    one(*g, false);
   }
 }
 
 /* One path for both hashes (plan P4a §4.3): the groups hashed through the
  * store's canonical map, which is cheap (no copy, no renumbering), so the
- * hashes equal those of the canonicalised complex that write() emits. A
- * store whose refs don't validate gets a marker and an empty map, so its
- * hash is still deterministic but matches no valid complex. */
+ * hashes equal those of the canonicalised complex that write() emits. Refs
+ * that don't validate (dangling, refused, or into another store) get a
+ * marker and the groups hashed with raw ref values: deterministic, still
+ * sensitive to every ref, and equal to no valid complex's hash. */
 template <geom::CoordType C> void hash_body(const Complex<C> &k, ident::Hasher128 &h, bool content)
 {
   const GeomRoots<C> roots(k);
   attr::PoolStore::CanonicalMap map;
   if (!k.geom.canonical_map(roots.roots(), map)) {
     h.u32(0xBAD6E0u);
+    hash_groups(k, h, content, nullptr);
   }
-  hash_groups(k, h, content, map);
-  if (content) {
-    k.geom.hash_into(h, map);
+  else {
+    hash_groups(k, h, content, &map);
+    if (content) {
+      k.geom.hash_into(h, map);
+    }
   }
   hash_floors(k, h);
 }

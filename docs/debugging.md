@@ -287,3 +287,56 @@ Entry format:
 - **Cause:** in PowerShell 5.1, `utf8` means UTF-8 with a BOM.
 - **Fix / technique:** edit source files with the editor tools or a Python patch script,
   not PowerShell. Check with `head -c 3 f | od -c`.
+
+## Code with `\n` written through a shell heredoc arrives broken
+- **Symptom:** a patch applied through `python - <<'EOF' ... EOF` from Git Bash turns
+  a C++ string literal's `\n` into a real line break (`missing terminating '"'
+  character`), or a generated Python file gets an unterminated string. Inline
+  `wsl -- bash -lc '...'` from Git Bash also lost `$variables`.
+- **Cause:** the text passes through more than one layer of quoting and escape
+  processing (Git Bash, the heredoc, the Python literal, WSL's command line), and one
+  of them interprets the escape.
+- **Fix / technique:**
+  - Write patch scripts and shell scripts to files with the editor tools, then run
+    them by path (`python script.py <root>`, `wsl -d Debian -- bash /mnt/c/.../x.sh`).
+  - Never pass code containing backslash escapes through a heredoc or an inline
+    command.
+
+## Root clusters just inside a segment end make sliver pieces
+- **Symptom:** the approximation of a curve gave pieces a few ulps long next to a
+  segment join.
+- **Cause:** the root partition cut at every root of the derivative polynomials,
+  including clusters of roots within rounding of the segment end, where nothing
+  changes.
+- **Fix / technique:** cut only at the curve's breaks (continuity < `kSmooth`).
+  Features (C∞ special parameters) are places, not cuts (plan P4a §11, W3).
+
+## Staging a whole directory picks up other people's files
+- **Symptom:** `git add docs` or `git add source/...` staged research documents and
+  scratch output (`Testing/`) that belonged to someone else's work in the same
+  checkout.
+- **Fix / technique:**
+  - Stage explicit paths only.
+  - When a file holds both your change and someone else's unstaged edit, stage a blob
+    built from `HEAD` plus your change:
+    `git hash-object -w --no-filters <file>`, then
+    `git update-index --cacheinfo 100644,<sha>,<path>`.
+    This leaves the other edit in the working tree, unstaged.
+
+## `content_hash` crashes under ASan on refs into another store
+- **Symptom:** `test_edit_primitives` (`test_pool_roots`) passed in release builds but
+  failed under gcc-asan (SEGV in `PoolStore::CanonicalMap::map`) and gcc-ubsan.
+- **Cause:**
+  - The test keeps a dynamic `Column<PoolRef>` whose refs point into its own
+    `PoolStore`, not the complex's.
+  - Since P4a, `content_hash` maps every ref column through `k.geom`'s canonical map.
+    Those refs dangle there, so `canonical_map` failed.
+  - The hash then mapped them through the empty map it left, and `CanonicalMap::map`
+    indexed `old_to_new` out of range. Release builds read garbage silently.
+- **Fix / technique:**
+  - `CanonicalMap::map` is now total: out-of-range refs give an unset slot (litestl).
+  - `content_hash` hashes the groups with raw ref values after a marker when
+    `canonical_map` fails, as plan P4a §4.3 specified.
+  - Lesson: run the sanitizer configurations before declaring a wave done. The
+    release matrix can't see an out-of-range read that happens to return stable
+    garbage.

@@ -679,6 +679,70 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
 
 ---
 
+## DEC-018 — P4a: curves, the geometry store in `Complex`, curved edges
+
+- **Date:** 2026-11-18
+- **Status:** accepted (implemented in P4a; plan
+  [2026-11-18-p4a-curves.md](plans/2026-11-18-p4a-curves.md) v2, fresh-context review
+  recorded there).
+- **Decisions:**
+  - **The curves library** is `source/ubertopo/curves/`, namespace `ubertopo::curves`.
+    - Curves evaluate in `double`, in the tile frame's local coordinates (the values of
+      `geom::to_double3`: metres for `double` and `float`, quanta for `Lattice`).
+    - Nothing in it is templated on the coordinate type.
+    - Kinds: `cesaro2` (κ laws of degree ≤ 3), `offset2`, `alignment3`, `catenary3`,
+      `polyline3`, `bspline`. Dispatch is virtual per kind.
+  - **No libm on curve paths.** litestl's `math/detmath.h` provides sin, cos, exp,
+    log, sinh, cosh and asinh. It gives the same bits under clang, gcc and MSVC, and
+    each function has a stated ulp bound.
+  - **Certified bounds.** Every kind reports `eval_error`, `deriv_eval_error(k)` and
+    `deriv_bound(t0, t1, k)`, proved for exact arithmetic plus an explicit allowance for
+    every rounding, and checked against a quad-precision oracle.
+    - Box bounds, flattening and the G2 quintic Hermite approximation are generic
+      algorithms over these.
+    - The approximation's knot multiplicity follows the source's continuity.
+  - **The geometry store.** `GeomRef` is `attr::PoolRef`. `Complex` holds a `PoolStore`
+    with the kinds registered in a fixed order.
+    - `.e.curve` takes 3D kinds only. Pcurves and surfaces are refused until P4b.
+    - New Topo columns: `.e.range`, `.e.geom_flags` and `.g.curve_tol` (default 2⁻³⁰
+      frame units).
+  - **One hash path.** `content_hash` and `topology_hash` see refs through the store's
+    read-only canonical map, so they equal the hashes of the canonicalised complex
+    that `write` emits. Unreferenced entries never change a hash.
+  - **UTCX format 3** writes the canonical store after the floors, from a canonicalised
+    copy. `read` audits, canonicalises (which must change nothing) and checks the
+    trailing hash. Formats 1 and 2 still read.
+  - **Edge carriers.** `.e.curve` = ref and `.e.range` = (t₀, t₁) put `vs[0]` at
+    carrier(t₀) and `vs[1]` at carrier(t₁).
+    - An end vertex must lie within eval_error + √3·rounding_C(p) + curve_tol of the
+      carrier.
+    - The skeleton validator keeps checking straight chords (OI-P4a-1).
+  - **The editor never renumbers the live store.**
+    - `intern_curve` is not journaled.
+    - `set_edge_curve` and `split_edge_at` are journaled.
+    - Barrier undo and rollback restore the groups and keep the store.
+    - `JournalRoots` roots every ref the journal holds.
+    - Collects are explicit: `collect_geometry()` outside transactions, and every
+      barrier after it commits.
+- **Goldens:**
+  - `test_edit_random` (600 steps, `double`, with curve steps):
+    - seed 1: `{0x7ce5ffd466d9054b, 0x670cb9e60e3d5bb2}`;
+    - seed 2: `{0x6c72c409e108ce3b, 0x65dcb1c54131ecf4}`;
+    - seed 3: `{0xaa60a8a7e5aa9661, 0xe6a3903c669fef9a}`.
+  - P2 determinism: `{0x474f0ef45988d192, 0x4e944de540b23ca0}`.
+  - The W5 switch was checked with a structure hash that leaves out geometry columns,
+    pinned with the format-2 code and unchanged by the switch.
+- **Open:**
+  - OI-P4a-1: curved geometry is validated on its chord skeleton, and there are no
+    curved digons;
+  - OI-P4a-2: no automatic collect;
+  - OI-P4a-3: κ laws of degree ≤ 3 only;
+  - OI-P4a-4: `detmath` speed is reported, not gated;
+  - OI-P4a-5: the `cesaro2` bound's terms are not tested individually. The oracle
+    test's 5–90× slack hides any single dropped term (plan §8 items 2–4 survive).
+
+---
+
 ## Open questions
 
 - ~~Q-A — WASM target~~ → DEC-005 (native N-API in a Chromium shell).

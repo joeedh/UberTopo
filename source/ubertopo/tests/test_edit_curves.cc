@@ -177,6 +177,44 @@ template <geom::CoordType C> void test_face_edge()
   UT_CHECK(h(fx.k) == h0);
 }
 
+/* a lone square face in the air with an in-plane arc on one edge: the split
+ * keeps the face planar, adds a corner and makes the regions dirty */
+template <geom::CoordType C> void test_face_split_ok()
+{
+  Fixture<C> fx;
+  UT_CHECK(fx.box({0, 0, 0}, {256, 256, 256}));
+  Editor<C> ed(fx.k, &fx.j);
+  const double xy[4][2] = {{600, 0}, {900, 0}, {900, 300}, {600, 300}};
+  VertRef v[4];
+  for (int i = 0; i < 4; i++) {
+    EXPECT_EDIT(ed, ed.make_vertex(fpt<C>(xy[i][0], xy[i][1], 500), test::pid(9500 + i), &v[i]), EditCode::Ok);
+  }
+  ed.begin("square");
+  for (int i = 0; i < 4; i++) {
+    EXPECT_EDIT(ed, ed.make_edge(v[i], v[(i + 1) % 4]), EditCode::Ok);
+  }
+  const uint32_t sizes[1] = {4};
+  EXPECT_EDIT(ed, ed.make_face(v, sizes, test::pid(9600)), EditCode::Ok);
+  UT_CHECK(ed.commit() == EditCode::Ok);
+  EXPECT_EDIT(ed, ed.rebuild_regions(), EditCode::Ok);
+  UT_CHECK(!fx.k.regions_dirty && fx.valid());
+  /* the edge v0 -> v1 along +x: a right turn bulges to -y, out of the square */
+  const EdgeRef e = ed.find_edge(v[0], v[1]);
+  const bool fwd = fx.k.edge_verts(e)[0] == v[0];
+  PoolRef arc;
+  double s = 0;
+  EXPECT_EDIT(ed, test::arc_carrier(ed, v[0], v[1], -0.3, &arc, &s), EditCode::Ok);
+  EXPECT_EDIT(ed, ed.set_edge_curve(e, arc, fwd ? 0 : s, fwd ? s : 0), EditCode::Ok);
+  UT_CHECK(!fx.k.regions_dirty);
+  VertRef m;
+  EXPECT_EDIT(ed, ed.split_edge_at(e, s / 2, &m), EditCode::Ok);
+  UT_CHECK(fx.k.regions_dirty && fx.valid());
+  /* the corner leaves again on the join */
+  EXPECT_EDIT(ed, ed.rebuild_regions(), EditCode::Ok);
+  EXPECT_EDIT(ed, ed.join_edge(m), EditCode::Ok);
+  UT_CHECK(fx.k.regions_dirty && fx.valid());
+}
+
 template <geom::CoordType C> void test_weld()
 {
   for (const bool same : {true, false}) {
@@ -371,6 +409,7 @@ template <geom::CoordType C> void all()
   test_validate_direct<C>();
   test_set_and_split<C>();
   test_face_edge<C>();
+  test_face_split_ok<C>();
   test_weld<C>();
   test_journal_roots<C>();
   test_barrier<C>();

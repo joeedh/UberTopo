@@ -209,7 +209,10 @@ These are testable requirements for every operation in the core:
    sorted maps.
 6. **Floating-point discipline:** no `-ffast-math`, `-ffp-contract=off` in geometry
    translation units, and no `std::` transcendental functions on decision paths. The
-   curve library uses its own evaluation ([05](05-geometry-pools.md)).
+   curve library uses litestl's `math/detmath.h` (P4a, DEC-018): sin, cos, exp, log,
+   sinh, cosh and asinh with fixed range reduction and polynomials, no FMA, the same
+   bits under every supported compiler, and a stated ulp bound per function
+   ([05](05-geometry-pools.md)).
 
 CI runs determinism tests at 1, 2 and N threads and compares hashes across the compilers
 in use.
