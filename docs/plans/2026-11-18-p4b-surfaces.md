@@ -904,3 +904,101 @@ same ids.
   clang-cl and MSVC Release (native Windows) pass 30/30; the compile-fail tests
   don't run under MSVC-style drivers. gcc-ubsan and gcc-tsan were not run: the
   matrix moves to GitHub Actions in the next change.
+
+**W6:**
+- **`tests/gen/road_terrain.h`.** `plan_road` decides the stations and the kill
+  set in double metres from the definition. `build_terrain` and `place_road`
+  then build that definition in each type's frame units, scaled by u = 2^ul2:
+  1 for `double`, 2^10 for `Lattice`.
+  - Scaling by a power of two is exact, so the reference, the profile, the
+    section and everything `build_road` derives from them are the metre values
+    times u, bit for bit. Only the rounded vertices differ.
+  - `frame_poly` scales coefficient k by u^(dim − k): dim is 1 for lengths, 0
+    for slopes and −1 for curvature.
+- **The road as built:**
+  - **Reference:** line 322 m, clothoid 128 m to κ = 2⁻⁹, arc 300 m, clothoid
+    128 m, line 322 m. It starts at (300, 500) heading 0.2 rad and turns left.
+  - **Profile:** grades of ±2 %, joined by a crest (200–400 m) and a sag
+    (700–900 m) vertical curve, between −4 m and +4 m. Each piece starts at the
+    previous piece's computed end value.
+  - **Section and crossfall:** two 3.5 m lanes and two 2 m shoulders. The
+    shoulders take their lane's crossfall: −2 % on the straights, rotating
+    over the clothoids to +6 % (outer, right) and −6 % (inner, left).
+  - **Widening:** the outer lane goes from 3.5 m to 4.5 m over 350–380 m. It
+    also narrows back over 820–850 m, which the plan didn't specify, so the
+    road's two ends match.
+  - **Stations:** the 50 m steps plus the breaks at 322, 380, 820 and 878 m,
+    29 in all. The kill set has 50 cells. Terrain heights come from a SplitMix64
+    hash of the grid point, in sixteenths of a metre.
+- **`place_road`** runs under `OnCommit`.
+  - **Order:** the definitions are interned through `intern_geom`. Then the
+    cells are killed, followed by the edges between two killed cells and the
+    vertices that only killed cells shared.
+  - **The road:** each vertex is round_C(carrier_k(s_i)). Border edges get
+    their carrier through `set_edge_curve`, and cross edges are straight. Each
+    face gets `set_face_surface` with its four pcurves.
+  - **The fill face:** its outer loop walks the killed region's boundary
+    counter-clockwise. Its inner loop is the road's outline, clockwise.
+- **Two bugs found, both from stations on breaks** (`docs/debugging.md`):
+  - `Fn1D::range(s, s)` at a break returned an empty range. It now covers both
+    one-sided pieces, and `test_curves_poly` checks this.
+  - `validate_surfaces` multiplied a derivative bound (+inf at a break) by a
+    zero pcurve error, giving NaN. A zero weight now adds nothing
+    (`weighted`, as the general pass's `acc` already did).
+  - W4's sheet never put a station on a break, so neither bug showed there.
+- **Deviations from §6:**
+  - **The dense surface check** compares `road3` with the interpolation
+    (1 − w) P_k + w P_(k+1) of the border carriers at the same station.
+    - In real arithmetic this is S on a link exactly. The carriers
+      (alignment3 over offset2) are evaluated by other code.
+    - The quad oracle can't take 10⁴ samples per face of a new road without
+      linking libquadmath (DEC-002). It still covers `road3`'s evaluation on
+      the W3 fixtures.
+    - Observed: 1.12 M samples, worst error 1.45 % of the bound.
+  - **The crossing variant** keeps the cell under the centre line at the
+    middle station and flattens it to the road's height there. The profile's
+    grade therefore crosses it, and the commit reports `FaceIntersection`.
+    - It makes no fill face, which can't exist once the outline leaves the hole.
+    - `FaceIntersection` is a 3D test, so pushing the outline into a kept cell
+      at random terrain heights wouldn't be certain to cross.
+  - **The structure hash** is a test helper (`shape_hash`): `structure_hash`
+    without the coordinate key, the frame, positions, geometry columns or the
+    `ProjAxis` bits.
+    - `topology_hash` can't be used for this, because it covers the store's
+      entries, which scale with u.
+    - `double` makes 1614 projected faces and `Lattice` 1626, because rounding
+      bends some planar road faces on the straights.
+  - The P4a format-3 fixture is still read by `test_topo_legacy`, so this test
+    doesn't repeat it.
+- **Checks** (`test_road_terrain`, `double` and `Lattice`):
+  - the plan's counts;
+  - the pinned terrain and road content hashes;
+  - `validate(Global)`;
+  - radial degree 2 on every road edge;
+  - bitwise borders (688 samples per type);
+  - the dense surface check;
+  - the fill face's T(f) using all 144 border flattening points;
+  - a border split with its pcurves copied, joined back, both undone;
+  - `split_face` refused with `SurfacedFace`;
+  - undo to the terrain hash and redo to the road hash;
+  - `rebuild_regions` keeping one sheet shell;
+  - freeze, write and read;
+  - equal structure hashes;
+  - the crossing variant.
+
+  It takes 7.7 s in clang-cl Release and 109 s under MSVC ASan.
+- **Mutation runs** now run natively (`mut_native.py`, session tooling). It
+  mutates a private copy of the checkout, synced by content, and builds it in
+  its own clang-cl tree.
+- **Mutations:** 3 W6 mutants, run natively.
+  - §9 item 26, the fill face without its hole loop: killed by
+    `test_road_terrain`.
+  - Removing the `Fn1D::range` fix: killed by `test_curves_poly` and
+    `test_road_terrain`.
+  - **One equivalent survivor:** removing `weighted`. With the range fix, every
+    box on a valid road gets a finite `deriv_bound`, so no reachable case
+    multiplies +inf by a zero error. The guard stays for the same reason as the
+    general pass's `acc`.
+- **Matrix:** the local check (clang-cl-rel and msvc-asan) passes 31/31 with no
+  warnings. CI runs on the push.
+

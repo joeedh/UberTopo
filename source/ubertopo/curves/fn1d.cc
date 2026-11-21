@@ -198,7 +198,11 @@ double Fn1D::eval_error(int k) const
 
 Range Fn1D::range(double s0, double s1, int k) const
 {
-  const int i0 = piece_at(s0, Side::Above), i1 = piece_at(s1, Side::Below);
+  int i0 = piece_at(s0, Side::Above), i1 = piece_at(s1, Side::Below);
+  if (i0 > i1) {
+    /* [s0, s1] is the single point of a break: both one-sided limits */
+    std::swap(i0, i1);
+  }
   Range out{INFINITY, -INFINITY};
   for (int i = i0; i <= i1; i++) {
     const double a = std::max(s0, breaks[i]) - breaks[i], b = std::min(s1, breaks[i + 1]) - breaks[i];

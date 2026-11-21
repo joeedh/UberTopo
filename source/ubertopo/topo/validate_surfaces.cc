@@ -120,6 +120,14 @@ double grad_bound(const curves::SurfaceEval &ev, const curves::ParamBox &box, in
   return curves::up(ev.deriv_bound_piece(box, 1, 0, piece) + ev.deriv_bound_piece(box, 0, 1, piece));
 }
 
+/* m * w where a zero weight adds nothing, even against an infinite bound
+ * (deriv_bound is +inf on a box at a break; a zero pcurve error makes the
+ * box a point, and inf * 0 would be NaN) */
+double weighted(double m, double w)
+{
+  return w == 0 ? 0.0 : m * w;
+}
+
 /* the pcurve point at lambda (one-sided) */
 void pcurve_at(const PRec &r, double lam, CSide side, double &u, double &v)
 {
@@ -306,7 +314,7 @@ template <geom::CoordType C> struct FaceCheck {
       const double dx = s[0] - p[0], dy = s[1] - p[1], dz = s[2] - p[2];
       const double d = std::sqrt(dx * dx + dy * dy + dz * dz);
       const curves::ParamBox box{{u - r.pe, u + r.pe}, {v - r.pe, v + r.pe}};
-      const double tol = curves::up(ev.eval_error() + grad_bound(ev, box, link) * r.pe +
+      const double tol = curves::up(ev.eval_error() + weighted(grad_bound(ev, box, link), r.pe) +
                                     kSqrt3Up * rounding_of<C>(k.pos(vs[i])) + curve_tol);
       if (!within(d, tol)) {
         return false;
@@ -429,7 +437,7 @@ template <geom::CoordType C> struct FaceCheck {
       acc(Mt, cp.V2);
       const double c2 = r.curved ? r.carrier->deriv_bound(a, b, 2) : 0.0;
       const double M2 = curves::up(curves::up(c2 + sg2) * (1 + curves::gamma_n(8)));
-      double err = cerr + se0 + curves::up(Ms + Mt) * r.pe;
+      double err = cerr + se0 + weighted(curves::up(Ms + Mt), r.pe);
       if (mapped) {
         /* a cut at a mapped surface break misses it by a few ulps of lambda */
         err += curves::up(8 * curves::kUnit * (Ms * cp.U1 + Mt * cp.V1));

@@ -64,9 +64,11 @@ ut_test(test_curves_pcurve.cc ubertopo_curves)
 ut_test(test_curves_road.cc ubertopo_curves)
 ut_test(test_validate_surfaces.cc ubertopo_topo)
 ut_test(test_edit_surfaces.cc ubertopo_topo)
+ut_test(test_road_terrain.cc ubertopo_topo)
 ut_test(test_edit_random.cc ubertopo_topo)
 set_tests_properties(test_edit_random PROPERTIES LABELS long)
 set_tests_properties(test_topo_determinism PROPERTIES LABELS long)
+set_tests_properties(test_road_terrain PROPERTIES LABELS long)
 
 # benchmarks: built, not run by ctest
 add_executable(bench_edit bench_edit.cc)

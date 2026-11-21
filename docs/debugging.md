@@ -486,3 +486,32 @@ Entry format:
   (`types::ArrayBase`, `types::_StructBase`). To find every site, search for
   every spelling, not the one UBSan printed:
   `(static|reinterpret)_cast<(const )?(types::)?(Array|Struct)<`.
+
+## A vertex on a break fails `PcurveVertex` although S matches it bit for bit
+- **Symptom:** in the road-on-terrain case, road faces failed `PcurveVertex` at
+  vertices on a profile or width break (s = 200, 350, 820 m). S at the pcurve's
+  end, the carrier and the vertex agreed to the last bit.
+- **Cause:** two faults combined.
+  - `Fn1D::range(s, s)` at a break returned the empty range [inf, -inf]. A
+    padding of a few ulps around the break rounded back to the break itself, and
+    the pieces at `Side::Above` and `Side::Below` came out in the wrong order.
+  - `road3`'s `deriv_bound_piece` built from that empty range came out +inf or
+    NaN, and the validator's tolerance multiplied it by the pcurve's error. When
+    that error is 0 (a constant border), inf * 0 is NaN, and a NaN tolerance
+    fails every comparison.
+- **Fix / technique:**
+  - A point range at a break now covers both one-sided pieces.
+  - The validator's bound-times-error terms skip a zero weight (`weighted`).
+  - To find it, print the distance and each input of the tolerance at one
+    failing vertex. Matching values with a failing check point at the
+    tolerance.
+  - Test fixtures whose stations avoid every break never reach this.
+
+## PowerShell 5.1 edits garble UTF-8 files and add a BOM
+- **Symptom:** after a `(Get-Content f -Raw).Replace(...) | Set-Content -Encoding
+  utf8 f` edit, `§` read as `Â§` and the file started with a byte-order mark.
+- **Cause:** Windows PowerShell 5.1's `Get-Content` reads a BOM-less file in the
+  ANSI code page, and `-Encoding utf8` writes a BOM.
+- **Fix / technique:** edit with the editor tools or Python (`open(p, 'rb')`),
+  not PowerShell string replacement. To repair a file, strip the BOM and
+  reverse the mis-decoding: `s.encode('cp1252').decode('utf-8')`.

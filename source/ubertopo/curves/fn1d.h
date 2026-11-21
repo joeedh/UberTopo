@@ -70,7 +70,8 @@ public:
   double max_jump() const;
   /** Bound on eval()'s rounding of the k-th derivative anywhere. */
   double eval_error(int k = 0) const;
-  /** Enclosure of the k-th derivative over [s0, s1] (within the domain). */
+  /** Enclosure of the k-th derivative over [s0, s1] (within the domain). At
+   * a break, [s, s] covers both one-sided limits. */
   Range range(double s0, double s1, int k = 0) const;
 
   /** Sum (breakpoints merged; coefficients shifted with rounding). Both must

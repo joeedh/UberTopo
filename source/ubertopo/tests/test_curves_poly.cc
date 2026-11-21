@@ -178,6 +178,9 @@ void test_fn1d()
   UT_CHECK(std::fabs(f.eval(20, 0, Side::Above, &err) - 6.0) <= err);
   const Range rg = f.range(0, 25, 0);
   UT_CHECK(rg.lo <= 1.0 && rg.hi >= 8.5 && rg.hi < 8.6);
+  /* a point range at a break covers both one-sided limits (it was empty) */
+  const Range rb = f.range(10, 10, 1);
+  UT_CHECK(rb.lo <= 0.0 && rb.hi >= 0.5);
   /* refusals */
   Fn1D h;
   util::Vector<Poly, 1> bad;
