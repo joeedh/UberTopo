@@ -368,8 +368,8 @@ Entry format:
   opens hundreds of headers (Eigen, litestl), once per configuration.
 - **Fix:** mirror the checkout into the Linux filesystem with
   `rsync -a --delete --exclude=.git /mnt/c/dev/UberTopo/ ~/src/UberTopo/` before
-  each build, and configure the build trees against the mirror. `-a` keeps
-  modification times, so ninja's incremental rebuilds stay correct. With the mirror,
+  each build, and configure the build trees against the mirror. Touch every file
+  rsync rewrites (next entry). With the mirror,
   the compilers run at 75–97 % CPU each, and the full 13-configuration matrix runs in
   about 25 minutes from clean build trees.
 - **Notes:**
@@ -377,6 +377,21 @@ Entry format:
     every build script syncs first.
   - A mutation runner should edit the mirror, not the checkout.
   - Adding cores through `.wslconfig` doesn't help an I/O-bound build.
+
+## Builds from the WSL mirror link stale objects
+- **Symptom:** after a sync, gcc-ubsan and gcc-tsan failed to link with undefined
+  references to new editor functions, although the mirror's headers declared and
+  defined them. In clang-rel, a test failed exactly as it had under a mutant that
+  had since been reverted. `ninja -n -d explain` reported no work to do.
+- **Cause:** `rsync -a` copies the Windows modification times into the mirror. When
+  an object has been built from different content (a mutant written straight into
+  the mirror, or a build run without syncing first), the next sync can write the
+  correct content with a time older than that object. ninja compares times only, so
+  it keeps the stale object.
+- **Fix:** after rsync, touch every file it wrote (`--out-format='%i %n'`, lines
+  starting `>f`), so a changed file is always newer than any earlier object. Then
+  touch the whole mirror once to clear objects that are already stale. A mutation
+  runner that restores a file should also push its time forward and rebuild.
 
 ## Fins on a curved edge intersect although they looked disjoint when straight
 - **Symptom:** a test built three triangular faces on one edge, then put an arc on
@@ -408,3 +423,36 @@ Entry format:
   scratch `PoolStore` (`register_pools` first) to compute positions, then again
   in `k.geom`. `build_road` is deterministic, so both copies agree bit for bit
   (`test_validate_surfaces`).
+
+## A split meant to swap two faces' radial order is refused with `VertexLink`
+- **Symptom:** a test for `split_edge_at` wanted the piece from the new vertex to
+  sort its faces differently from the piece before it (OI-P4b-8). With projected
+  faces the two orders always came out equal. With planar faces whose curved edge
+  leaves their planes, the swap appeared, but the split was refused with
+  `VertexLink` on the new vertex.
+- **Cause:** sheets that meet only along a curve keep one cyclic order along it,
+  so a correct sort can't swap them anywhere. The swap needs faces the curve
+  doesn't lie in, and then the new vertex, which has degree 2, has a link that
+  contradicts itself, so `VertexLink` refuses it. An accepted split therefore never
+  shows whether the second piece was re-sorted. The re-sort shows only in how such
+  a split is refused: `VertexLink`, or `RadialOrder` on the second piece when
+  that piece keeps the edge's stale order.
+- **Fix / technique:** test the refusal code instead of a swap
+  (`test_split_resorts_both` in `test_edit_curves`). To find configurations, model
+  the half-planes in a few lines of Python and search, rather than building
+  candidates in C++. A planar face's half-plane point is the first skeleton point
+  off the axis, and the half-plane points away from it when that point lies outside
+  the face (`HalfPlane::s = -1`). Every face whose projection shows the bend picks
+  the same curve knot as that point, so such faces tie (`RadialTie`).
+
+## A mutant that removes a bounds check survives on another refusal's code
+- **Symptom:** the mutant that dropped `set_face_surface`'s "not a coedge of the
+  face" check survived. The test expected `BadArgument` for a foreign coedge and
+  still got it.
+- **Cause:** without the check, the search index equals the coedge count, so
+  `listed[j]` reads one past the end of a `util::Vector` (inside its inline
+  buffer, so nothing crashes in release). The stale byte there was nonzero, and the
+  call failed as "a coedge is listed twice", which is also `BadArgument`.
+- **Fix / technique:** when several refusals share an `EditCode`, check the
+  report's detail text too (`detail_has` in `test_edit_surfaces`). To see why a
+  mutant survives, apply it by hand and print `ed.report().detail` after the call.

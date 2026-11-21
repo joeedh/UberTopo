@@ -500,6 +500,18 @@ template <geom::CoordType C> EditCode Editor<C>::apply_op(const OpRecord<C> &op)
                             edit_detail::get_f64(u.data() + 5));
     case OpKind::SplitEdgeAt:
       return split_edge_at(EdgeRef(u[0]), edit_detail::get_f64(u.data() + 1));
+    case OpKind::SetFaceSurface: {
+      litestl::util::Vector<std::pair<CoedgeRef, litestl::attr::PoolRef>, 16> pcs;
+      for (uint32_t i = 4; i + 2 < uint32_t(u.size()); i += 3) {
+        pcs.append({CoedgeRef(u[i]), litestl::attr::PoolRef{u[i + 1], u[i + 2]}});
+      }
+      return set_face_surface(FaceRef(u[0]),
+                              litestl::attr::PoolRef{u[1], u[2]},
+                              u[3] != 0,
+                              std::span<const std::pair<CoedgeRef, litestl::attr::PoolRef>>(pcs.data(), pcs.size()));
+    }
+    case OpKind::SetCoedgePcurve:
+      return set_coedge_pcurve(CoedgeRef(u[0]), litestl::attr::PoolRef{u[1], u[2]});
     case OpKind::RebuildRegions:
     case OpKind::Compact:
       return EditCode::OpenTransaction; /* barriers are replayed on their own (redo) */

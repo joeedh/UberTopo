@@ -325,6 +325,9 @@ EditCode Editor<C>::split_face(FaceRef f, VertRef a, VertRef b, FaceRef *other, 
   if (!k_.verts.live(a.i) || !k_.verts.live(b.i) || a == b) {
     return pr.fail(EditCode::BadArgument, ElemKind::Vertex, a.i);
   }
+  if (surfaced(f)) {
+    return pr.fail(EditCode::SurfacedFace, ElemKind::Face, f.i);
+  }
   /* the shared split core (editor_impl_imprint.h) with a new chord a -> b */
   const uint32_t ab[2] = {a.i, b.i};
   const EditCode c = split_core(f, {}, std::span<const uint32_t>(ab, 2), true, other, chord);
@@ -355,6 +358,9 @@ template <geom::CoordType C> EditCode Editor<C>::join_faces(EdgeRef e, FaceRef *
   FaceRef f1 = k_.face_of(c1), f2 = k_.face_of(c2);
   if (f1 == f2) {
     return pr.fail(EditCode::NotJoinable, ElemKind::Edge, e.i, "both coedges on one face");
+  }
+  if (surfaced(f1) || surfaced(f2)) {
+    return pr.fail(EditCode::SurfacedFace, ElemKind::Face, surfaced(f1) ? f1.i : f2.i);
   }
   if (k_.sense(c1) == k_.sense(c2)) {
     return pr.fail(EditCode::NotJoinable, ElemKind::Edge, e.i, "inconsistent front sides");

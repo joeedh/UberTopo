@@ -540,9 +540,9 @@ Each must be killed by at least one test:
   acceptance case only builds forward.
 - **OI-P4b-7 — planar faces' curved carriers aren't checked against the plane.** Only
   the stored vertices decide planarity, as in P4a.
-- **OI-P4b-8 — `split_edge_at`'s re-sort of the second piece is untested** (W2
-  mutation check). It needs three planar faces on an S-shaped carrier split
-  exactly on its chord. Due with the W5 editor tests.
+- **OI-P4b-8 — closed in W5.** `split_edge_at`'s re-sort of the second piece
+  can't change an accepted split, only how a refused one is reported (§13 W5).
+  `test_split_resorts_both` pins the refusal.
 
 ## 11. Review (fresh context, 2026-11-18, of v1)
 
@@ -834,3 +834,73 @@ same ids.
       fails for the wrong kind, and that is also reported as `PcurveKind`.
     - The definite-failure exit only saves time. Without it, bisection runs to
       the cap and returns the same failure.
+
+**W5:**
+- **`intern_geom`** (with `intern_curve` kept as an alias) builds a surface kind's
+  `SurfaceEval` as its evaluator check. Pcurve kinds are 2D curves and already
+  passed through `intern_curve`.
+- **`set_face_surface(f, ref, reversed, pcurves)` takes the face's pcurves in the
+  same call.** This differs from §5.1, where the pcurves were set one by one.
+  `Full` and `Local` validation run after every primitive, and a surface without
+  its pcurves is invalid (`PcurveKind`), as are pcurves without a surface. A face
+  could otherwise be surfaced only under `OnCommit`.
+  - Each listed coedge (of the face, once) gets its pcurve. Every other coedge of
+    the face gets NONE.
+  - NONE clears the surface, the pcurves and `Reversed`. It refuses a reversed
+    flag or pcurves.
+  - `set_coedge_pcurve` replaces one pcurve.
+  - Both primitives check only that refs are NONE or live, because the journal
+    roots them. Kinds, ranges and fit are left to validation.
+- **Journal.** The `SetFaceSurface` payload is f, pool, slot, reversed, then
+  (c, pool, slot) per listed pcurve. `SetCoedgePcurve` is c, pool, slot.
+  `JournalRoots` visits every ref in both. Redo goes through `apply_op`.
+- **Split and join.** `split_impl` copies `.c.pcurve` to each new coedge, so both
+  halves keep the pcurve (it shares the carrier's parameter). `join_edge` needs
+  equal pcurves on each pair of matching coedges, else `Incompatible`.
+- **Refusals (`SurfacedFace`).** These primitives refuse a touched face with a
+  surface:
+  - `split_face`, `join_faces`, `imprint`, `unimprint`, `add_hole` and
+    `remove_hole`;
+  - `split_edge` and the straight case of `join_edge`, when a face on the edge has
+    a surface;
+  - `weld`, when a face at either vertex of a pair has a surface.
+
+  Each check comes right after the liveness checks, before the geometry ones.
+- **Allowed edits.** `flip_face`, `kill_face`, `make_face` and `set_position` are
+  allowed, as §5.2 says. Moving a border vertex reports `CurveEndpoint` before any
+  surface code, because `validate_curves` runs first.
+- **Tests:**
+  - The road sheet moved to `tests/support/road_sheet.h`, shared with
+    `test_validate_surfaces`. `build_sheet(sh, false)` leaves the surfaces to the
+    editor.
+  - `test_edit_surfaces` covers `intern_geom` and its refusals, and
+    `set_face_surface` in `Full` validation with each argument refusal. It also
+    covers clearing, Reversed after `flip_face`, undo and redo of all of it, and
+    the journal roots across `collect_geometry`. It checks the pcurve rules of
+    split and join, each refusal, and the barriers.
+  - The straight-edge refusals use the box fixture without validation, because
+    the sheet's coordinates give no exact midpoint for `split_edge`.
+- **OI-P4b-8 is closed: no accepted split can show the second re-sort.**
+  - Sheets that meet only along a curve keep one cyclic order along it. A swap
+    between the pieces needs faces that the curve leaves (OI-P4b-7).
+  - The new vertex has degree 2, so `VertexLink` requires the two pieces' orders
+    to agree. The piece from V would then keep the edge's order anyway.
+  - What the re-sort decides is how such a split is refused: `VertexLink`, or
+    `RadialOrder` on the second piece when it keeps the edge's stale order.
+    `test_split_resorts_both` (in `test_edit_curves`) uses three planar, steep
+    faces on an S-shaped polyline, split at its middle knot on the chord. The
+    test expects `VertexLink` and an unchanged hash.
+  - Projected faces never swap: about 4,000 configurations searched.
+- **Mutations:** 24 W5 mutants, all killed by `test_edit_surfaces`. They cover
+  §9 items 21–24 (item 23 as two mutants), the listed pcurves' roots, every other
+  `SurfacedFace` refusal, both `intern_geom` checks, each `set_face_surface`
+  rule, `set_coedge_pcurve`'s ref check and the three redo payloads.
+  - On the first run the foreign-coedge mutant survived. Its out-of-range read
+    tripped the "listed twice" refusal, which shares `BadArgument`. The
+    argument refusals now check their detail text.
+  - The W2 survivor *`split_edge_at` re-sorting only the first piece* is now
+    killed by `test_split_resorts_both`: the refusal becomes `RadialOrder`.
+- **Matrix:** clang-rel, gcc-rel, clang-v3 and gcc-asan (WSL) pass 35/35, and
+  clang-cl and MSVC Release (native Windows) pass 30/30; the compile-fail tests
+  don't run under MSVC-style drivers. gcc-ubsan and gcc-tsan were not run: the
+  matrix moves to GitHub Actions in the next change.

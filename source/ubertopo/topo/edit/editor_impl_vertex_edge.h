@@ -282,6 +282,10 @@ EditCode Editor<C>::split_edge(EdgeRef e, const Point &p, VertRef *v_out, EdgeRe
   if (!k_.edges.template get<".e.curve">()[e.i].none()) {
     return pr.fail(EditCode::CurvedEdge, ident::ElemKind::Edge, e.i);
   }
+  /* a kept segment2 would be wrong after the split (plan P4b §5.2) */
+  if (edge_surfaced(e)) {
+    return pr.fail(EditCode::SurfacedFace, ident::ElemKind::Edge, e.i);
+  }
   const auto vs = k_.edge_verts(e);
   const Point pa = k_.pos(vs[0]), pb = k_.pos(vs[1]);
   if (!edit_detail::strictly_inside<C>(p, pa, pb)) {
@@ -353,6 +357,9 @@ EditCode Editor<C>::split_impl(
     setC<".c.e">(c2, e2.i);
     setC<".c.l">(c2, l.i);
     setC<".c.flags">(c2, k_.coedges.template get<".c.flags">()[c.i]);
+    /* both halves keep the pcurve: it shares the carrier's parameter, and
+     * .c.pcurve is Topo, so propagation never copies it (plan P4b §5.2) */
+    setC<".c.pcurve">(c2, k_.coedges.template get<".c.pcurve">()[c.i]);
     if (k_.sense(c)) {
       /* c: a -> v; c2: v -> b, after c */
       const CoedgeRef n = k_.next(c);
@@ -464,6 +471,9 @@ template <geom::CoordType C> EditCode Editor<C>::join_edge(VertRef v, EdgeRef *s
   else if (!edit_detail::strictly_inside<C>(k_.pos(v), k_.pos(a), k_.pos(b))) {
     return pr.fail(EditCode::NotJoinable, ident::ElemKind::Vertex, v.i, "not collinear");
   }
+  else if (edge_surfaced(e1) || edge_surfaced(e2)) {
+    return pr.fail(EditCode::SurfacedFace, ident::ElemKind::Vertex, v.i);
+  }
   /* v may only carry the edges' own container (a split wire's vertex, C1) */
   if (!(k_.vert_container(v) == ec[e1.i]) || !(k_.verts.template get<".v.container_hint">()[v.i] == eh[e1.i])) {
     return pr.fail(EditCode::Incompatible, ident::ElemKind::Vertex, v.i, "the vertex has its own container");
@@ -483,6 +493,11 @@ template <geom::CoordType C> EditCode Editor<C>::join_edge(VertRef v, EdgeRef *s
     }
     else {
       return pr.fail(EditCode::NotJoinable, ident::ElemKind::Coedge, c1.i);
+    }
+    /* the survivor keeps c1's pcurve (plan P4b §5.2) */
+    const auto &pc = k_.coedges.template get<".c.pcurve">();
+    if (!(pc[c1.i] == pc[pairs[pairs.size() - 1].second.i])) {
+      return pr.fail(EditCode::Incompatible, ident::ElemKind::Coedge, c1.i, "the coedges' pcurves differ");
     }
   }
   /* propagation weights: parameter lengths on a carrier, chord lengths otherwise */

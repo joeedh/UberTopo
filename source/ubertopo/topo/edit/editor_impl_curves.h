@@ -1,6 +1,7 @@
 #pragma once
 
-/* Editor<C>: curved edges and the geometry store (plan P4a W6, Â§5.2).
+/* Editor<C>: curved edges, surfaces and the geometry store (plan P4a W6,
+ * §5.2; plan P4b W5, §5).
  * Template definitions, included only by editor.cc. */
 
 #include <bit>
@@ -149,6 +150,108 @@ template <geom::CoordType C> EditCode Editor<C>::split_edge_at(EdgeRef e, double
   if (v_out) {
     *v_out = v;
   }
+  return pr.finish();
+}
+
+/* ---- surfaces (plan P4b §5.1) ---- */
+
+template <geom::CoordType C> bool Editor<C>::edge_surfaced(EdgeRef e) const
+{
+  bool any = false;
+  if (k_.edge_coedge(e)) {
+    k_.for_each_radial(e, [&](CoedgeRef c) { any = any || surfaced(k_.face_of(c)); });
+  }
+  return any;
+}
+
+template <geom::CoordType C> bool Editor<C>::vert_surfaced(VertRef v) const
+{
+  bool any = false;
+  k_.for_each_edge_at(v, [&](EdgeRef e) { any = any || edge_surfaced(e); });
+  return any;
+}
+
+template <geom::CoordType C>
+EditCode Editor<C>::set_face_surface(FaceRef f,
+                                     litestl::attr::PoolRef ref,
+                                     bool reversed,
+                                     std::span<const std::pair<CoedgeRef, litestl::attr::PoolRef>> pcurves)
+{
+  using litestl::attr::PoolRef;
+  Prim pr(*this, OpKind::SetFaceSurface);
+  if (pr.done) {
+    return pr.code;
+  }
+  if (f.i >= k_.faces.capacity() || !k_.faces.live(f.i)) {
+    return pr.fail(EditCode::DeadElement, ident::ElemKind::Face, f.i);
+  }
+  /* refs the journal roots must be entries of the store */
+  auto usable = [&](PoolRef r) { return r.none() || (litestl::attr::well_formed(r) && k_.geom.live(r)); };
+  if (!usable(ref)) {
+    return pr.fail(EditCode::BadArgument, ident::ElemKind::Face, f.i, "the surface is not a live store entry");
+  }
+  if (ref.none() && (reversed || !pcurves.empty())) {
+    return pr.fail(EditCode::BadArgument, ident::ElemKind::Face, f.i, "no surface: no pcurves and not reversed");
+  }
+  litestl::util::Vector<uint32_t, 32> cs;
+  k_.for_each_loop(f, [&](LoopRef l) { k_.for_each_coedge(l, [&](CoedgeRef c) { cs.append(c.i); }); });
+  litestl::util::Vector<PoolRef, 32> pcs;
+  litestl::util::Vector<uint8_t, 32> listed;
+  for (uint32_t j = 0; j < uint32_t(cs.size()); j++) {
+    pcs.append(PoolRef{});
+    listed.append(0);
+  }
+  for (const auto &[c, r] : pcurves) {
+    uint32_t j = 0;
+    while (j < uint32_t(cs.size()) && cs[j] != c.i) {
+      j++;
+    }
+    if (j == uint32_t(cs.size())) {
+      return pr.fail(EditCode::BadArgument, ident::ElemKind::Coedge, c.i, "not a coedge of the face");
+    }
+    if (listed[j]) {
+      return pr.fail(EditCode::BadArgument, ident::ElemKind::Coedge, c.i, "a coedge is listed twice");
+    }
+    if (!usable(r)) {
+      return pr.fail(EditCode::BadArgument, ident::ElemKind::Coedge, c.i, "the pcurve is not a live store entry");
+    }
+    listed[j] = 1;
+    pcs[j] = r;
+  }
+  setF<".f.surface">(f, ref);
+  const uint8_t fl = k_.face_flags(f);
+  setF<".f.flags">(f, uint8_t(reversed ? fl | face_flags::Reversed : fl & ~face_flags::Reversed));
+  for (uint32_t j = 0; j < uint32_t(cs.size()); j++) {
+    setC<".c.pcurve">(CoedgeRef(cs[j]), pcs[j]);
+  }
+  pr.op.u.append(f.i);
+  pr.op.u.append(ref.pool);
+  pr.op.u.append(ref.slot);
+  pr.op.u.append(reversed ? 1u : 0u);
+  for (const auto &[c, r] : pcurves) {
+    pr.op.u.append(c.i);
+    pr.op.u.append(r.pool);
+    pr.op.u.append(r.slot);
+  }
+  return pr.finish();
+}
+
+template <geom::CoordType C> EditCode Editor<C>::set_coedge_pcurve(CoedgeRef c, litestl::attr::PoolRef ref)
+{
+  Prim pr(*this, OpKind::SetCoedgePcurve);
+  if (pr.done) {
+    return pr.code;
+  }
+  if (c.i >= k_.coedges.capacity() || !k_.coedges.live(c.i)) {
+    return pr.fail(EditCode::DeadElement, ident::ElemKind::Coedge, c.i);
+  }
+  if (!ref.none() && !(litestl::attr::well_formed(ref) && k_.geom.live(ref))) {
+    return pr.fail(EditCode::BadArgument, ident::ElemKind::Coedge, c.i, "the pcurve is not a live store entry");
+  }
+  setC<".c.pcurve">(c, ref);
+  pr.op.u.append(c.i);
+  pr.op.u.append(ref.pool);
+  pr.op.u.append(ref.slot);
   return pr.finish();
 }
 

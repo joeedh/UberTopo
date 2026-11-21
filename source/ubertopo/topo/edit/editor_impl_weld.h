@@ -46,6 +46,9 @@ template <geom::CoordType C> EditCode Editor<C>::weld(std::span<const std::pair<
     if (find_edge(a, b)) {
       return pr.fail(EditCode::Adjacent, ElemKind::Edge, find_edge(a, b).i);
     }
+    if (vert_surfaced(a) || vert_surfaced(b)) {
+      return pr.fail(EditCode::SurfacedFace, ElemKind::Vertex, vert_surfaced(a) ? a.i : b.i);
+    }
     const bool a_lo = k_.vert_id(a) < k_.vert_id(b);
     ps.append({a_lo ? a : b, a_lo ? b : a});
   }

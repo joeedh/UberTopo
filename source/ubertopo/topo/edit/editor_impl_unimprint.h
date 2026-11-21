@@ -26,6 +26,9 @@ template <geom::CoordType C> EditCode Editor<C>::unimprint(EdgeRef e, FaceRef *s
     return pr.fail(EditCode::NotJoinable, ElemKind::Edge, e.i, "the edge doesn't separate two faces");
   }
   FaceRef f1 = k_.face_of(m0[0]), f2 = k_.face_of(m0[1]);
+  if (surfaced(f1) || surfaced(f2)) {
+    return pr.fail(EditCode::SurfacedFace, ElemKind::Face, surfaced(f1) ? f1.i : f2.i);
+  }
   /* the maximal chain through e: edges between f1 and f2, interior vertices
    * of degree 2 */
   auto joins = [&](EdgeRef x) {

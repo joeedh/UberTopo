@@ -742,6 +742,9 @@ EditCode Editor<C>::imprint(FaceRef f, std::span<const EdgeRef> chain, FaceRef *
   if (!k_.faces.live(f.i)) {
     return pr.fail(EditCode::DeadElement, ident::ElemKind::Face, f.i);
   }
+  if (surfaced(f)) {
+    return pr.fail(EditCode::SurfacedFace, ident::ElemKind::Face, f.i);
+  }
   litestl::util::Vector<uint32_t, 32> vs;
   bool closed = false;
   EditCode c = read_chain(f, chain, vs, closed);
@@ -779,6 +782,9 @@ template <geom::CoordType C> EditCode Editor<C>::add_hole(FaceRef f, std::span<c
   if (!k_.faces.live(f.i)) {
     return pr.fail(EditCode::DeadElement, ident::ElemKind::Face, f.i);
   }
+  if (surfaced(f)) {
+    return pr.fail(EditCode::SurfacedFace, ident::ElemKind::Face, f.i);
+  }
   litestl::util::Vector<uint32_t, 32> vs;
   bool closed = false;
   EditCode c = read_chain(f, chain, vs, closed);
@@ -813,6 +819,9 @@ template <geom::CoordType C> EditCode Editor<C>::remove_hole(FaceRef f, LoopRef 
   using ident::ElemKind;
   if (!k_.faces.live(f.i) || !k_.loops.live(l.i) || k_.face_of(l) != f) {
     return pr.fail(EditCode::BadArgument, ElemKind::Loop, l.i);
+  }
+  if (surfaced(f)) {
+    return pr.fail(EditCode::SurfacedFace, ElemKind::Face, f.i);
   }
   const int axis = edit_detail::face_axis<C>(k_, f);
   Skeleton<C> sk(k_);

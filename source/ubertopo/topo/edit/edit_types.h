@@ -67,6 +67,8 @@ enum class EditCode : uint16_t {
   HoleInside,     /* a hole would be nested in a new hole or island (refused) */
   EdgeShared,     /* a hole's edges or vertices belong to other faces */
   Coincident,     /* weld: the vertices of a pair are not at the same point */
+  /* P4b */
+  SurfacedFace, /* the edit would touch a face with a surface (plan P4b §5.2, OI-P4b-2) */
   /* results */
   Invalid,         /* the edit produced an invalid complex (see report().validation) */
   RegionsFailed,   /* build_regions failed (see report().region_code) */
@@ -113,11 +115,15 @@ enum class OpKind : uint8_t {
   /* P4a W6 */
   SetEdgeCurve, /* u: e, pool, slot, t0 lo, t0 hi, t1 lo, t1 hi (doubles as two words) */
   SplitEdgeAt,  /* u: e, t lo, t hi */
+  /* P4b W5 */
+  SetFaceSurface,  /* u: f, pool, slot, reversed, then (c, pool, slot) per listed pcurve */
+  SetCoedgePcurve, /* u: c, pool, slot */
 };
 
 /** Arguments of one operation: indices, IDs, points and raw bytes. The
  * payloads that hold PoolRefs: SetAttr bytes, which JournalRoots visits
- * through the column (plan P3 C9), and SetEdgeCurve's u[1], u[2]. */
+ * through the column (plan P3 C9); SetEdgeCurve's and SetCoedgePcurve's
+ * u[1], u[2]; SetFaceSurface's u[1], u[2] and each listed pcurve's pair. */
 template <geom::CoordType C> struct OpRecord {
   OpKind kind;
   litestl::util::Vector<uint32_t, 8> u;

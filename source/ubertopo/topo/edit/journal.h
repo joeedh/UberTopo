@@ -20,7 +20,8 @@
  *
  * JournalRoots registers everything the journal holds with a PoolStore
  * (DEC-015): captured row bytes, barrier snapshots, SetAttr payloads and
- * SetEdgeCurve payloads (plan P4a §5.2). A barrier snapshot's own store is
+ * SetEdgeCurve payloads (plan P4a §5.2), and SetFaceSurface and
+ * SetCoedgePcurve payloads (plan P4b §5.1). A barrier snapshot's own store is
  * not used: undo keeps the live store. */
 
 #include <cstdint>
@@ -217,8 +218,15 @@ private:
           }
         }
         for (OpRecord<C> &op : t.ops) {
-          if (op.kind == OpKind::SetEdgeCurve && op.u.size() >= 3) {
+          if ((op.kind == OpKind::SetEdgeCurve || op.kind == OpKind::SetCoedgePcurve) && op.u.size() >= 3) {
             raw(op.u.data() + 1);
+            continue;
+          }
+          if (op.kind == OpKind::SetFaceSurface && op.u.size() >= 4) {
+            raw(op.u.data() + 1);
+            for (uint32_t i = 4; i + 2 < uint32_t(op.u.size()); i += 3) {
+              raw(op.u.data() + i + 1);
+            }
             continue;
           }
           if (op.kind != OpKind::SetAttr || op.u.size() < 3 || op.u[0] >= kGroupCount) {

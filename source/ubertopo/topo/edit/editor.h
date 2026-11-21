@@ -23,9 +23,9 @@
  * Undoing a barrier (rebuild_regions) restores a snapshot of the whole
  * complex: pointers to dynamic columns taken before it must be fetched again.
  *
- * Curves (plan P4a §5.2): intern_curve adds definitions to the complex's
- * geometry store without journaling; set_edge_curve and split_edge_at are
- * journaled. The editor never renumbers the live store: undoing a barrier
+ * Curves (plan P4a §5.2): intern_geom (intern_curve) adds definitions to the
+ * complex's geometry store without journaling; set_edge_curve, split_edge_at,
+ * set_face_surface and set_coedge_pcurve are journaled (plan P4b §5.1). The editor never renumbers the live store: undoing a barrier
  * restores the groups and keeps the store, and the journal roots every ref
  * it holds (JournalRoots), so collects (collect_geometry, and every barrier
  * after it commits) never free an entry undo or redo could bring back.
@@ -46,6 +46,7 @@
 #include "litestl/io/bytes.h"
 #include "litestl/util/vector.h"
 #include "ubertopo/curves/curve.h"
+#include "ubertopo/curves/surface.h"
 #include "ubertopo/topo/complex.h"
 #include "ubertopo/topo/geom_store.h"
 #include "ubertopo/topo/edit/edit_types.h"
@@ -199,9 +200,16 @@ public:
    * non-finite definitions), its inner refs must be live and of kinds the
    * holder accepts, and its evaluator must build. Not journaled and not a
    * write: version() is unchanged, and an entry nothing references never
-   * changes a hash. Refused on a frozen complex. */
+   * changes a hash. Refused on a frozen complex. A surface kind's evaluator
+   * is its SurfaceEval (plan P4b §5.1). */
   template <typename T>
-  EditCode intern_curve(const curves::KindOps &kind, const T &def, litestl::attr::PoolRef *out);
+  EditCode intern_geom(const curves::KindOps &kind, const T &def, litestl::attr::PoolRef *out);
+  /** intern_geom under its P4a name. */
+  template <typename T>
+  EditCode intern_curve(const curves::KindOps &kind, const T &def, litestl::attr::PoolRef *out)
+  {
+    return intern_geom(kind, def, out);
+  }
   /** Sets the carrier of @p e: vertex vs[0] at carrier(t0), vs[1] at
    * carrier(t1) (plan P4a §5.1). @p ref NONE makes e straight, with range
    * (0, 0). Checks the kind and the range here; the endpoint rule is the
@@ -213,6 +221,19 @@ public:
    * split_edge; the chord skeleton changes, so incident planar faces must
    * stay planar (NonPlanarFace) and regions become dirty. */
   EditCode split_edge_at(EdgeRef e, double t, VertRef *v_out = nullptr, EdgeRef *e_out = nullptr);
+  /* ---- surfaces (P4b W5; editor_impl_curves.h) ---- */
+  /** Sets the surface of @p f, its Reversed flag, and the pcurves of all of
+   * its coedges in one step, so every validation mode sees a whole surfaced
+   * face: each listed coedge (of f, once) gets its pcurve, every other coedge
+   * of f gets NONE. @p ref NONE clears the surface, the pcurves and Reversed;
+   * it then takes reversed false and no pcurves. Refs must be NONE or live;
+   * the kind, range and fit rules are the validator's (plan P4b §4.2). */
+  EditCode set_face_surface(FaceRef f,
+                            litestl::attr::PoolRef ref,
+                            bool reversed,
+                            std::span<const std::pair<CoedgeRef, litestl::attr::PoolRef>> pcurves = {});
+  /** Sets one coedge's pcurve (NONE or live; rules as set_face_surface). */
+  EditCode set_coedge_pcurve(CoedgeRef c, litestl::attr::PoolRef ref);
   /** Frees the store entries that neither the complex, the journal nor
    * @p extra reach. Outside transactions only; a journal invalidated by an
    * outside write is dropped first. */
@@ -290,6 +311,13 @@ private:
    * fraction from vs[0]; @p t non-null for a curved split at *t. */
   EditCode split_impl(Prim &pr, EdgeRef e, const Point &p, double frac, const double *tc, VertRef *v_out, EdgeRef *e_out);
   EditCode validate_now(const litestl::util::Vector<uint32_t> *touched);
+  /* the faces the edits of plan P4b §5.2 refuse (SurfacedFace) */
+  bool surfaced(FaceRef f) const
+  {
+    return !k_.faces.template get<".f.surface">()[f.i].none();
+  }
+  bool edge_surfaced(EdgeRef e) const;
+  bool vert_surfaced(VertRef v) const;
   void touched_filter(ValidateFilter &flt, const litestl::util::Vector<uint32_t> *touched) const;
 
   /* ---- write helpers: capture first, then write (editor.cc) ---- */
@@ -415,7 +443,7 @@ private:
 
 template <geom::CoordType C>
 template <typename T>
-EditCode Editor<C>::intern_curve(const curves::KindOps &kind, const T &def, litestl::attr::PoolRef *out)
+EditCode Editor<C>::intern_geom(const curves::KindOps &kind, const T &def, litestl::attr::PoolRef *out)
 {
   namespace attr = litestl::attr;
   rep_ = EditReport{};
@@ -452,8 +480,9 @@ EditCode Editor<C>::intern_curve(const curves::KindOps &kind, const T &def, lite
     return fail(EditCode::BadArgument, "the definition is not canonical or not valid");
   }
   const attr::PoolRef ref = k_.geom.template intern<P>(pool, std::move(v));
-  const bool builds = curves::curve_dim(k_.geom, ref) == 3 ? bool(curves::curve3(k_.geom, ref))
-                                                            : bool(curves::curve2(k_.geom, ref));
+  const bool builds = kind.as_surface()                    ? bool(curves::surface(k_.geom, ref))
+                      : curves::curve_dim(k_.geom, ref) == 3 ? bool(curves::curve3(k_.geom, ref))
+                                                             : bool(curves::curve2(k_.geom, ref));
   if (!builds) {
     /* the entry stays until the next collect; nothing references it */
     return fail(EditCode::BadArgument, "the definition's evaluator does not build");

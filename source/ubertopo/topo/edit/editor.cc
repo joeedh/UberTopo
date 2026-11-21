@@ -67,6 +67,7 @@ const char *edit_code_name(EditCode c)
     UT_CASE(HoleInside)
     UT_CASE(EdgeShared)
     UT_CASE(Coincident)
+    UT_CASE(SurfacedFace)
 #undef UT_CASE
   }
   return "?";

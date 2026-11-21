@@ -1,4 +1,4 @@
-/* Curved edges in the editor (plan P4a W6, §5.2, §6.3): set_edge_curve and
+﻿/* Curved edges in the editor (plan P4a W6, Â§5.2, Â§6.3): set_edge_curve and
  * the endpoint rule, split_edge_at / join_edge, weld, the journal rooting
  * refs across collects and barriers, and freeze / write / read. */
 
@@ -7,6 +7,7 @@
 
 #include "support/curve_fixture.h"
 #include "support/edit_fixture.h"
+#include "ubertopo/curves/polyline.h"
 #include "ubertopo/topo/freeze.h"
 #include "ubertopo/topo/io.h"
 #include "ut_test.h"
@@ -161,7 +162,7 @@ template <geom::CoordType C> void test_set_and_split()
 /* a face edge with a carrier off one of its faces' planes: setting it is
  * fine (planarity reads the stored vertices; the in-plane check is OI-P4b-7),
  * though it changes the faces' skeletons and so dirties the regions (P4b
- * §4.3); splitting it is not fine */
+ * Â§4.3); splitting it is not fine */
 template <geom::CoordType C> void test_face_edge()
 {
   Fixture<C> fx;
@@ -208,7 +209,7 @@ template <geom::CoordType C> void test_face_split_ok()
   double s = 0;
   EXPECT_EDIT(ed, test::arc_carrier(ed, v[0], v[1], -0.3, &arc, &s), EditCode::Ok);
   EXPECT_EDIT(ed, ed.set_edge_curve(e, arc, fwd ? 0 : s, fwd ? s : 0), EditCode::Ok);
-  UT_CHECK(fx.k.regions_dirty); /* the face's skeleton changed (P4b §4.3) */
+  UT_CHECK(fx.k.regions_dirty); /* the face's skeleton changed (P4b Â§4.3) */
   EXPECT_EDIT(ed, ed.rebuild_regions(), EditCode::Ok);
   UT_CHECK(!fx.k.regions_dirty && fx.valid());
   VertRef m;
@@ -409,12 +410,76 @@ template <geom::CoordType C> void test_validate_direct()
   UT_CHECK(fx.valid());
 }
 
+/* split_edge_at re-sorts both pieces (OI-P4b-8). Three planar faces share
+ * the chord A B (along x) and an S-shaped polyline edge, A (1, 0.5) V
+ * (3, -0.5) B in plan, split at its middle knot V, which lies on the chord as
+ * planar faces require. Each face's plane is steep, so none sees the bend;
+ * its half-plane is set by the vertex Q after B, close to the chord. The
+ * pieces' first segments tilt opposite ways in plan, which swaps the last
+ * two faces about the piece from V.
+ *
+ * An accepted split can't show the second re-sort: V has degree 2, so
+ * VertexLink makes the pieces' orders agree, and the piece from V would
+ * keep the edge's order anyway. What the re-sort decides is how this split
+ * is refused: sorted about its own first segment, the piece from V
+ * contradicts the piece from A (VertexLink); left in the edge's order, it
+ * contradicts its own geometry instead (RadialOrder on that piece, as the
+ * W2 mutant shows). */
+template <geom::CoordType C> void test_split_resorts_both()
+{
+  Fixture<C> fx;
+  Builder<C> b;
+  constexpr double s = 64;
+  auto key = [&](uint64_t id, double x, double y, double z) {
+    return b.vertex(test::pid(9700 + id), fpt<C>(s * x, s * y, s * z));
+  };
+  const uint32_t A = key(0, 0, 0, 0), B = key(1, 4, 0, 0);
+  /* (y, z) of each face's Q: about 120, 240 and 270 degrees round x; the
+   * face runs A B Q, then out to 16 times as far along the same ray */
+  const double yz[3][2] = {{-0.125, 0.1875}, {-0.125, -0.1875}, {0, -0.25}};
+  for (int i = 0; i < 3; i++) {
+    const double y = yz[i][0], z = yz[i][1];
+    b.face(test::pid(9710 + i),
+           {{A, B, key(2 + 3 * i, 6, y, z), key(3 + 3 * i, 6, 16 * y, 16 * z), key(4 + 3 * i, 0, 16 * y, 16 * z)}});
+  }
+  BuildReport br;
+  RegionReport rr;
+  UT_CHECK(b.build(fx.k, br) && build_regions(fx.k, rr) && fx.valid());
+  Editor<C> ed(fx.k, &fx.j);
+  VertRef va, vb;
+  fx.k.verts.for_each_live([&](uint32_t v) {
+    const PersistentId id = fx.k.vert_id(VertRef(v));
+    va = id == test::pid(9700) ? VertRef(v) : va;
+    vb = id == test::pid(9701) ? VertRef(v) : vb;
+  });
+  const EdgeRef e = ed.find_edge(va, vb);
+  UT_CHECK(bool(e));
+  if (!e) {
+    return;
+  }
+  litestl::util::Vector<double, 12> pts;
+  for (double x : {0.0, 0.0, 0.0, 1.0, 0.5, 0.0, 2.0, 0.0, 0.0, 3.0, -0.5, 0.0, 4.0, 0.0, 0.0}) {
+    pts.append(s * x);
+  }
+  curves::Polyline3 pl;
+  UT_CHECK(curves::Polyline3::make(pts, pl) == nullptr);
+  PoolRef ref;
+  EXPECT_EDIT(ed, ed.intern_curve(curves::polyline3_kind(), pl, &ref), EditCode::Ok);
+  const bool fwd = fx.k.edge_verts(e)[0] == va;
+  EXPECT_EDIT(ed, ed.set_edge_curve(e, ref, fwd ? 0 : 4, fwd ? 4 : 0), EditCode::Ok);
+  UT_CHECK(fx.valid());
+  const PersistentId h0 = h(fx.k);
+  EXPECT_EDIT(ed, ed.split_edge_at(e, 2), EditCode::Invalid);
+  UT_CHECK(first_issue(ed) == ValidateCode::VertexLink && h(fx.k) == h0 && fx.valid());
+}
+
 template <geom::CoordType C> void all()
 {
   test_validate_direct<C>();
   test_set_and_split<C>();
   test_face_edge<C>();
   test_face_split_ok<C>();
+  test_split_resorts_both<C>();
   test_weld<C>();
   test_journal_roots<C>();
   test_barrier<C>();
