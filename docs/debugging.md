@@ -472,3 +472,17 @@ Entry format:
 - **Fix / technique:** sync the copy from litestl. To find the slow test, sort
   ctest's per-test times from the log, then compare the same test across the
   configurations.
+
+## UBSan: "downcast of address ... which does not point to an object of type 'Array'"
+- **Symptom:** under gcc-ubsan, litestl's `test_binding_functions` failed in
+  `BindingManager::add`. A fix to the cast UBSan named led to the same report
+  from another file on the next run.
+- **Cause:** binding code handled any array or struct binding by casting it to
+  one fixed specialisation (`Array<void>`, `Array<BindingBase>`, `Struct<void>`,
+  even `reinterpret_cast` to `Array<char>`). The object is some other `Array<T>`,
+  so the cast is undefined behaviour even when the layouts agree. UBSan stops at
+  the first report per test (`-fno-sanitize-recover`), so each run shows one site.
+- **Fix / technique:** cast to a non-template base that holds the fields
+  (`types::ArrayBase`, `types::_StructBase`). To find every site, search for
+  every spelling, not the one UBSan printed:
+  `(static|reinterpret)_cast<(const )?(types::)?(Array|Struct)<`.
