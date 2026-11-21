@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <map>
+#include <numbers>
 #include <set>
 #include <vector>
 
@@ -240,7 +241,7 @@ static std::vector<UV> star_polygon(SplitMix64 &r, int n, int64_t rmin, int64_t 
   for (int attempt = 0; attempt < 1000; attempt++) {
     std::vector<UV> p;
     for (int i = 0; i < n; i++) {
-      const double ang = 2 * M_PI * (i + 0.15 + 0.7 * r.unit()) / n;
+      const double ang = 2 * std::numbers::pi * (i + 0.15 + 0.7 * r.unit()) / n;
       const double rad = double(r.range(rmin, rmax));
       p.push_back({cx + int64_t(std::lround(rad * std::cos(ang))), cy + int64_t(std::lround(rad * std::sin(ang)))});
     }
@@ -567,7 +568,7 @@ template <CoordType C> static void test_performance()
       /* a finely tessellated round outline: points on a circle (convex arc) */
       std::vector<UV> arc;
       for (int i = 0; i < n_arc; i++) {
-        const double ang = 2 * M_PI * i / n_arc;
+        const double ang = 2 * std::numbers::pi * i / n_arc;
         arc.push_back({int64_t(std::lround(3e7 * std::cos(ang))), int64_t(std::lround(3e7 * std::sin(ang)))});
       }
       c.loops.push_back(arc);

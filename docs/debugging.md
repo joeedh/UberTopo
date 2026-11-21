@@ -188,6 +188,9 @@ Entry format:
 - **Fix / technique:** after reading, treat a dynamic Temp or Derived column as absent, and `ensure` it again if needed.
 
 ## Building the configuration matrix on the Windows workstation
+- **Retired 2026-11-21:** the matrix now runs in GitHub Actions, and the local
+  check builds natively on Windows (`docs/building.md`). This entry and the WSL
+  entries below are kept as history.
 - **Symptom:** the matrix needs Linux gcc and clang with ASan, UBSan and TSan, but the Windows host has only MSVC and clang-cl.
 - **Fix / technique:**
   - Use WSL Debian, with `clang gcc g++ cmake ninja-build git` installed from apt.
@@ -359,6 +362,7 @@ Entry format:
     comparison against NaN passes vacuously.
 
 ## WSL builds crawl when the sources live on /mnt/c
+- **Retired 2026-11-21** with the WSL matrix (`docs/building.md`).
 - **Symptom:** the full matrix took far longer than its CPU work suggested. Windows
   showed WSL at ~6.5 % CPU. Inside WSL, every compiler process sat in state `D`
   (waiting on I/O) at ~1.5 % CPU, with a load average of ~2.6 on 16 cores, although
@@ -379,6 +383,7 @@ Entry format:
   - Adding cores through `.wslconfig` doesn't help an I/O-bound build.
 
 ## Builds from the WSL mirror link stale objects
+- **Retired 2026-11-21** with the WSL matrix (`docs/building.md`).
 - **Symptom:** after a sync, gcc-ubsan and gcc-tsan failed to link with undefined
   references to new editor functions, although the mirror's headers declared and
   defined them. In clang-rel, a test failed exactly as it had under a mutant that
@@ -456,3 +461,14 @@ Entry format:
 - **Fix / technique:** when several refusals share an `EditCode`, check the
   report's detail text too (`detail_has` in `test_edit_surfaces`). To see why a
   mutant survives, apply it by hand and print `ed.report().detail` after the call.
+
+## A test takes minutes under MSVC's ASan but seconds in Release
+- **Symptom:** `test_geom_cdt` took 808 s in `msvc-asan`, against 113 s in
+  gcc-asan and 9 s in Release. Every other test took under 50 s.
+- **Cause:** its exact oracle (`tests/support/bigint_oracle.h`) copied
+  `std::vector` limbs on every determinant expansion. Heap churn is what MSVC's
+  ASan allocator handles worst. litestl had already fixed its own copy of the
+  oracle (`9a2cd92`), but UberTopo's hand-kept copy was older.
+- **Fix / technique:** sync the copy from litestl. To find the slow test, sort
+  ctest's per-test times from the log, then compare the same test across the
+  configurations.

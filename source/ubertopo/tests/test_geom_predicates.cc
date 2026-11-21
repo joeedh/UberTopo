@@ -10,8 +10,10 @@
 #include "support/splitmix64.h"
 #include "ut_test.h"
 
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <numbers>
 #include <vector>
 
 using namespace ubertopo;
@@ -220,7 +222,7 @@ template <CoordType C> static void test_point_in_poly_random()
     std::vector<std::vector<std::array<int64_t, 2>>> loops(1);
     const int n = 3 + int(r.below(9));
     for (int i = 0; i < n; i++) {
-      const double ang = 2 * M_PI * (i + 0.2 + 0.6 * r.unit()) / n;
+      const double ang = 2 * std::numbers::pi * (i + 0.2 + 0.6 * r.unit()) / n;
       const double rad = 6 + double(r.below(8));
       loops[0].push_back({int64_t(std::lround(rad * std::cos(ang))), int64_t(std::lround(rad * std::sin(ang)))});
     }

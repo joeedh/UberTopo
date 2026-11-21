@@ -1,0 +1,79 @@
+# The configuration matrix (docs/building.md). Every configuration is a
+# CMake workflow preset in CMakePresets.json, so a job is one command.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: ${{ matrix.preset }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [clang-rel, gcc-rel, clang-v3, clang-noint128, gcc-asan, gcc-ubsan, gcc-tsan]
+    steps:
+      # The pinned litestl commit must already be on github.com/joeedh/litestl.
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install ninja
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
+
+      # gcc's TSan runtime can't map its shadow memory with the runner
+      # kernel's 32 bits of mmap randomisation.
+      - name: Reduce mmap randomisation for TSan
+        if: matrix.preset == 'gcc-tsan'
+        run: sudo sysctl vm.mmap_rnd_bits=28
+
+      - name: Configure, build and test
+        run: cmake --workflow --preset ${{ matrix.preset }}
+
+      - name: Upload the test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-${{ matrix.preset }}
+          path: build/${{ matrix.preset }}/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+
+  windows:
+    name: ${{ matrix.preset }}
+    runs-on: windows-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [clang-cl-rel, msvc-rel, msvc-asan]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # configureEnv.mjs applies vcvars64 from the newest Visual Studio, which
+      # brings cl, clang-cl, CMake and Ninja.
+      - name: Configure, build and test
+        run: node source/litestl/configureEnv.mjs cmake --workflow --preset ${{ matrix.preset }}
+
+      - name: Upload the test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-${{ matrix.preset }}
+          path: build/${{ matrix.preset }}/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore

@@ -1,0 +1,170 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": { "CMAKE_EXPORT_COMPILE_COMMANDS": "ON" }
+    },
+    {
+      "name": "linux",
+      "hidden": true,
+      "inherits": "base",
+      "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": { "UT_LITESTL_TESTS": "ON" }
+    },
+    {
+      "name": "linux-gcc",
+      "hidden": true,
+      "inherits": "linux",
+      "cacheVariables": { "CMAKE_C_COMPILER": "gcc", "CMAKE_CXX_COMPILER": "g++" }
+    },
+    {
+      "name": "linux-clang",
+      "hidden": true,
+      "inherits": "linux",
+      "cacheVariables": { "CMAKE_C_COMPILER": "clang", "CMAKE_CXX_COMPILER": "clang++" }
+    },
+    {
+      "name": "windows",
+      "hidden": true,
+      "inherits": "base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "clang-rel",
+      "displayName": "clang, Release",
+      "inherits": "linux-clang",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "gcc-rel",
+      "displayName": "gcc, Release",
+      "inherits": "linux-gcc",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "clang-v3",
+      "displayName": "clang, Release, x86-64-v3",
+      "inherits": "linux-clang",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_FLAGS": "-march=x86-64-v3",
+        "CMAKE_CXX_FLAGS": "-march=x86-64-v3"
+      }
+    },
+    {
+      "name": "clang-noint128",
+      "displayName": "clang, Release, portable wide integers",
+      "inherits": "linux-clang",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "LITESTL_NO_INT128": "ON" }
+    },
+    {
+      "name": "gcc-asan",
+      "displayName": "gcc, Debug, AddressSanitizer",
+      "inherits": "linux-gcc",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "UT_SANITIZE": "address" }
+    },
+    {
+      "name": "gcc-ubsan",
+      "displayName": "gcc, Debug, UndefinedBehaviorSanitizer",
+      "inherits": "linux-gcc",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "UT_SANITIZE": "undefined" }
+    },
+    {
+      "name": "gcc-tsan",
+      "displayName": "gcc, RelWithDebInfo, ThreadSanitizer, attr checks",
+      "inherits": "linux-gcc",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "UT_SANITIZE": "thread",
+        "CMAKE_C_FLAGS": "-DLITESTL_ATTR_CHECKS=1",
+        "CMAKE_CXX_FLAGS": "-DLITESTL_ATTR_CHECKS=1"
+      }
+    },
+    {
+      "name": "clang-cl-rel",
+      "displayName": "clang-cl, Release (run under configureEnv.mjs)",
+      "inherits": "windows",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang-cl",
+        "CMAKE_CXX_COMPILER": "clang-cl",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "msvc-rel",
+      "displayName": "MSVC, Release (run under configureEnv.mjs)",
+      "inherits": "windows",
+      "cacheVariables": { "CMAKE_C_COMPILER": "cl", "CMAKE_CXX_COMPILER": "cl", "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "msvc-asan",
+      "displayName": "MSVC, RelWithDebInfo, AddressSanitizer (run under configureEnv.mjs)",
+      "inherits": "windows",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "UT_SANITIZE": "address"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "clang-rel", "configurePreset": "clang-rel" },
+    { "name": "gcc-rel", "configurePreset": "gcc-rel" },
+    { "name": "clang-v3", "configurePreset": "clang-v3" },
+    { "name": "clang-noint128", "configurePreset": "clang-noint128" },
+    { "name": "gcc-asan", "configurePreset": "gcc-asan" },
+    { "name": "gcc-ubsan", "configurePreset": "gcc-ubsan" },
+    { "name": "gcc-tsan", "configurePreset": "gcc-tsan" },
+    { "name": "clang-cl-rel", "configurePreset": "clang-cl-rel" },
+    { "name": "msvc-rel", "configurePreset": "msvc-rel" },
+    { "name": "msvc-asan", "configurePreset": "msvc-asan" }
+  ],
+  "testPresets": [
+    {
+      "name": "test-base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "jobs": 8, "timeout": 1800 },
+      "environment": { "LITESTL_TEST_NO_BREAK": "1" }
+    },
+    {
+      "name": "test-sanitized",
+      "hidden": true,
+      "inherits": "test-base",
+      "environment": { "LITESTL_TEST_NO_BREAK": "1", "LITESTL_TEST_SCALE_DIV": "4" }
+    },
+    { "name": "clang-rel", "inherits": "test-base", "configurePreset": "clang-rel" },
+    { "name": "gcc-rel", "inherits": "test-base", "configurePreset": "gcc-rel" },
+    { "name": "clang-v3", "inherits": "test-base", "configurePreset": "clang-v3" },
+    { "name": "clang-noint128", "inherits": "test-base", "configurePreset": "clang-noint128" },
+    { "name": "gcc-asan", "inherits": "test-sanitized", "configurePreset": "gcc-asan" },
+    {
+      "name": "gcc-ubsan",
+      "inherits": "test-sanitized",
+      "configurePreset": "gcc-ubsan",
+      "environment": { "LITESTL_TEST_NO_BREAK": "1", "LITESTL_TEST_SCALE_DIV": "4", "UBSAN_OPTIONS": "print_stacktrace=1" }
+    },
+    { "name": "gcc-tsan", "inherits": "test-sanitized", "configurePreset": "gcc-tsan" },
+    { "name": "clang-cl-rel", "inherits": "test-base", "configurePreset": "clang-cl-rel" },
+    { "name": "msvc-rel", "inherits": "test-base", "configurePreset": "msvc-rel" },
+    { "name": "msvc-asan", "inherits": "test-sanitized", "configurePreset": "msvc-asan" }
+  ],
+  "workflowPresets": [
+    { "name": "clang-rel", "steps": [{ "type": "configure", "name": "clang-rel" }, { "type": "build", "name": "clang-rel" }, { "type": "test", "name": "clang-rel" }] },
+    { "name": "gcc-rel", "steps": [{ "type": "configure", "name": "gcc-rel" }, { "type": "build", "name": "gcc-rel" }, { "type": "test", "name": "gcc-rel" }] },
+    { "name": "clang-v3", "steps": [{ "type": "configure", "name": "clang-v3" }, { "type": "build", "name": "clang-v3" }, { "type": "test", "name": "clang-v3" }] },
+    { "name": "clang-noint128", "steps": [{ "type": "configure", "name": "clang-noint128" }, { "type": "build", "name": "clang-noint128" }, { "type": "test", "name": "clang-noint128" }] },
+    { "name": "gcc-asan", "steps": [{ "type": "configure", "name": "gcc-asan" }, { "type": "build", "name": "gcc-asan" }, { "type": "test", "name": "gcc-asan" }] },
+    { "name": "gcc-ubsan", "steps": [{ "type": "configure", "name": "gcc-ubsan" }, { "type": "build", "name": "gcc-ubsan" }, { "type": "test", "name": "gcc-ubsan" }] },
+    { "name": "gcc-tsan", "steps": [{ "type": "configure", "name": "gcc-tsan" }, { "type": "build", "name": "gcc-tsan" }, { "type": "test", "name": "gcc-tsan" }] },
+    { "name": "clang-cl-rel", "steps": [{ "type": "configure", "name": "clang-cl-rel" }, { "type": "build", "name": "clang-cl-rel" }, { "type": "test", "name": "clang-cl-rel" }] },
+    { "name": "msvc-rel", "steps": [{ "type": "configure", "name": "msvc-rel" }, { "type": "build", "name": "msvc-rel" }, { "type": "test", "name": "msvc-rel" }] },
+    { "name": "msvc-asan", "steps": [{ "type": "configure", "name": "msvc-asan" }, { "type": "build", "name": "msvc-asan" }, { "type": "test", "name": "msvc-asan" }] }
+  ]
+}
