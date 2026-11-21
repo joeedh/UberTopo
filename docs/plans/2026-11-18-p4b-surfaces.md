@@ -15,8 +15,9 @@
   - [road-alignment-standards](../research/curves/road-alignment-standards.md)
     (crossfall and superelevation);
   - DEC-014 (projected faces and the canonical CDT).
-- **Status:** v2, after a fresh-context review of v1 (§11). The owner confirmed the
-  decisions marked **(owner)** on 2026-11-19 (§11).
+- **Status:** implemented 2026-11-21 (DEC-019; notes in §13). v2, after a fresh-context
+  review of v1 (§11). The owner confirmed the decisions marked **(owner)** on 2026-11-19
+  (§11).
 
 ## 1. Split: P4b now, P4c later
 
@@ -1002,3 +1003,37 @@ same ids.
 - **Matrix:** the local check (clang-cl-rel and msvc-asan) passes 31/31 with no
   warnings. CI runs on the push.
 
+**W7:**
+- **Benchmark** (`bench_surfaces`, clang-cl Release, reported and not gated):
+
+  | | `double` | `Lattice` |
+  |---|---|---|
+  | `place_road` (OnCommit, validation included) | 754 ms | 740 ms |
+  | `validate(Global)`, terrain alone (1600 faces) | 48 ms | 29 ms |
+  | `validate(Global)`, with the road (1663 faces) | 515 ms | 432 ms |
+  | of which up to Embedding | 92 ms | 88 ms |
+  | of which the surface checks | 63 ms | 63 ms |
+  | skeleton flattening points (140 curved edges) | 360 | 360 |
+
+  - `road3` evaluates at 7.0 M points/s for S alone and 5.3 M/s with partials to
+    order 2.
+  - **Most of the road's validation cost is in the Global layer:** about 420 ms,
+    against 39 ms for the terrain alone, for 63 more faces. It isn't profiled yet.
+    The fill face is the obvious suspect, since it is one face with 278 triangles
+    whose box covers the whole hole. P4c should profile it before a city-scale
+    road network.
+- **§9 mutation run:** all 102 P4b mutants, run natively against the final code. 97
+  are killed. The 5 survivors are the equivalents recorded in W2, W3, W4 and W6.
+  The first pass left three more, each now killed:
+  - *`segment2` `eval_error` set to 0* (W1) survived natively. `test_curves_pcurve`
+    used a `long double` oracle, which is `double` under clang-cl and MSVC. It now
+    computes the exact residual with `fma` and TwoSum (`docs/debugging.md`).
+  - *The pool-limit guard ignoring later pools* (W1) is killed by litestl's
+    `test_attr_pool`, as W1 found, but that test wasn't in the mutant's list. The
+    native runner now builds litestl's tests.
+  - *Z_k + w·(Z_(k+1) − Z_k)* (W3, §9 item 3) can only show when a link's border
+    heights have opposite signs, so that their difference rounds. Every fixture's
+    heights have one sign. `test_curves_road` gained a road with heights of 0.01 and
+    −0.06 for its bitwise-border check. W3's gcc run killed it; the native run shows
+    that the kill rested on how one compiler rounded, not on the test's design.
+- **Docs:** DEC-019; 07 §17 and its status; 05's status; 06's P4 row; the index.

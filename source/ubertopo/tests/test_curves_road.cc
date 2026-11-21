@@ -272,6 +272,21 @@ void test_border_bits()
     UT_CHECK(build(f, b));
     n += border_bits(b, f.name);
   }
+  {
+    /* border heights of opposite signs (0.01 and -0.06): Z_(k+1) - Z_k
+     * rounds, so Z_k + w (Z_(k+1) - Z_k) misses Z_(k+1) at w = 1, and only
+     * the convex form is exact there (§9 item 3). The fixtures' heights all
+     * have one sign, and a profile through zero cancels to a coarse grid that
+     * subtracts exactly. Not an oracle fixture. */
+    using namespace test::road_fx;
+    RoadFixture f{"opposite_signs", {"line", 0.0, 0.0, 0.25, {{200.0, 0, 0, 0, 0}}, {}}, {}, {}, {}, {0.5}};
+    f.borders = {constant(-3.5, 0, 200), constant(0, 0, 200), constant(3.5, 0, 200)};
+    f.heights = {constant(-0.06, 0, 200), constant(0.01, 0, 200), constant(-0.06, 0, 200)};
+    f.stations = {50.5};
+    Built b;
+    UT_CHECK(build(f, b));
+    n += border_bits(b, f.name);
+  }
   printf("road borders: %d bitwise comparisons\n", n);
 }
 

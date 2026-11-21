@@ -2,7 +2,8 @@
 
 - **Status:** P2 complete 2026-11-18 (plan [P2](../../plans/2026-11-18-p2-cell-complex.md):
   P2a, then P2b with amendment A1). P3a editing complete 2026-11-18 (§14; plan
-  [P3](../../plans/2026-11-18-p3-editing.md)).
+  [P3](../../plans/2026-11-18-p3-editing.md)). P4a curves (§16) and P4b surfaces
+  (§17) complete 2026-11-21.
 - **Scope:** the realised API of `geom/`, `ident/` and `topo/`. The design rationale
   stays in [01](01-cell-complex.md), [02](02-coordinates-and-predicates.md) and
   [04](04-identity-versions-journal.md); this file records names, contracts and the
@@ -579,3 +580,79 @@ All four are Topo.
 - `CurveRange`;
 - `CurveEndpoint`;
 - `GeometryUnsupported` (pcurves, surfaces, non-zero `.e.geom_flags`).
+
+## 17. Surfaces, pcurves and the refined skeleton (P4b)
+
+Plan [2026-11-18-p4b-surfaces.md](../../plans/2026-11-18-p4b-surfaces.md); DEC-019.
+
+**Kinds** (`curves/`):
+- **`road3`** (`road.h`): a ruled road surface over a `cesaro2` reference. S(s, t) =
+  r(s) + t·N(s) + Z(s, t)·e_z, with t a horizontal offset and Z linear in t between
+  border heights. Each link (the strip between two borders) is one piece.
+- **`graph2`** (t = f(s)) and **`segment2`** (`pcurve.h`): pcurves in a surface's
+  (s, t) space. Their pieces are `Fn1D`s (`fn1d.h`): polynomials in σ = s − break.
+- **`SurfaceEval`** (`surface.h`): `eval(u, v, n, out)` gives S and its partials to
+  order 2, with one-sided limits at breaks. `eval_piece` evaluates on a given link.
+  It also reports `eval_error`, `deriv_eval_error(k)` and box derivative bounds.
+- **`build_road`** (`road_build.h`), a generator helper and not a kind: from a
+  reference, a centre profile and a cross-section of links, it interns the `road3`
+  and each border's `offset2`, `alignment3` carrier and `graph2` pcurve.
+
+**Accept rules and columns:**
+- `.f.surface` takes `road3`. The face flag `Reversed` gives its orientation.
+- `.c.pcurve` takes `graph2` on a curved edge's coedge and `segment2` on a straight
+  edge's, only where the coedge's face has a surface. Every coedge of a surfaced face
+  has one.
+- `road3` names a `cesaro2`. Nothing names a `road3`, `graph2` or `segment2`.
+- **Same parameter:** a curved edge's pcurve takes the edge's carrier parameter over
+  `.e.range`; a straight edge's takes λ ∈ [0, 1] from `vs[0]` to `vs[1]`.
+- `.g.skeleton_tol`: Topo, `double`, default 2⁻⁶ frame units. It is left out of the
+  topology hash (it is in frame units).
+
+**The refined skeleton** (`topo/face_skeleton.h`):
+- **`Skeleton<C>`** holds each curved edge's flattening at `skeleton_tol`, rounded to
+  `C`. Its points are numbered from the vertex count, in one table per validation pass
+  or editor operation. `warm()` fills it up front for parallel readers.
+- **`FacePoints::gather(k, f, sk)`** expands a face's loops to skeleton points (`ids`,
+  with the `owner` coedge of each). `gather(k, f)` stays vertices-only.
+- **Readers:** projection and T(f), radial order, contacts (`skel_point_on_face`,
+  `skel_segment_on_face`), wire–face tests, containers, regions, face boxes and the
+  editor's grid.
+- **`face_planar_rule`** (`face_geom.h`): the stored vertices decide planarity, unless
+  they are degenerate (a loop of arcs), when the skeleton decides.
+- With no curved edges, everything reads exactly the stored vertices.
+
+**Editor** (`edit/editor_impl_curves.h`):
+- **`intern_geom(kind, def, &ref)`** takes every kind (`intern_curve` is its P4a
+  name).
+- **`set_face_surface(f, ref, reversed, pcurves)`** sets a face's surface, its
+  `Reversed` flag and every coedge's pcurve in one journaled step, so every validation
+  mode sees a whole surfaced face. NONE clears all three.
+- **`set_coedge_pcurve(c, ref)`** is journaled.
+- `split_edge_at` and curved `join_edge` keep pcurve refs.
+- **`SurfacedFace`** refuses the edits that would need pcurve rules on a surfaced face:
+  `split_edge` and `join_edge` on straight edges, `split_face`, `join_faces`,
+  `imprint`, `unimprint`, `add_hole`, `remove_hole` and `weld` (OI-P4b-2).
+
+**Validation** (`validate_surfaces.cc`, after the curve checks), per surfaced face:
+- `SurfaceKind`, `PcurveKind`, `PcurveRange`: refs, kinds and domains;
+- `SurfaceLink`: one link holds every pcurve;
+- `PcurveVertex`: S(pcurve) at each coedge end against its vertex;
+- `PcurveDeviation`: the edge against S(pcurve) along its range, structurally for road
+  borders and by a second-order bound otherwise;
+- `SurfaceOrientation`: `Reversed` against the surface normal.
+
+`SkeletonDegenerate` reports a refined skeleton that touches its own loop or another,
+and a curved edge that doesn't flatten at `skeleton_tol`. `GeometryUnsupported` now
+means only a non-zero `.e.geom_flags`.
+
+**Format and I/O:** UTCX format 4 (`kComplexFormat`). The new kinds are appended to
+the store. Format 3 reads through a migration that checks its stored hash over the
+first `kFormat3Pools` (6) pools.
+
+**The acceptance generator** (`tests/gen/road_terrain.h`): a 2 km terrain sheet of
+40 × 40 projected quads, and a 1.2 km road placed into it in one transaction. The
+transaction kills the cells under the road, adds road faces with their surface and
+pcurves, and makes a fill face from the hole's boundary to the road's outline. It
+builds in `double` and `Lattice`, whose definitions differ only by an exact power-of-two
+scale.

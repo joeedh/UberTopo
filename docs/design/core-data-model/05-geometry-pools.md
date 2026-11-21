@@ -7,6 +7,17 @@ Part of the [core data model design](README.md). Research basis:
 [attributes-and-queries/embedded-geometry-attributes](../../research/attributes-and-queries/embedded-geometry-attributes.md).
 The pool pattern is taken from Sculptcore's `DeformPool`.
 
+> **Status (2026-11-21): P4b is done (DEC-019,
+> [07 §17](07-topology-api.md#17-surfaces-pcurves-and-the-refined-skeleton-p4b)).**
+> - **`RoadSurface` is `road3`,** narrower than §4's row: a ruled surface between
+>   border heights, with t a horizontal offset rather than OpenDRIVE's tilted one.
+> - **Pcurves are `graph2` (t = f(s)) and `segment2`,** on the coedges of surfaced faces
+>   only. §1's "derived by projection when needed" and the per-edge primary flag are
+>   not implemented: the flag bit stays reserved.
+> - **Planar faces still have no stored `Plane`**, and `Heightfield`, `Sweep` and
+>   `BSplineSurface` are not implemented. All four, with inversion and intersection
+>   queries, are P4c.
+>
 > **Status (2026-11-18): P4a is done (DEC-018,
 > [07 §16](07-topology-api.md#16-curves-and-the-geometry-store-p4a)).** `Complex`
 > holds the geometry store, edges carry 3D curves (`cesaro2` horizontals through

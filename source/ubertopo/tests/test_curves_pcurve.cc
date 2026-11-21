@@ -117,8 +117,14 @@ void test_segment2()
     const double t = i / 1000.0;
     Vec<2> out[3];
     c->eval(t, 2, out, Side::Above);
+    /* the exact residuals by error-free transformations, not long double,
+     * which is double under MSVC's ABI (it would see no error at all) */
+    const double rx = std::fma(t, 7.25, -out[0][0]);
+    const double p = t * -5.5, ep = std::fma(t, -5.5, -p);
+    const double s2 = 2.5 + p, bb = s2 - 2.5, es = (2.5 - (s2 - bb)) + (p - bb);
+    const double ry = (s2 - out[0][1]) + (es + ep); /* s2 - out exact (Sterbenz) */
+    bad += std::hypot(rx, ry) > e0 ? 1 : 0;
     const LD x = LD(t) * 7.25L, y = 2.5L + LD(t) * (-5.5L);
-    bad += std::hypot(LD(out[0][0]) - x, LD(out[0][1]) - y) > LD(e0) ? 1 : 0;
     bad += std::hypot(x, y) > LD(b0) || std::hypot(7.25L, 5.5L) > LD(b1) ? 1 : 0;
     bad += out[1][0] != 7.25 || out[1][1] != -5.5 || out[2][0] != 0 || out[2][1] != 0 ? 1 : 0;
   }

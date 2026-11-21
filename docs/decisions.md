@@ -744,6 +744,86 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
 
 ---
 
+## DEC-019 — P4b: road surfaces, pcurves, the refined skeleton, a road on terrain
+
+- **Date:** 2026-11-21
+- **Status:** accepted (implemented in P4b; plan
+  [2026-11-18-p4b-surfaces.md](plans/2026-11-18-p4b-surfaces.md), fresh-context review
+  recorded there). The rest of P4a's "P4b" list moved to P4c (plan §1).
+- **Decisions:**
+  - **The acceptance case is hole and fill (owner).** The terrain cells a buffer around
+    the road overlaps are removed. The road's faces carry a `road3` surface and
+    pcurves, and one projected fill face joins them to the terrain: its outer loop is
+    the hole's boundary and its hole loop is the road's outline.
+    - Literal imprinting would need vertices on both a straight terrain edge and a road
+      border, which only exist if the road follows the terrain exactly.
+    - Daylight lines found by slope are P4c.
+  - **`road3`**, a ruled road surface: S(s, t) = r(s) + t·N(s) + Z(s, t)·e_z.
+    - **t is a horizontal offset (owner).** r and N are the `cesaro2` reference's point
+      and left normal, so border k's footprint is `offset2(reference, b_k)` exactly.
+    - Z interpolates linearly in t between the border heights Z_k(s). Crossfall, crown
+      and superelevation are expressed through the Z_k.
+    - Border k's edges carry `alignment3(offset2(reference, b_k), Z_k)`. The
+      evaluation is pinned so that the border lies on S bit for bit.
+    - Each link (the strip between two borders) is one piece.
+  - **Pcurves** are `graph2` (t = f(s)) on a curved edge's coedge and `segment2` on a
+    straight edge's.
+    - **Same parameter:** a curved edge's pcurve takes the edge's carrier parameter; a
+      straight edge's takes λ ∈ [0, 1] from `vs[0]` to `vs[1]`. So `split_edge_at` and
+      `join_edge` keep pcurve refs unchanged on curved edges.
+    - Every coedge of a surfaced face has a pcurve, and no other coedge does.
+  - **Validation is certified, not exact.** New checks: `SurfaceKind`, `PcurveKind`,
+    `PcurveRange`, `SurfaceLink`, `PcurveVertex`, `PcurveDeviation` (structural for
+    road borders, by a second-order bound otherwise) and `SurfaceOrientation`.
+    Tolerances follow P4a's endpoint rule.
+  - **Surfaced faces may be planar or projected.** The surface is the face's geometry;
+    the skeleton classification only drives the topological tests.
+  - **The refined skeleton.** A curved edge contributes its deterministic flattening
+    at `.g.skeleton_tol` (default 2⁻⁶ frame units) to every test that reads face loop
+    points: projection and T(f), radial order, contacts, wire–face tests, containers,
+    regions, face boxes and the editor's grid.
+    - Flattening points are rounded to `C`, numbered after the stored vertices in one
+      table per pass (`Skeleton<C>`), and never stored or hashed.
+    - Planarity is still decided on the stored vertices (OI-P4b-7).
+  - **The editor.** `intern_geom` (P4a's `intern_curve`) takes every kind;
+    `set_face_surface` and `set_coedge_pcurve` are journaled.
+    - Edits that would need pcurve rules on surfaced faces are refused with
+      `SurfacedFace`: `split_edge` and `join_edge` on straight edges, `split_face`,
+      `join_faces`, `imprint`, `unimprint`, `add_hole`, `remove_hole` and `weld`.
+    - `split_edge_at` and curved `join_edge` keep the pcurves.
+  - **UTCX format 4.** The new kinds are appended to the store and `.g.skeleton_tol`
+    joins the global schema. Format 3 reads through a migration that checks its hash
+    over the first 6 pools (litestl `PoolStore::hash_into` with a pool limit).
+  - **The topology hash leaves out `.g.skeleton_tol`**, which is in frame units, as it
+    leaves out positions.
+- **Goldens:**
+  - `test_edit_random` (600 steps, `double`):
+    - seed 1: `{0x43da9c3224b285d1, 0x11a35c20a48e069f}`;
+    - seed 2: `{0x339f00b89b89cc36, 0x14bd7d328afdb162}`;
+    - seed 3: `{0x0071f444ac2078f3, 0xdde9a7286c002ad9}`.
+
+    Re-pinned in W1 (three pools and a global; structure goldens unchanged) and in W2
+    (behaviourally, the refined skeleton).
+  - P2 determinism topology: `{0x2a499b7b7287dea1, 0x2505140161e20813}`, its structure
+    golden unchanged.
+  - Road on terrain, content after placement:
+    - `double`: `{0xb1593a8a3b173e70, 0xb2acc08bad884e5c}`;
+    - `Lattice`: `{0xa5b9cd7c66cd53cb, 0x0764de8ea7e76939}`.
+
+    The two builds have equal coordinate-free structure hashes.
+- **Open:** OI-P4b-1 to OI-P4b-7 (plan §10):
+  - OI-P4b-1: contacts and regions are decided on the skeleton, within skeleton_tol of
+    the true geometry;
+  - OI-P4b-2: few edits on surfaced faces;
+  - OI-P4b-3: lane widths are horizontal, not along the tilted surface as in
+    OpenDRIVE;
+  - OI-P4b-4: the fill face is the CDT of its boundary, not an embankment design;
+  - OI-P4b-5: skeleton_tol is in frame units, so `Lattice` generators must set it;
+  - OI-P4b-6: no inversion queries;
+  - OI-P4b-7: a planar face's curved carriers aren't checked against its plane.
+
+---
+
 ## Open questions
 
 - ~~Q-A — WASM target~~ → DEC-005 (native N-API in a Chromium shell).

@@ -515,3 +515,19 @@ Entry format:
 - **Fix / technique:** edit with the editor tools or Python (`open(p, 'rb')`),
   not PowerShell string replacement. To repair a file, strip the BOM and
   reverse the mis-decoding: `s.encode('cp1252').decode('utf-8')`.
+
+## A mutant killed on Linux survives on Windows: `long double` oracles
+- **Symptom:** setting `segment2`'s `eval_error` to 0 was killed by
+  `test_curves_pcurve` under gcc, but survived the native clang-cl mutation run.
+- **Cause:** the test recomputed the point in `long double` and measured the
+  error against that. Under MSVC's ABI, which clang-cl follows, `long double` is
+  `double`. The "oracle" then rounds exactly like the evaluator, measures an
+  error of 0, and a zero bound passes.
+- **Fix / technique:**
+  - For a short expression, compute the exact residual with error-free
+    transformations: `std::fma(a, b, -p)` is the product's rounding error, and
+    TwoSum gives a sum's. `test_curves_pcurve`'s `segment2` check does this.
+  - For anything longer, use the quad or BigInt oracles.
+  - Other tests that use `long double` (`using LD`) only test their bounds on
+    Linux. A mutant they alone kill must be confirmed there (CI), not by the
+    native run.
