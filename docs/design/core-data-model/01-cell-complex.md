@@ -266,6 +266,8 @@ records ([04 §6](04-identity-versions-journal.md#6-journal)).
 - **Fast paths deferred (OI-P3-1, narrowed in P3b).** Every face edit sets
   `regions_dirty`. Since DEC-017 a hinted region's ID no longer depends on its
   minimum side, but incremental maintenance still waits for a measured need.
+  The full rebuild is now linear bookkeeping plus geometry (plan
+  [2026-11-23](../../plans/2026-11-23-region-maintenance.md)).
 - **P3b added** `imprint` / `unimprint`, `add_hole` / `remove_hole` and `weld` (which
   merges vertex pairs; the `merge_vertices` above) — see
   [07 §15](07-topology-api.md#15-editing-additions-p3b). `connect_loops` is still to

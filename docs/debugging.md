@@ -568,3 +568,15 @@ Entry format:
   - Recovery: HEAD plus the lost lines. The session transcript (the `.jsonl`
     under `~/.claude/projects/`) holds earlier diffs and reads that show their
     exact text and position.
+
+## A restored source file isn't rebuilt (copy keeps the old timestamp)
+- **Symptom:** "old" and "new" benchmark binaries, built after swapping a source
+  file out and back, were byte-identical. Both held the swapped-in old code, and so
+  did the build tree.
+- **Cause:** PowerShell's `Copy-Item` (like `cp -p`) keeps the source file's
+  modification time. The restored file was older than the object built from the
+  temporary version, so ninja saw nothing to rebuild.
+- **Fix / technique:**
+  - After restoring a file by copying, touch it:
+    `(Get-Item f).LastWriteTime = Get-Date`, or `touch f`.
+  - Compare the binaries' hashes before trusting an A/B timing.

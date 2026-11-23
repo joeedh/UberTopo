@@ -1,6 +1,6 @@
 # Plan: cheaper region rebuilds (OI-P3-1)
 
-Status: **v2**, after a fresh-context review (§7). Stage A is ready to implement;
+Status: **v2**, after a fresh-context review (§7). **Stage A implemented** (§9);
 Stage B is a design outline waiting on decision D1.
 
 ## 1. Why and scope
@@ -283,3 +283,65 @@ The steps:
 - **Testing gaps, all adopted (§3.3):** carry-over and generations, an out-of-order
   old domain, the `unb` tie, a pinned issue sequence, the A/B harness across
   coordinate types and band counts, and three more mutations.
+
+## 8. Owner decisions (2026-11-23)
+
+- **Stage A:** implement now.
+- **The CSR helper:** in litestl, per the rule (R4 accepted: UberTopo master waits for
+  the litestl PR).
+- **D1:** decided after Stage A's measurements.
+
+## 9. Implementation notes (Stage A, 2026-11-23)
+
+- **A0:** litestl `util::group_by_key` / `KeyGroups` (`util/sort.h`), with a
+  randomized test against a vector-of-vectors reference and reuse checks. 5 mutants,
+  all killed. It is on litestl branch `ubertopo/group-by-key`. UberTopo's gitlink
+  points there until the litestl PR merges.
+- **A1, as planned,** with two additions:
+  - per-face coedge counts size the flat per-shell vertex buffer up front;
+  - `old_by_id` is built only when the region domain has custom columns, because
+    nothing else reads it.
+- **The A/B harness** was a temporary hook in `build_regions` (never committed).
+  - With `UT_REGIONS_AB` set, it ran the pre-Stage-A code on a copy, and the new
+    code at 1, 2, 4 and 12 bands. It aborted on any difference in the report (issues
+    in order, counters) or in anything `build_regions` writes: face regions and
+    shells, shell chains, containers, the shell and region domains with their
+    generations and floors.
+  - `node tools/check.mjs` passed with it on, on clang-cl Release and MSVC ASan:
+    every test, every coordinate type, every region build.
+  - A tie-rule change planted to check the hook was caught.
+  - It compared columns, not `write()` bytes: `write()` refuses the test complexes
+    whose geometry store is deliberately invalid.
+- **A2 tests** (`test_topo_regions`):
+  - `test_votes_and_order`:
+    - a two-hint tie, and `unb` ties on both sides of `unb` (including the carrier
+      a container resolves through);
+    - more than 8 hints in one region, in one shell with fixed face order so the
+      winning hint is counted through the map;
+    - three winners of one hint, and two hints with two winners each (`DuplicateHint`
+      in final order);
+    - a minority hint carried by two regions;
+    - the issue sequence of a failed build.
+  - `test_carry_over`: a renamed region, with carry-over (region 0 included) and
+    generations; an old domain out of ID order; a duplicated old ID (the last row
+    wins).
+- **Mutations:** 13, 12 killed. The survivor, vertex sets left undeduplicated, only
+  changes which candidate test vertex nesting tries. Any valid test point gives the
+  same result, so it is effectively equivalent.
+- **Results** (`bench_regions`, 1.1·10⁵ faces, old and new binaries run alternately
+  on one machine; this machine was slower than in §2):
+
+  | | before | after |
+  |---|---|---|
+  | `build_regions` | 223–257 ms | 83–87 ms |
+  | barrier after a split, `None` | 244–247 ms | 105–106 ms |
+  | barrier after a split, `Local` | 269–278 ms | 133–147 ms |
+  | barrier after a merge, `None` | 401–430 ms | 245–341 ms |
+  | undo of the merge barrier | 165–207 ms | 188–276 ms |
+
+  - `build_regions` gained 2.6–3×, more than §3.2 expected.
+  - The merge barrier and its undo are now dominated by `EditIndex::refresh_regions`
+    re-keying region-indexed rows, which Stage A doesn't touch. That is B0's
+    target (option (c) of D1).
+  - At 1.1·10⁴ and 3.7·10⁴ faces `build_regions` went from 14 to 8 ms and from 49
+    to 27 ms.

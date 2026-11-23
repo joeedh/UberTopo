@@ -1,10 +1,12 @@
 #include "ubertopo/topo/regions.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
-#include <map>
 
 #include "litestl/math/wideint.h"
+#include "litestl/util/map.h"
+#include "litestl/util/sort.h"
 #include "litestl/util/task.h"
 #include "ubertopo/geom/predicates.h"
 #include "ubertopo/topo/radial.h"
@@ -211,45 +213,59 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
   }
   util::Vector<PersistentId> side_id;
   side_id.resize(NS2);
-  for (uint32_t f = 0; f < F; f++) {
-    if (k.faces.live(f)) {
-      side_id[2 * f] = ident::face_side_id(k.face_id(FaceRef(f)), 0);
-      side_id[2 * f + 1] = ident::face_side_id(k.face_id(FaceRef(f)), 1);
+  task::parallel_for_chunks(util::IndexRange(0, int(F)), 2048, [&](int, util::IndexRange r) {
+    for (int f : r) {
+      if (k.faces.live(uint32_t(f))) {
+        side_id[2 * f] = ident::face_side_id(k.face_id(FaceRef(uint32_t(f))), 0);
+        side_id[2 * f + 1] = ident::face_side_id(k.face_id(FaceRef(uint32_t(f))), 1);
+      }
     }
+  });
+  /* class label: smallest side ID per DSU root; shells indexed in label
+   * order (side IDs are unique, so the order is total) */
+  util::Vector<uint32_t> root;
+  root.resize(NS2);
+  util::Vector<PersistentId> label;
+  label.resize(NS2);
+  util::Vector<uint8_t> is_root;
+  is_root.resize(NS2);
+  for (uint32_t s = 0; s < NS2; s++) {
+    is_root[s] = 0;
   }
-  /* class label: smallest side ID; shells indexed in label order */
-  std::map<uint32_t, PersistentId> root_label;
   for (uint32_t s = 0; s < NS2; s++) {
     if (!k.faces.live(s / 2)) {
+      root[s] = NONE;
       continue;
     }
-    const uint32_t r = dsu.find(s);
-    auto it = root_label.find(r);
-    if (it == root_label.end() || side_id[s] < it->second) {
-      root_label[r] = side_id[s];
+    const uint32_t r = root[s] = dsu.find(s);
+    if (!is_root[r] || side_id[s] < label[r]) {
+      label[r] = side_id[s];
+      is_root[r] = 1;
     }
   }
   util::Vector<std::pair<PersistentId, uint32_t>> labels;
-  for (auto &[r, id] : root_label) {
-    labels.append({id, r});
+  for (uint32_t r = 0; r < NS2; r++) {
+    if (is_root[r]) {
+      labels.append({label[r], r});
+    }
   }
   std::sort(labels.begin(), labels.end());
-  std::map<uint32_t, uint32_t> root_shell;
+  util::Vector<uint32_t> root_shell; /* by root side; set for roots only */
+  root_shell.resize(NS2);
   for (uint32_t i = 0; i < labels.size(); i++) {
     root_shell[labels[i].second] = i;
   }
   const uint32_t S = uint32_t(labels.size());
   util::Vector<uint32_t> side_shell;
   side_shell.resize(NS2);
-  util::Vector<util::Vector<uint32_t>> shell_sides;
-  shell_sides.resize(S);
   for (uint32_t s = 0; s < NS2; s++) {
-    side_shell[s] = NONE;
-    if (k.faces.live(s / 2)) {
-      side_shell[s] = root_shell[dsu.find(s)];
-      shell_sides[side_shell[s]].append(s); /* ascending side index */
-    }
+    side_shell[s] = root[s] == NONE ? NONE : root_shell[root[s]];
   }
+  /* each shell's sides in ascending side order: the shell chains, the test
+   * points, the volume sums and the nesting rays depend on it */
+  util::KeyGroups shell_sides;
+  util::group_by_key(
+      NS2, S, [&](uint32_t s) { return side_shell[s] == NONE ? util::kNoGroup : side_shell[s]; }, shell_sides);
 
   /* ---- 2. shell kind, volume, bounding box, vertex set ---- */
   enum Kind : uint8_t { Sheet, Outer, Cavity, Degenerate };
@@ -259,8 +275,33 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
   vol.resize(S);
   util::Vector<BBox> box;
   box.resize(S);
-  util::Vector<util::Vector<uint32_t>> shell_verts;
-  shell_verts.resize(S);
+  /* vertex sets, flat: shell sh's (with repeats) are allotted
+   * vbuf[voff[sh] .. voff[sh + 1]), and the sorted distinct ones end up in
+   * the first vlen[sh] */
+  util::Vector<uint32_t> fcount;
+  fcount.resize(F);
+  task::parallel_for_chunks(util::IndexRange(0, int(F)), 2048, [&](int, util::IndexRange r) {
+    for (int f : r) {
+      uint32_t n = 0;
+      if (k.faces.live(uint32_t(f))) {
+        k.for_each_loop(FaceRef(uint32_t(f)), [&](LoopRef l) { n += k.loops.template get<".l.size">()[l.i]; });
+      }
+      fcount[f] = n;
+    }
+  });
+  util::Vector<uint32_t> voff, vlen, vbuf;
+  voff.resize(size_t(S) + 1);
+  vlen.resize(S);
+  voff[0] = 0;
+  for (uint32_t sh = 0; sh < S; sh++) {
+    uint32_t n = 0;
+    for (uint32_t s : shell_sides[sh]) {
+      n += fcount[s / 2];
+    }
+    voff[sh + 1] = voff[sh] + n;
+  }
+  vbuf.resize(voff[S]);
+  auto shell_verts = [&](uint32_t sh) { return std::span<const uint32_t>(vbuf.data() + voff[sh], vlen[sh]); };
   task::parallel_for_chunks(util::IndexRange(0, int(S)), 64, [&](int, util::IndexRange r) {
     for (int sh : r) {
       bool sheet = true;
@@ -268,6 +309,8 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
         sheet = sheet && side_shell[s ^ 1u] == uint32_t(sh);
       }
       bool tri_ok = true;
+      uint32_t *sv = vbuf.data() + voff[sh];
+      uint32_t nv = 0;
       for (uint32_t s : shell_sides[sh]) {
         const uint32_t f = s / 2;
         tri_ok = tri_ok && ftri_ok[f];
@@ -282,20 +325,19 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
         k.for_each_loop(FaceRef(f), [&](LoopRef l) {
           k.for_each_coedge(l, [&](CoedgeRef c) {
             const VertRef v = k.start_vert(c);
-            shell_verts[sh].append(v.i);
+            sv[nv++] = v.i;
             box[sh].add(geom::to_double3<C>(k.pos(v)));
           });
         });
       }
-      std::sort(shell_verts[sh].begin(), shell_verts[sh].end());
-      auto &sv = shell_verts[sh];
+      std::sort(sv, sv + nv);
       uint32_t w = 0;
-      for (uint32_t i = 0; i < sv.size(); i++) {
+      for (uint32_t i = 0; i < nv; i++) {
         if (i == 0 || sv[i] != sv[i - 1]) {
           sv[w++] = sv[i];
         }
       }
-      sv.resize(w);
+      vlen[sh] = w;
       if (!tri_ok) {
         kind[sh] = Degenerate;
       }
@@ -359,8 +401,9 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
         /* (b) a test point of A off B */
         Point p;
         int scale = -1;
-        for (uint32_t v : shell_verts[a]) {
-          if (!std::binary_search(shell_verts[b].begin(), shell_verts[b].end(), v)) {
+        const auto vb = shell_verts(b);
+        for (uint32_t v : shell_verts(a)) {
+          if (!std::binary_search(vb.begin(), vb.end(), v)) {
             p = k.pos(VertRef(v));
             scale = 0;
             break;
@@ -455,38 +498,80 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
   preg_hint.resize(PR);
   util::Vector<PersistentId> preg_min;
   preg_min.resize(PR);
-  /* hints carried by a region other than region 0 as a minority (P3b C4):
-   * hint -> provisional region, NONE if two regions carry it */
-  std::map<PersistentId, uint32_t> carrier;
+  /* Per hint, over regions r > 0: how many win it, the final index of the
+   * winner (hint_region, when exactly one wins), and the minority carrier
+   * (P3b C4): the provisional region carrying it without winning it, NONE
+   * if two do, absent if none. */
+  struct HintInfo {
+    uint32_t winners = 0, seen = 0, win = NONE, carrier = NONE;
+    bool has_carrier = false;
+  };
+  util::Map<PersistentId, HintInfo> info;
   {
-    util::Vector<util::Vector<uint32_t>> preg_sides;
-    preg_sides.resize(PR);
-    for (uint32_t sh = 0; sh < S; sh++) {
-      for (uint32_t s : shell_sides[sh]) {
-        preg_sides[shell_preg[sh]].append(s);
-      }
-    }
+    util::KeyGroups preg_shells;
+    util::group_by_key(S, PR, [&](uint32_t sh) { return shell_preg[sh]; }, preg_shells);
     const auto &hints = k.faces.sides().template get<".fs.hint">();
+    /* distinct hints and their counts, scanned linearly; past 8 a map
+     * indexes them (region 0 has ~one hint over many sides) */
+    struct Vote {
+      PersistentId h;
+      uint32_t n;
+    };
+    util::Vector<Vote> votes;
+    util::Map<PersistentId, uint32_t> vpos;
+    bool use_map = false;
+    auto vote = [&](PersistentId h) {
+      if (!use_map) {
+        for (Vote &v : votes) {
+          if (v.h == h) {
+            v.n++;
+            return;
+          }
+        }
+        votes.append({h, 1});
+        if (votes.size() > 8) {
+          use_map = true;
+          for (uint32_t i = 0; i < votes.size(); i++) {
+            vpos.add(votes[i].h, i);
+          }
+        }
+        return;
+      }
+      if (uint32_t *p = vpos.lookup_ptr(h)) {
+        votes[*p].n++;
+      }
+      else {
+        vpos.add(h, uint32_t(votes.size()));
+        votes.append({h, 1});
+      }
+    };
     for (uint32_t r = 0; r < PR; r++) {
-      std::map<PersistentId, uint32_t> votes;
+      votes.clear();
+      if (use_map) {
+        vpos = util::Map<PersistentId, uint32_t>();
+        use_map = false;
+      }
       PersistentId min_side{};
       bool have_min = false;
-      for (uint32_t s : preg_sides[r]) {
-        if (!have_min || side_id[s] < min_side) {
-          min_side = side_id[s];
-          have_min = true;
-        }
-        const PersistentId h = hints[s];
-        if (!(h == ident::kNoId)) {
-          votes[h]++;
+      for (uint32_t sh : preg_shells[r]) {
+        for (uint32_t s : shell_sides[sh]) {
+          if (!have_min || side_id[s] < min_side) {
+            min_side = side_id[s];
+            have_min = true;
+          }
+          const PersistentId h = hints[s];
+          if (!(h == ident::kNoId)) {
+            vote(h);
+          }
         }
       }
+      /* the most votes; ties keep the smaller hint. unb votes like any hint */
       PersistentId hint{};
       uint32_t best = 0;
-      for (auto &[h, n] : votes) {
-        if (n > best) { /* ties keep the smaller hint (map order) */
-          best = n;
-          hint = h;
+      for (const Vote &v : votes) {
+        if (v.n > best || (v.n == best && v.h < hint)) {
+          best = v.n;
+          hint = v.h;
         }
       }
       if (votes.size() > 1 || (r == 0 && best > 0 && !(hint == unb)) || (r != 0 && hint == unb)) {
@@ -495,26 +580,26 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
       preg_hint[r] = (r == 0 || hint == unb) ? PersistentId{} : hint;
       preg_min[r] = min_side;
       if (r != 0) {
-        for (auto &[h, n] : votes) {
-          if (h == hint || h == unb) {
+        for (const Vote &v : votes) {
+          if (v.h == hint || v.h == unb) {
             continue;
           }
-          auto it = carrier.find(h);
-          if (it == carrier.end()) {
-            carrier[h] = r;
+          HintInfo &hi = info[v.h];
+          if (!hi.has_carrier) {
+            hi.has_carrier = true;
+            hi.carrier = r;
           }
-          else if (it->second != r) {
-            it->second = NONE;
+          else {
+            hi.carrier = NONE; /* a second region (a region's hints are distinct) */
           }
         }
       }
     }
     /* IDs (DEC-017): a winning hint no other region wins names the region on
      * its own; shared winners keep the minimal side to stay unique */
-    std::map<PersistentId, uint32_t> winners;
     for (uint32_t r = 1; r < PR; r++) {
       if (!(preg_hint[r] == ident::kNoId)) {
-        winners[preg_hint[r]]++;
+        info[preg_hint[r]].winners++;
       }
     }
     for (uint32_t r = 0; r < PR; r++) {
@@ -524,7 +609,7 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
       else if (preg_hint[r] == ident::kNoId) {
         preg_id[r] = ident::region_id_from_sides(preg_min[r]);
       }
-      else if (winners[preg_hint[r]] == 1) {
+      else if (info.lookup(preg_hint[r]).winners == 1) {
         preg_id[r] = ident::region_id_from_hint(preg_hint[r]);
       }
       else {
@@ -532,12 +617,18 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
       }
     }
   }
-  /* final order: region 0 first, then by ID */
+  /* final order: region 0 first, then by ID (unique barring a hash
+   * collision) */
   util::Vector<uint32_t> rorder;
   for (uint32_t r = 1; r < PR; r++) {
     rorder.append(r);
   }
-  std::sort(rorder.begin(), rorder.end(), [&](uint32_t a, uint32_t b) { return preg_id[a] < preg_id[b]; });
+  {
+    const bool unique = util::sort_unique_keys(util::span<uint32_t>(rorder.data(), rorder.size()),
+                                               [&](uint32_t a, uint32_t b) { return preg_id[a] < preg_id[b]; });
+    assert(unique);
+    (void)unique;
+  }
   util::Vector<uint32_t> preg_final;
   preg_final.resize(PR);
   preg_final[0] = 0;
@@ -552,52 +643,43 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
     reg_id[preg_final[r]] = preg_id[r];
     reg_hint[preg_final[r]] = preg_hint[r];
   }
-  {
-    std::map<PersistentId, uint32_t> seen;
-    for (uint32_t r = 1; r < R; r++) {
-      if (!(reg_hint[r] == ident::kNoId) && seen[reg_hint[r]]++ == 1) {
-        report.add(RegionCode::DuplicateHint, r);
-      }
-    }
-  }
-
-  /* ---- 7 (checks first). container hints ---- */
-  std::map<PersistentId, uint32_t> hint_region; /* NONE if ambiguous */
+  /* in final order: the second winner of a hint is reported (only it), and
+   * a hint's sole winner is recorded */
   for (uint32_t r = 1; r < R; r++) {
     if (reg_hint[r] == ident::kNoId) {
       continue;
     }
-    auto it = hint_region.find(reg_hint[r]);
-    if (it == hint_region.end()) {
-      hint_region[reg_hint[r]] = r;
+    HintInfo &hi = info.lookup(reg_hint[r]);
+    if (hi.seen++ == 1) {
+      report.add(RegionCode::DuplicateHint, r);
     }
-    else {
-      it->second = NONE;
-    }
+    hi.win = r;
   }
+
+  /* ---- 7 (checks first). container hints ---- */
+  /* unb, then the winning region (ambiguous if two win), then the minority
+   * carrier (ambiguous if two carry it), else unresolved */
   auto resolve = [&](PersistentId h, uint32_t index, ident::ContainerRef &out) {
     if (h == unb) {
       return ident::ContainerRef::region(RegionRef(0), out);
     }
-    auto it = hint_region.find(h);
-    if (it == hint_region.end()) {
-      /* no region wins the hint: a unique minority carrier (P3b C4) */
-      auto ct = carrier.find(h);
-      if (ct == carrier.end()) {
+    const HintInfo *hi = info.lookup_ptr(h);
+    if (hi == nullptr || hi->winners == 0) {
+      if (hi == nullptr || !hi->has_carrier) {
         report.add(RegionCode::UnresolvedContainerHint, index);
         return false;
       }
-      if (ct->second == NONE) {
+      if (hi->carrier == NONE) {
         report.add(RegionCode::AmbiguousContainerHint, index);
         return false;
       }
-      return ident::ContainerRef::region(RegionRef(preg_final[ct->second]), out);
+      return ident::ContainerRef::region(RegionRef(preg_final[hi->carrier]), out);
     }
-    if (it->second == NONE) {
+    if (hi->winners > 1) {
       report.add(RegionCode::AmbiguousContainerHint, index);
       return false;
     }
-    return ident::ContainerRef::region(RegionRef(it->second), out);
+    return ident::ContainerRef::region(RegionRef(hi->win), out);
   };
   util::Vector<std::pair<uint32_t, ident::ContainerRef>> vcont, econt;
   {
@@ -692,23 +774,26 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
     k.regions.template get<".r.flags">().set(0, region_flags::Unbounded);
     k.regions.replace_generations(
         old, [&](uint32_t r) { return old.live(r) && old.template get<".id">()[r] == reg_id[r]; });
-    std::map<PersistentId, uint32_t> old_by_id;
-    for (uint32_t r = 0; r < old.capacity(); r++) {
+    /* only custom columns are carried: without any, nothing to match. A
+     * duplicate old ID keeps its last row (the old domain's order isn't
+     * checked, so no merge by ID order) */
+    const bool custom = old.group().column_count() > old.group().builtin_count();
+    util::Map<PersistentId, uint32_t> old_by_id;
+    for (uint32_t r = 0; custom && r < old.capacity(); r++) {
       if (old.live(r)) {
-        old_by_id[old.template get<".id">()[r]] = r;
+        old_by_id.add_overwrite(old.template get<".id">()[r], r);
       }
     }
     util::Vector<uint32_t> targets, offsets, sources;
     offsets.append(0);
-    for (uint32_t r = 0; r < R; r++) {
-      auto it = old_by_id.find(reg_id[r]);
-      if (it != old_by_id.end()) {
+    for (uint32_t r = 0; custom && r < R; r++) {
+      if (const uint32_t *src = old_by_id.lookup_ptr(reg_id[r])) {
         targets.append(r);
-        sources.append(it->second);
+        sources.append(*src);
         offsets.append(uint32_t(sources.size()));
       }
     }
-    if (targets.size() > 0 && old.group().column_count() > old.group().builtin_count()) {
+    if (targets.size() > 0 && custom) {
       attr::MixBatch mb{litestl::util::span<const uint32_t>(targets.data(), targets.size()),
                         litestl::util::span<const uint32_t>(offsets.data(), offsets.size()),
                         litestl::util::span<const uint32_t>(sources.data(), sources.size()),
