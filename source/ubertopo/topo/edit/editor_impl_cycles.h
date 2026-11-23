@@ -10,6 +10,7 @@
  * validator), so .e.c is the coedge whose face has the smallest ID. */
 
 #include <map>
+#include <optional>
 #include <vector>
 
 #include "ubertopo/topo/edit/editor.h"
@@ -151,14 +152,20 @@ template <geom::CoordType C> void Editor<C>::link_radial(EdgeRef e, std::span<co
   setE<".e.c">(e, order[0]);
 }
 
-template <geom::CoordType C> EditCode Editor<C>::resort_radial(EdgeRef e, std::span<const uint32_t> extra)
+template <geom::CoordType C>
+EditCode Editor<C>::resort_radial(EdgeRef e, std::span<const uint32_t> extra, edit_detail::HalfPlanes<C> *shared)
 {
   litestl::util::Vector<uint32_t, 8> in, order;
   k_.for_each_radial(e, [&](CoedgeRef c) { in.append(c.i); });
   for (uint32_t c : extra) {
     in.append(c);
   }
-  edit_detail::HalfPlanes<C> hp(k_);
+  std::optional<edit_detail::HalfPlanes<C>> own;
+  if (!shared) {
+    own.emplace(k_);
+  }
+  edit_detail::HalfPlanes<C> &hp = shared ? *shared : *own;
+  hp.failed = FaceRef();
   bool tie = false;
   if (!radial_order<C>(k_, e, std::span<const uint32_t>(in.data(), in.size()), hp, order, &tie, &hp.sk)) {
     rep_.kind = ident::ElemKind::Face;
@@ -215,10 +222,11 @@ template <geom::CoordType C> void Editor<C>::refresh_ec(EdgeRef e)
 template <geom::CoordType C> EditCode Editor<C>::resort_face_edges(FaceRef f)
 {
   EditCode code = EditCode::Ok;
+  edit_detail::HalfPlanes<C> hp(k_); /* one cache: the geometry doesn't change here */
   k_.for_each_loop(f, [&](LoopRef l) {
     k_.for_each_coedge(l, [&](CoedgeRef c) {
       if (code == EditCode::Ok) {
-        code = resort_radial(k_.edge_of(c));
+        code = resort_radial(k_.edge_of(c), {}, &hp);
       }
     });
   });

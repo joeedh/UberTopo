@@ -256,8 +256,17 @@ template <geom::CoordType C> struct FaceMesh {
   util::Vector<std::array<uint32_t, 3>> tris; /* vertex indices */
   util::Vector<uint32_t, 16> verts;           /* sorted */
   util::Vector<std::pair<uint32_t, uint32_t>, 16> edges; /* boundary edges, sorted */
+  /* per triangle: lo xyz, hi xyz of its corners in to_double3. The rounding
+   * is monotone, so a contact's closed boxes still overlap after it */
+  util::Vector<std::array<double, 6>> tbox;
   double lo[3], hi[3];
 };
+
+/* closed boxes (lo xyz, hi xyz) overlap */
+inline bool boxes_meet(const double *a, const double *b)
+{
+  return a[0] <= b[3] && b[0] <= a[3] && a[1] <= b[4] && b[1] <= a[4] && a[2] <= b[5] && b[2] <= a[5];
+}
 
 } // namespace
 
@@ -319,6 +328,18 @@ void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateF
         for (int i = 0; i < 3; i++) {
           fm.lo[i] = std::min(fm.lo[i], d[i]);
           fm.hi[i] = std::max(fm.hi[i], d[i]);
+        }
+      }
+      fm.tbox.resize(fm.tris.size());
+      for (uint32_t t = 0; t < fm.tris.size(); t++) {
+        std::array<double, 6> &b = fm.tbox[t];
+        b = {INFINITY, INFINITY, INFINITY, -INFINITY, -INFINITY, -INFINITY};
+        for (uint32_t cv : fm.tris[t]) {
+          const auto d = geom::to_double3<C>(sk.pos(cv));
+          for (int i = 0; i < 3; i++) {
+            b[i] = std::min(b[i], d[i]);
+            b[3 + i] = std::max(b[3 + i], d[i]);
+          }
         }
       }
     return true;
@@ -407,8 +428,10 @@ void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateF
       }
     }
   }
+  /* a pair whose boxes share several cells is listed once per cell */
   std::sort(pairs.begin(), pairs.end());
-  auto pos = [&](uint32_t v) -> const P & { return sk.pos(v); };
+  pairs.resize(int(std::unique(pairs.begin(), pairs.end()) - pairs.begin()));
+  auto pos =[&](uint32_t v) -> const P & { return sk.pos(v); };
 
   /* does segment (p, q) of face f meet triangle t of face g other than at
    * shared vertices and along shared edges? */
@@ -439,10 +462,20 @@ void validate_global(const Complex<C> &k, ValidationReport &rep, const ValidateF
       for (uint32_t i = 0; i < x.tris.size() && !bad; i++) {
         for (int s = 0; s < 3 && !bad; s++) {
           const uint32_t p = x.tris[i][s], q = x.tris[i][(s + 1) % 3];
+          /* a contact needs the segment's box to meet the triangle's */
+          const auto dp = geom::to_double3<C>(pos(p)), dq = geom::to_double3<C>(pos(q));
+          const double sb[6] = {std::min(dp[0], dq[0]), std::min(dp[1], dq[1]), std::min(dp[2], dq[2]),
+                                std::max(dp[0], dq[0]), std::max(dp[1], dq[1]), std::max(dp[2], dq[2])};
+          const double yb[6] = {y.lo[0], y.lo[1], y.lo[2], y.hi[0], y.hi[1], y.hi[2]};
+          if (!boxes_meet(sb, yb)) {
+            continue;
+          }
           const std::pair<uint32_t, uint32_t> pe = {std::min(p, q), std::max(p, q)};
           const bool boundary = std::binary_search(x.edges.begin(), x.edges.end(), pe);
           for (uint32_t j = 0; j < y.tris.size() && !bad; j++) {
-            bad = bad_contact(p, q, boundary, y.tris[j], sh);
+            if (boxes_meet(sb, y.tbox[j].data())) {
+              bad = bad_contact(p, q, boundary, y.tris[j], sh);
+            }
           }
         }
       }

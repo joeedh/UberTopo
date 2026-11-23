@@ -57,6 +57,10 @@
 
 namespace ubertopo::topo {
 
+namespace edit_detail {
+template <geom::CoordType C> struct HalfPlanes;
+}
+
 enum class ValidateMode : uint8_t {
   Full,     /* validate(k, Global) after every primitive (the oracle) */
   Local,    /* validate_local on the elements each primitive touched */
@@ -363,8 +367,12 @@ private:
   void disk_insert(EdgeRef e, uint32_t slot);
   void disk_remove(EdgeRef e, uint32_t slot);
   void disk_replace(EdgeRef old_e, uint32_t old_slot, EdgeRef new_e, uint32_t new_slot);
-  /** Re-sorts the radial cycle of @p e from its current members plus @p extra. */
-  EditCode resort_radial(EdgeRef e, std::span<const uint32_t> extra = {});
+  /** Re-sorts the radial cycle of @p e from its current members plus @p extra.
+   * @p hp, if given, is a half-plane cache shared across calls: valid while
+   * no position, loop or carrier changes, and needed by callers that re-sort
+   * many edges of one face, since a projected face's cache entry costs its
+   * T(f). */
+  EditCode resort_radial(EdgeRef e, std::span<const uint32_t> extra = {}, edit_detail::HalfPlanes<C> *hp = nullptr);
   void radial_remove(CoedgeRef c);
   void refresh_ec(EdgeRef e);
   void link_radial(EdgeRef e, std::span<const uint32_t> order);

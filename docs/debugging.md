@@ -531,3 +531,25 @@ Entry format:
   - Other tests that use `long double` (`using LD`) only test their bounds on
     Linux. A mutant they alone kill must be confirmed there (CI), not by the
     native run.
+
+## One large face makes editing and validation slow
+- **Symptom:** on the road-on-terrain case, `place_road` took about 750 ms and
+  `validate(Global)` about 515 ms, against 48 ms for the terrain alone. The road
+  adds only 63 faces.
+- **Cause:** two costs, each multiplied by the size of the one large fill face
+  (about 100 edges, 278 triangles):
+  - `make_face` re-sorted each of the new face's edges with a fresh
+    `HalfPlanes` cache. For a projected face, that cache's entry is the face's
+    whole T(f), so the fill face was triangulated once per edge: about 500 ms.
+  - The full Global pass listed a candidate face pair once per grid cell the
+    two boxes share, and never removed duplicates. It then tested every
+    segment against every triangle of the other face with exact predicates.
+- **Fix / technique:**
+  - `resort_radial` takes an optional shared cache. `make_face` and
+    `resort_face_edges` pass one cache for all their edges, since only radial
+    links change in between.
+  - The Global pass removes duplicate pairs, and skips a triangle unless its
+    closed box (in `to_double3`, which is monotone) meets the segment's.
+  - To find costs like these, put temporary timers on each step behind an
+    environment variable (`CLAUDENOTE`), and count the calls each step makes.
+    Totals alone pointed at the wrong layer here.

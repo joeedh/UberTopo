@@ -51,15 +51,15 @@ template <geom::CoordType C> void road_case(const rt::Plan &plan)
   rt::Model<C> base;
   rt::build_terrain(base);
   const double v0 = median_ms(5, [&] { validate(base.k, ValidateLevel::Global); });
-  /* place_road, from a fresh terrain each time */
-  double place = 0;
-  {
+  /* place_road, from a fresh terrain each time, with and without validation */
+  double place = 0, place_nv = 0;
+  for (const ValidateMode mode : {ValidateMode::None, ValidateMode::OnCommit}) {
     std::vector<double> t;
     for (int i = 0; i < 5; i++) {
       rt::Model<C> m;
       rt::build_terrain(m);
       EditorOptions opt;
-      opt.validate = ValidateMode::OnCommit;
+      opt.validate = mode;
       Editor<C> ed(m.k, &m.j, nullptr, opt);
       const auto t0 = Clock::now();
       const EditCode c = rt::place_road(ed, m, plan);
@@ -70,7 +70,7 @@ template <geom::CoordType C> void road_case(const rt::Plan &plan)
       }
     }
     std::sort(t.begin(), t.end());
-    place = t[t.size() / 2];
+    (mode == ValidateMode::None ? place_nv : place) = t[t.size() / 2];
   }
   rt::Model<C> m;
   rt::build_terrain(m);
@@ -95,7 +95,8 @@ template <geom::CoordType C> void road_case(const rt::Plan &plan)
   });
   uint32_t faces = 0;
   m.k.faces.for_each_live([&](uint32_t) { faces++; });
-  printf("%s: place_road %.1f ms (OnCommit, validation included)\n", key, place);
+  printf("%s: place_road %.1f ms (OnCommit, validation included), %.1f ms without validation\n", key, place,
+         place_nv);
   printf("%s: validate(Global) %.1f ms on the terrain (1600 faces), %.1f ms with the road (%u faces)\n", key, v0, v1,
          faces);
   printf("%s:   of which up to Embedding %.1f / %.1f ms, the surface checks alone %.1f ms\n", key, v0e, v1e, v1s);

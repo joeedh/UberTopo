@@ -244,9 +244,12 @@ EditCode Editor<C>::make_face(std::span<const VertRef> verts,
       j0 += m;
     }
   }
+  /* one half-plane cache for every edge of the face: only radial links
+   * change in this loop, and a projected face's entry costs its T(f) */
+  edit_detail::HalfPlanes<C> hp(k_);
   for (int i = 0; i < new_c.size(); i++) {
     const uint32_t one[1] = {new_c[i]};
-    const EditCode rc = resort_radial(EdgeRef(edges[i]), std::span<const uint32_t>(one, 1));
+    const EditCode rc = resort_radial(EdgeRef(edges[i]), std::span<const uint32_t>(one, 1), &hp);
     if (rc != EditCode::Ok) {
       return pr.fail(rc, rep_.kind, rep_.index);
     }

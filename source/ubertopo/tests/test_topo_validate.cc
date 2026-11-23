@@ -403,6 +403,18 @@ template <geom::CoordType C> static void test_geometric_layers()
     expect_level<C>(k, G, VC::FaceIntersection, [](Complex<C> &) {}, "piercing faces");
   }
   {
+    /* touching, not piercing: a vertical triangle's corner rests on the
+     * square's interior. The boxes only meet in the plane z = 0, so the pair
+     * test's box filter must use closed boxes */
+    test::GridBuilder<C> g;
+    g.face({{{0, 0, 0}, {10, 0, 0}, {10, 10, 0}, {0, 10, 0}}});
+    g.face({{{5, 5, 0}, {8, 5, 4}, {2, 5, 4}}});
+    Complex<C> k;
+    BuildReport br;
+    UT_CHECK(g.b.build(k, br));
+    expect_level<C>(k, G, VC::FaceIntersection, [](Complex<C> &) {}, "a corner resting on a face");
+  }
+  {
     test::GridBuilder<C> g;
     g.face({{{0, 0, 0}, {10, 0, 0}, {10, 10, 0}, {0, 10, 0}}});
     Complex<C> k;

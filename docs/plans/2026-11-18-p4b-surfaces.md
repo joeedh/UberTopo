@@ -1037,3 +1037,29 @@ same ids.
     −0.06 for its bitwise-border check. W3's gcc run killed it; the native run shows
     that the kill rested on how one compiler rounded, not on the test's design.
 - **Docs:** DEC-019; 07 §17 and its status; 05's status; 06's P4 row; the index.
+
+**Follow-up (2026-11-22): the validation and editing cost on the road case.**
+Profiled at the owner's request before choosing the next phase
+(`docs/debugging.md`):
+- The fill face's `make_face` triangulated the face once per edge. `make_face`
+  and `resort_face_edges` now share one half-plane cache across a face's edges.
+- The full Global pass tested duplicate face pairs, and every segment against
+  every triangle of the other face. It now removes duplicate pairs and filters
+  triangles by closed boxes.
+- **Results** (`bench_surfaces`, clang-cl Release):
+
+  | | before | after |
+  |---|---|---|
+  | `place_road`, `double` (OnCommit) | 754 ms | 176 ms |
+  | `place_road`, `double` (no validation) | ≈ 840 ms | 54 ms |
+  | `validate(Global)`, `double`, with the road | 515 ms | 140 ms |
+  | `validate(Global)`, `Lattice`, with the road | 432 ms | 110 ms |
+
+  The surface checks are now the largest part, about 57 ms for 112 road faces.
+  Under MSVC ASan, `test_road_terrain` went from 109 s to 51 s.
+- **Behaviour:** a bad face pair now reports `FaceIntersection` once, not once per
+  shared grid cell. No golden changed.
+- **Mutations:** 3 mutants of the box filter, all killed by `test_topo_validate`.
+  The open-box mutant needed a new case, a triangle's corner resting on a face,
+  where the two boxes meet only in a plane. A fourth mutant, the shared cache
+  keeping a stale failure, is equivalent: callers stop at the first failure.
