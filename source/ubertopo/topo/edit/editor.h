@@ -407,6 +407,11 @@ private:
   std::string label_;
   std::vector<Savepoint> sp_;
   std::unique_ptr<Complex<C>> barrier_snapshot_;
+  OpKind barrier_kind_ = OpKind::Compact; /* the barrier barrier_snapshot_ belongs to */
+  /** rebuild_regions' validation in Local and OnCommit modes (plan
+   * 2026-11-22 §2.1): the combinatorial layer in full, then the embedding
+   * layer on the elements with region containers. */
+  ValidationReport validate_region_barrier();
   uint64_t start_schema_[kGroupCount] = {};
   std::unordered_map<uint64_t, uint32_t> captured_; /* (g << 32 | row) -> epoch */
   uint32_t epoch_ = 0;

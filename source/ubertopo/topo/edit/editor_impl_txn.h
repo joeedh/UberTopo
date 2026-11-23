@@ -245,9 +245,13 @@ template <geom::CoordType C> EditCode Editor<C>::rollback()
     if (barrier_snapshot_) {
       restore_snapshot(std::move(*barrier_snapshot_));
       barrier_snapshot_.reset();
-      idx_.invalidate();
-      idx_.flush(k_); /* eagerly, inside the barrier (C13) */
-      grid_.rebuild_if_used(k_);
+      /* a failed rebuild_regions rolls back before it touches the index or
+       * the grid (plan 2026-11-22 §2.2): the snapshot alone restores it */
+      if (barrier_kind_ != OpKind::RebuildRegions) {
+        idx_.invalidate();
+        idx_.flush(k_); /* eagerly, inside the barrier (C13) */
+        grid_.rebuild_if_used(k_);
+      }
     }
     log_ = TxnLog{};
     captured_.clear();
@@ -342,9 +346,16 @@ template <geom::CoordType C> EditCode Editor<C>::undo()
   check_index_stamp();
   if (t.snapshot) {
     restore_snapshot(std::move(*t.snapshot));
-    idx_.invalidate();
-    idx_.flush(k_);
-    grid_.rebuild_if_used(k_);
+    if (!t.ops.empty() && t.ops.front().kind == OpKind::RebuildRegions) {
+      /* the state before build_regions differs only in regions and resolved
+       * containers: re-key those; the grid holds geometry only */
+      idx_.refresh_regions(k_);
+    }
+    else {
+      idx_.invalidate();
+      idx_.flush(k_);
+      grid_.rebuild_if_used(k_);
+    }
   }
   else {
     restore(t.log, 0, 0, t.log.start_size, t.log.regions_dirty);

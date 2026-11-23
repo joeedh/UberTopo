@@ -18,8 +18,10 @@
  * Each row's indexed keys are remembered, so a flush first removes the keys
  * of every marked row and then adds their current keys; a row freed and an
  * ID re-used by another row in the same transaction never look like a
- * duplicate. Barriers (snapshot restores) invalidate everything; the next
- * query rebuilds in O(N). */
+ * duplicate. A compact barrier (and its undo) renumbers rows, so it
+ * rebuilds everything in O(N log N); rebuild_regions and its undo change
+ * only regions and resolved containers, so they re-key just those
+ * (refresh_regions). */
 
 #include <cstdint>
 #include <map>
@@ -86,6 +88,44 @@ public:
       add_row(k, d.kind, d.row);
     }
     dirty_.clear();
+  }
+  /** Brings the index up to date after build_regions, or after restoring
+   * the state before one (plan 2026-11-22 §2.2). build_regions changes only
+   * faces' regions and the containers of hinted elements, never IDs, hints
+   * or row counts, so only those keys are compared and re-keyed, the stored
+   * keys with the maps. O(N) column reads; map work only for changed rows. */
+  void refresh_regions(const Complex<C> &k)
+  {
+    if (!valid_) {
+      rebuild(k);
+      return;
+    }
+    flush(k);
+    const auto &vc = k.verts.template get<".v.container">();
+    const auto &ec = k.edges.template get<".e.container">();
+    const auto &fr = k.faces.template get<".f.region">();
+    auto elems = [&](std::vector<ElemKey> &keys, const auto &col, uint32_t tag) {
+      for (uint32_t i = 0; i < uint32_t(keys.size()); i++) {
+        ElemKey &x = keys[i];
+        if (x.live && !(x.c == col[i])) {
+          container(x.c, (i << 1) | tag, -1);
+          x.c = col[i];
+          container(x.c, (i << 1) | tag, +1);
+        }
+      }
+    };
+    elems(vkeys_, vc, 0);
+    elems(ekeys_, ec, 1);
+    for (uint32_t f = 0; f < uint32_t(fkeys_.size()); f++) {
+      FaceKey &x = fkeys_[f];
+      const U32x2 r = x.live ? fr[f] : U32x2{};
+      if (x.live && (x.region[0] != r[0] || x.region[1] != r[1])) {
+        face_regions(x, -1);
+        x.region[0] = r[0];
+        x.region[1] = r[1];
+        face_regions(x, +1);
+      }
+    }
   }
 
   /* ---- queries (flush first) ---- */
@@ -234,6 +274,23 @@ private:
       }
     }
   }
+  /* an element's entry in its container's inclusion list */
+  void container(ident::ContainerRef c, uint32_t packed, int delta)
+  {
+    if (c.is_none()) {
+      return;
+    }
+    if (delta > 0) {
+      incl_[c.bits].insert(packed);
+    }
+    else {
+      auto it = incl_.find(c.bits);
+      it->second.erase(packed);
+      if (it->second.empty()) {
+        incl_.erase(it);
+      }
+    }
+  }
   static void bump(std::map<PersistentId, uint32_t> &m, PersistentId h, int delta)
   {
     uint32_t &n = m[h];
@@ -248,18 +305,7 @@ private:
       return;
     }
     count_id(slot, x.id, delta);
-    if (!x.c.is_none()) {
-      if (delta > 0) {
-        incl_[x.c.bits].insert(packed);
-      }
-      else {
-        auto it = incl_.find(x.c.bits);
-        it->second.erase(packed);
-        if (it->second.empty()) {
-          incl_.erase(it);
-        }
-      }
-    }
+    container(x.c, packed, delta);
     if (!(x.hint == ident::kNoId)) {
       bump(users_, x.hint, delta);
     }
@@ -271,11 +317,24 @@ private:
     }
     count_id(2, x.id, delta);
     for (uint32_t s = 0; s < 2; s++) {
+      if (!(x.hint[s] == ident::kNoId)) {
+        bump(carriers_, x.hint[s], delta);
+      }
+    }
+    face_regions(x, delta);
+  }
+  /* the part of a face's keys that depends on its regions: the votes of its
+   * hinted sides */
+  void face_regions(const FaceKey &x, int delta)
+  {
+    if (!x.live) {
+      return;
+    }
+    for (uint32_t s = 0; s < 2; s++) {
       const PersistentId h = x.hint[s];
       if (h == ident::kNoId) {
         continue;
       }
-      bump(carriers_, h, delta);
       if (x.region[s] != NONE) {
         auto &v = votes_[x.region[s]];
         bump(v, h, delta);

@@ -644,6 +644,7 @@ template <geom::CoordType C> EditCode Editor<C>::run_barrier(OpKind kind)
     return c;
   }
   barrier_snapshot_ = std::make_unique<Complex<C>>(k_);
+  barrier_kind_ = kind;
   if (kind == OpKind::Compact) {
     topo::compact(k_);
   }
@@ -662,7 +663,10 @@ template <geom::CoordType C> EditCode Editor<C>::run_barrier(OpKind kind)
       return EditCode::RegionsFailed;
     }
     if (opt_.validate != ValidateMode::None) {
-      ValidationReport r = validate(k_, ValidateLevel::Embedding);
+      /* the index and grid are untouched until this passes, so a failure
+       * rolls back by the snapshot alone */
+      ValidationReport r = opt_.validate == ValidateMode::Full ? validate(k_, ValidateLevel::Embedding) :
+                                                                  validate_region_barrier();
       if (!r.ok()) {
         rep_.validation = r;
         rep_.code = EditCode::Invalid;
@@ -675,9 +679,17 @@ template <geom::CoordType C> EditCode Editor<C>::run_barrier(OpKind kind)
   op.kind = kind;
   ops_.push_back(std::move(op));
   c = commit_internal(redoing_);
-  idx_.invalidate();
-  idx_.flush(k_); /* eagerly, inside the barrier (C13) */
-  grid_.rebuild_if_used(k_);
+  /* eagerly, inside the barrier (C13). compact renumbers rows: both are
+   * rebuilt. build_regions writes only regions and resolved containers: the
+   * index re-keys those, and the grid, which holds geometry only, stays */
+  if (kind == OpKind::Compact) {
+    idx_.invalidate();
+    idx_.flush(k_);
+    grid_.rebuild_if_used(k_);
+  }
+  else {
+    idx_.refresh_regions(k_);
+  }
   sync_index_stamp();
   if (c == EditCode::Ok) {
     /* barriers collect after they commit (plan P4a §5.2): the snapshot is
@@ -685,6 +697,47 @@ template <geom::CoordType C> EditCode Editor<C>::run_barrier(OpKind kind)
     (void)collect_internal({}, nullptr);
   }
   return c;
+}
+
+template <geom::CoordType C> ValidationReport Editor<C>::validate_region_barrier()
+{
+  ValidationReport r;
+  const VertexTopoView v{k_.verts.template get<".v.e">(),
+                         k_.verts.template get<".v.container">(),
+                         k_.verts.template get<".id">(),
+                         k_.verts.template get<".live">(),
+                         k_.verts.capacity()};
+  validate_combinatorial(k_, v, r); /* shells and regions are checked here */
+  if (!r.ok()) {
+    return r;
+  }
+  /* the one embedding check that reads regions (ContainerGeometry), skipped
+   * while they were dirty: every element with a region container, found by
+   * a column scan (the index isn't refreshed yet) */
+  ValidateFilter flt;
+  const auto &vc = k_.verts.template get<".v.container">();
+  const auto &ec = k_.edges.template get<".e.container">();
+  k_.verts.for_each_live([&](uint32_t i) {
+    if (vc[i].kind() == ident::ContainerKind::Region) {
+      flt.verts.append(i);
+    }
+  });
+  k_.edges.for_each_live([&](uint32_t i) {
+    if (ec[i].kind() == ident::ContainerKind::Region) {
+      flt.edges.append(i);
+    }
+  });
+  if (flt.verts.size() == 0 && flt.edges.size() == 0) {
+    return r;
+  }
+  /* region 0's ray through the grid only if it is already built: a barrier
+   * never builds it (about as costly as the rebuild it saves) */
+  if (grid_.valid()) {
+    grid_.flush(k_);
+    flt.grid = &grid_.grid();
+  }
+  validate_embedding(k_, r, &flt);
+  return r;
 }
 
 } // namespace ubertopo::topo

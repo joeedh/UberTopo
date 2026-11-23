@@ -408,7 +408,7 @@ the only writer of a complex during editing.
 | `flip_face(f)` | Reverses loops, swaps side rows and hints, toggles `Reversed`; regions go dirty |
 | `set_side_hint(f, side, h)` | Regions go dirty; refuses removing the last carrier of a used hint |
 | `set_attr(group, row, column, bytes)` | Journaled write of a non-`Topo` column (not `pos`) |
-| `rebuild_regions()` | A barrier: `build_regions`, then Embedding validation; it snapshots the complex for undo |
+| `rebuild_regions()` | A barrier: `build_regions`, then validation; it snapshots the complex for undo. `Full` mode validates to Embedding. `Local` and `OnCommit` run the combinatorial layer in full and `ContainerGeometry` on region-contained elements, the one geometric check that reads regions (plan [2026-11-22](../../plans/2026-11-22-region-barrier-cost.md)). Earlier commits validated the geometry the barrier leaves unchanged |
 
 **Regions are derived.** Only `rebuild_regions` writes region and shell columns.
 - Face edits (make, kill, split, join, flip, hints) set `regions_dirty`.
@@ -493,8 +493,13 @@ and both are redone by running them again.
   (`topo/face_grid.h`).
 - **How:** both are maintained by dirty rows. `touch`, `alloc` and `restore` mark
   rows; a flush re-reads them from the current state.
-- **Barriers and outside writes:** barriers rebuild both eagerly. A write outside the
-  editor invalidates them, and they are rebuilt on next use.
+- **Barriers and outside writes:**
+  - `compact` and its undo rebuild both eagerly, since they renumber rows.
+  - `rebuild_regions` and its undo re-key only the index entries that depend on
+    regions (`EditIndex::refresh_regions`: face sides' votes, region-container
+    inclusions) and leave the grid, which holds geometry only. A failed
+    `rebuild_regions` rolls back before touching either.
+  - A write outside the editor invalidates both, and they are rebuilt on next use.
 - **Grid cells** are the smallest power of two at least the median face-box extent.
 - **Large faces** spanning more than 64 cells are entered by their T(f) triangles.
 - **Wires** are entered along their segment.

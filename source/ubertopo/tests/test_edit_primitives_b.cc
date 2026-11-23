@@ -133,6 +133,16 @@ bool two_rooms(Complex<C> &k, PersistentId ha, PersistentId hb, PersistentId sen
   return g.b.build(k, br) && build_regions(k, rr);
 }
 
+bool has_code(const ValidationReport &rep, ValidateCode c)
+{
+  for (const auto &is : rep.issues) {
+    if (is.code == c) {
+      return true;
+    }
+  }
+  return false;
+}
+
 template <geom::CoordType C> uint32_t region_of_id(const Complex<C> &k, PersistentId id)
 {
   for (uint32_t r = 0; r < k.regions.capacity(); r++) {
@@ -762,6 +772,88 @@ template <geom::CoordType C> void test_on_commit()
   UT_CHECK(hk(fx.k) == h1 && fx.valid());
 }
 
+/* The rebuild_regions barrier in Local and OnCommit modes (plan
+ * 2026-11-22): the index re-keys only regions and resolved containers, the
+ * grid stays, and validation is the combinatorial layer plus the
+ * region-container geometry. Each step checks the index and grid against
+ * fresh rebuilds, then edits rows the refresh re-keyed, since stale stored
+ * keys only show when such a row is flushed again. */
+template <geom::CoordType C> void test_region_barrier(ValidateMode mode)
+{
+  PersistentId ha = hid("roomA"), hb = hid("roomB");
+  if (ha < hb) {
+    std::swap(ha, hb); /* B's region sorts first, so merging moves A's index */
+  }
+  auto consistent = [](Editor<C> &ed) { return ed.index_consistent() && ed.grid_consistent(); };
+  {
+    Fixture<C> fx;
+    UT_CHECK(two_rooms<C>(fx.k, ha, hb, ha));
+    EditorOptions opt;
+    opt.validate = mode;
+    Editor<C> ed(fx.k, &fx.j, nullptr, opt);
+    /* a probe in room B (region 2): the merge below moves it to region 1 */
+    VertRef probe;
+    EXPECT_EDIT(ed, ed.make_vertex(pt<C>({6, 1, 1}), hid("probe"), &probe), EditCode::Ok);
+    const uint32_t rb = region_of_id(fx.k, ident::region_id_from_hint(hb));
+    EXPECT_EDIT(ed, ed.embed_vertex(probe, EmbedTarget::region(RegionRef(rb))), EditCode::Ok);
+    /* removing the shared wall merges the rooms: regions are renumbered and
+     * the probe's container resolves to the merged room */
+    const FaceRef wall = fx.face_with({{4, 0, 0}, {4, 4, 0}, {4, 4, 4}, {4, 0, 4}});
+    EXPECT_EDIT(ed, ed.kill_face(wall), EditCode::Ok); /* validates: the grid is built */
+    const PersistentId h_dirty = hk(fx.k);
+    const auto c0 = fx.k.verts.template get<".v.container">()[probe.i];
+    EXPECT_EDIT(ed, ed.rebuild_regions(), EditCode::Ok);
+    UT_CHECK(!(fx.k.verts.template get<".v.container">()[probe.i] == c0)); /* re-keyed */
+    UT_CHECK(consistent(ed) && fx.valid());
+    const PersistentId h_rebuilt = hk(fx.k);
+    /* edits on re-keyed rows: the probe, and a face whose region changed */
+    EXPECT_EDIT(ed, ed.kill_vertex(probe), EditCode::Ok);
+    const FaceRef floor_b = fx.face_with({{4, 0, 0}, {8, 0, 0}, {8, 4, 0}, {4, 4, 0}});
+    EXPECT_EDIT(ed, ed.set_side_hint(floor_b, 1, hb), EditCode::Ok);
+    UT_CHECK(consistent(ed));
+    EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+    EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+    UT_CHECK(hk(fx.k) == h_rebuilt && consistent(ed));
+    /* the barrier's undo re-keys back, and its redo runs it again */
+    EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+    UT_CHECK(hk(fx.k) == h_dirty && consistent(ed));
+    EXPECT_EDIT(ed, ed.redo(), EditCode::Ok);
+    UT_CHECK(hk(fx.k) == h_rebuilt && consistent(ed));
+    EXPECT_EDIT(ed, ed.kill_vertex(vertex_by_id(fx.k, hid("probe"))), EditCode::Ok);
+    UT_CHECK(consistent(ed));
+    EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+    /* edits after the undo (they drop the redo) */
+    EXPECT_EDIT(ed, ed.undo(), EditCode::Ok);
+    UT_CHECK(hk(fx.k) == h_dirty);
+    EXPECT_EDIT(ed, ed.kill_vertex(vertex_by_id(fx.k, hid("probe"))), EditCode::Ok);
+    EXPECT_EDIT(ed, ed.set_side_hint(floor_b, 1, hb), EditCode::Ok);
+    UT_CHECK(consistent(ed));
+  }
+  /* a barrier refused by the narrowed validation: the sensor, hinted to room
+   * A, moves into room B while regions are dirty (ContainerGeometry is
+   * skipped then); the rebuild resolves it to A and fails, and the rollback
+   * leaves the index and grid as they were */
+  {
+    Fixture<C> fx;
+    UT_CHECK(two_rooms<C>(fx.k, ha, hb, ha));
+    EditorOptions opt;
+    opt.validate = mode;
+    Editor<C> ed(fx.k, &fx.j, nullptr, opt);
+    const FaceRef wall = fx.face_with({{0, 0, 0}, {4, 0, 0}, {4, 0, 4}, {0, 0, 4}});
+    EXPECT_EDIT(ed, ed.split_face(wall, fx.vert_at({0, 0, 0}), fx.vert_at({4, 0, 4})), EditCode::Ok);
+    UT_CHECK(fx.k.regions_dirty);
+    EXPECT_EDIT(ed, ed.set_position(vertex_by_id(fx.k, hid("sensor")), pt<C>({6, 1, 1})), EditCode::Ok);
+    const PersistentId h0 = hk(fx.k);
+    EXPECT_EDIT(ed, ed.rebuild_regions(), EditCode::Invalid);
+    UT_CHECK(has_code(ed.report().validation, ValidateCode::ContainerGeometry));
+    UT_CHECK(hk(fx.k) == h0 && fx.k.regions_dirty && consistent(ed));
+    EXPECT_EDIT(ed, ed.kill_vertex(vertex_by_id(fx.k, hid("sensor"))), EditCode::Ok);
+    UT_CHECK(consistent(ed));
+    EXPECT_EDIT(ed, ed.rebuild_regions(), EditCode::Ok);
+    UT_CHECK(consistent(ed) && fx.valid());
+  }
+}
+
 } // namespace
 
 int main()
@@ -781,6 +873,10 @@ int main()
   test_wire_face<geom::Lattice>();
   test_on_commit<double>();
   test_on_commit<geom::Lattice>();
+  for (const ValidateMode mode : {ValidateMode::Local, ValidateMode::OnCommit}) {
+    test_region_barrier<double>(mode);
+    test_region_barrier<geom::Lattice>(mode);
+  }
   UT_CHECK(litestl::alloc::getMemorySize() == baseline);
   return ut_test_end();
 }

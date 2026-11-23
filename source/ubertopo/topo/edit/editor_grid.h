@@ -11,8 +11,10 @@
  *    faces whose boxes they restore (C6), and a face appended and then
  *    dropped loses its entries.
  *  - The grid is built on first use (the first Local or OnCommit
- *    validation) and kept from then on; barriers and stale-stamp checks
- *    rebuild it eagerly when it exists (C13). */
+ *    validation) and kept from then on; compact barriers and stale-stamp
+ *    checks rebuild it eagerly when it exists (C13). rebuild_regions leaves
+ *    it alone: it holds geometry only, which build_regions doesn't write
+ *    (plan 2026-11-22 §2.3), so its cell size is re-tuned only by those. */
 
 #include <algorithm>
 #include <cstdint>

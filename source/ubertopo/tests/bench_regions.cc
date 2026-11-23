@@ -103,45 +103,55 @@ void city(int n)
   }
   printf("city %dx%d: %u faces, %u regions: build_regions %.1f ms (1 band %.1f ms)\n", n, n, k.faces.live_count(),
          regions, t_all, t_one);
-  /* the barrier after a split, which is what an edit that needs regions pays */
+  /* the barrier after an edit that dirties the regions, which is what such
+   * an edit pays: a face split (regions unchanged), and an interior wall
+   * removed (two rooms merge, and every region after the removed one in ID
+   * order shifts down: about half are renumbered) */
   Journal<double> j;
   Editor<double> ed(k, &j, nullptr, EditorOptions{ValidateMode::Local});
   ed.options().verify_redo = false;
-  litestl::test::SplitMix64 r(7);
-  std::vector<double> split, barrier[2], undo_b, undo_s;
-  int done = 0;
-  for (int tries = 0; tries < 4000 && done < 10; tries++) {
-    const uint32_t f = uint32_t(r.below(k.faces.capacity()));
-    VertRef v[4];
-    if (!k.faces.live(f) || !quad(k, FaceRef(f), v)) {
-      continue;
+  for (const bool merge : {false, true}) {
+    litestl::test::SplitMix64 r(7);
+    std::vector<double> edit, barrier[2], undo_b, undo_e;
+    int done = 0;
+    for (int tries = 0; tries < 20000 && done < 10; tries++) {
+      const uint32_t f = uint32_t(r.below(k.faces.capacity()));
+      VertRef v[4];
+      if (!k.faces.live(f) || !quad(k, FaceRef(f), v)) {
+        continue;
+      }
+      if (merge && (k.region(FaceRef(f), 0).i == 0 || k.region(FaceRef(f), 1).i == 0)) {
+        continue; /* not between two rooms */
+      }
+      auto t0 = Clock::now();
+      const EditCode ce = merge ? ed.kill_face(FaceRef(f)) : ed.split_face(FaceRef(f), v[0], v[2]);
+      if (ce != EditCode::Ok) {
+        continue;
+      }
+      edit.push_back(ms_since(t0));
+      const ValidateMode mode = done % 2 ? ValidateMode::None : ValidateMode::Local;
+      ed.options().validate = mode;
+      t0 = Clock::now();
+      const EditCode c = ed.rebuild_regions();
+      barrier[done % 2].push_back(ms_since(t0));
+      ed.options().validate = ValidateMode::Local;
+      if (c != EditCode::Ok) {
+        printf("  rebuild_regions failed: %s\n", edit_code_name(c));
+        return;
+      }
+      t0 = Clock::now();
+      ed.undo();
+      undo_b.push_back(ms_since(t0));
+      t0 = Clock::now();
+      ed.undo();
+      undo_e.push_back(ms_since(t0));
+      done++;
     }
-    auto t0 = Clock::now();
-    if (ed.split_face(FaceRef(f), v[0], v[2]) != EditCode::Ok) {
-      continue;
-    }
-    split.push_back(ms_since(t0));
-    const ValidateMode mode = done % 2 ? ValidateMode::None : ValidateMode::Local;
-    ed.options().validate = mode;
-    t0 = Clock::now();
-    const EditCode c = ed.rebuild_regions();
-    barrier[done % 2].push_back(ms_since(t0));
-    ed.options().validate = ValidateMode::Local;
-    if (c != EditCode::Ok) {
-      printf("  rebuild_regions failed: %s\n", edit_code_name(c));
-      return;
-    }
-    t0 = Clock::now();
-    ed.undo();
-    undo_b.push_back(ms_since(t0));
-    t0 = Clock::now();
-    ed.undo();
-    undo_s.push_back(ms_since(t0));
-    done++;
+    printf("  %s %.3f ms; rebuild_regions barrier %.1f ms (Local), %.1f ms (None); undo of the barrier "
+           "%.1f ms, of the edit %.3f ms (%d samples)\n",
+           merge ? "kill_face (merge)" : "split_face", median(edit), median(barrier[0]), median(barrier[1]),
+           median(undo_b), median(undo_e), done);
   }
-  printf("  split_face %.3f ms; rebuild_regions barrier %.1f ms (Local), %.1f ms (None); undo of the barrier "
-         "%.1f ms, of the split %.3f ms (%d samples)\n",
-         median(split), median(barrier[0]), median(barrier[1]), median(undo_b), median(undo_s), done);
 }
 
 void road()

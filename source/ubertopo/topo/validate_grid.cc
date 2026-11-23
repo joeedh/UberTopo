@@ -310,7 +310,8 @@ void validate_global_grid(const Complex<C> &k, ValidationReport &rep, const Vali
     }
   }
 
-  /* 4. stored regions against a fresh build: only barriers ask (O(N)) */
+  /* 4. stored regions against a fresh build, O(N), when a caller sets
+   * flt.regions (no editor path does: barriers build them fresh) */
   if (flt.regions && !k.regions_dirty) {
     vdetail::check_regions_fresh<C>(k, rep);
   }
