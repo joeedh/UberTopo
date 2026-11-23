@@ -707,7 +707,7 @@ template <geom::CoordType C> ValidationReport Editor<C>::validate_region_barrier
                          k_.verts.template get<".id">(),
                          k_.verts.template get<".live">(),
                          k_.verts.capacity()};
-  validate_combinatorial(k_, v, r); /* shells and regions are checked here */
+  validate_regions(k_, v, r); /* the combinatorial checks that read regions (plan §8) */
   if (!r.ok()) {
     return r;
   }

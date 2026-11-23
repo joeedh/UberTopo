@@ -33,7 +33,7 @@ flags, IDs, hints, or any row count of the vertex, edge, coedge, loop or face do
 Replace it with:
 - the full combinatorial layer (`validate_combinatorial`), which is where the shell and
   region structure is checked (`check_regions`, invariant W). `validate_local.cc`
-  says barriers validate this in full; that stays true;
+  says barriers validate this in full (§8 later narrowed it to the region part);
 - the embedding layer restricted (`validate_embedding` with a `ValidateFilter`) to the
   vertices and edges whose container is a region after the rebuild. Their
   `ContainerGeometry` check is the only embedding check that reads regions. It is
@@ -199,8 +199,8 @@ The comment at `validate_grid.cc:313` ("only barriers ask") is stale: nothing se
   **One equivalent survivor:** the barrier skipping the combinatorial layer. The
   editor refuses to embed into an unhinted region (`UnhintedRegion`), so every
   region container has a hint that `build_regions` resolves. That layer can then
-  fail after a rebuild only through a bug in `build_regions` itself. It stays: it is
-  the documented guarantee ("barriers validate shells and regions in full").
+  fail after a rebuild only through a bug in `build_regions` itself. §8 then narrowed
+  it to its region part.
 - **Results** (`bench_regions`, 1.1·10⁵ faces, clang-cl Release; two runs):
 
   | | before | after |
@@ -228,3 +228,94 @@ The comment at `validate_grid.cc:313` ("only barriers ask") is stale: nothing se
     barrier needs. They depend on per-coedge validity arrays that the earlier
     combinatorial checks fill in, so running them alone needs its own entry point.
     That is the next cheap step, worth about 240 ms at 10⁵ faces.
+
+## 8. Amendment: the region part of the combinatorial layer only
+
+- **Why:** after §2, the full combinatorial layer is the larger half of a `Local`
+  barrier: 220–260 ms of 380–470 ms at 1.1·10⁵ faces. §7's mutation run showed that,
+  for every state the editor can reach, it can only catch a bug in `build_regions`.
+- **What a barrier needs from it** (`validate.cc`, `Checker`): only three checks read
+  what `build_regions` writes:
+  - `check_regions`: one unbounded region at index 0, shells partitioning the live
+    face sides, shell and region chains, and invariant W on every wedge;
+  - unique region IDs (`check_unique_ids` over the region domain);
+  - region liveness of `.v.container` and `.e.container` (`check_container`, region
+    case).
+
+  Every other combinatorial check reads topology that `build_regions` doesn't write
+  and that earlier commits validated: §2.1's argument, applied to this layer.
+- **Change:** add `validate_regions(k, v, rep)` running those three, and (review,
+  §8.1) `ContainerOnFaceVertex`. `check_regions`
+  reads `coedge_ok`, which the full layer fills in while reporting link errors. Here
+  it is computed quietly: the coedge is live, and its loop, radial next and radial
+  prev are live and in range. That keeps the region checks memory-safe on any
+  input, without re-checking links. The barrier (`Local`, `OnCommit`) calls it in
+  place of `validate_combinatorial`. `Full` mode is unchanged.
+- **Tests** (`test_topo_validate`):
+  - `validate_regions` is clean on the valid bases.
+  - It reports each region corruption the full layer reports: `WedgeInvariant`,
+    `ShellPartition`, `ShellRegion`, `UnboundedRegion`, `DuplicateId` on regions,
+    and `ContainerInvalid` for a container naming a dead region.
+  - It also runs on every topology corruption case, with its result ignored, so
+    ASan checks it doesn't read out of range.
+- **Mutations:** each of the three checks removed; the quiet `coedge_ok` taking all
+  coedges as followable (ASan, through the topology corruptions).
+- **Risk:** a topology corruption that only a full combinatorial pass would catch is
+  no longer caught at a barrier. The barrier never wrote it, and Local and OnCommit
+  validated it when it was made (R2).
+
+### 8.1 Review (fresh context, 2026-11-22, of §8)
+
+- **Confirmed:**
+  - the quiet `coedge_ok` bounds every read `check_regions` makes;
+  - the view is needed (`verts` is in `Complex<C>`, not `ComplexBase`);
+  - per transaction, earlier commits validated everything else.
+- **Findings, all adopted:**
+  1. **Medium:** `ContainerOnFaceVertex` reads `.v.container` too. `build_regions`
+     resolves every hinted live vertex, so one with a `None` container lying on a
+     face would start failing it. The builder, `make_face`, weld and imprint keep
+     hinted vertices off faces, so this is unreachable, but the check is O(E) and is
+     added.
+  2. **Medium: the risk section missed a gap.** The `Editor` constructor validates
+     nothing, so in `Local` and `OnCommit` the first barrier was, by accident, the
+     only full combinatorial check of a built or loaded complex. It also caught
+     anything `touched_filter` missed. Both are now the caller's job (R4).
+  3. **Low: docs this makes false:** `validate_local.cc`'s header, the barrier
+     comments, §2.1, 07's barrier row, §7's survivor note.
+  4. **Low:** with dirty regions, `validate_regions` skips `check_regions` and keeps
+     the ID and container checks, like the full layer.
+  5. **Low:** out-of-range corruptions must be far out of range (NONE, or beyond 2×
+     capacity) for ASan to see a read.
+  6. **Low:** `coedge_ok` and the W loop aren't free, so the saving is under 240 ms.
+- **Tests added on its advice:**
+  - parity on every corruption case (the full layer's region issues must all be in
+    `validate_regions`' report);
+  - a container of kind 3;
+  - a region index past the domain;
+  - a container naming a dead region;
+  - a region container on a face vertex;
+  - far-out-of-range links on coedges, loops, shells, face sides and regions.
+
+### 8.2 Implementation notes
+
+- **As planned,** with §8.1's additions. `validate_regions` is a second entry point on
+  the combinatorial `Checker` (`run_regions`).
+- **Mutations:** 7, 6 killed by `test_topo_validate`:
+  - each of the five checks removed;
+  - the quiet `coedge_ok` following every coedge (it reads out of range on the wild
+    links even in Release).
+
+  **The equivalent survivor moves:** the barrier calling no region checks at all
+  survives, for §7's reason (after `build_regions`, only a bug in it could fail
+  them). The direct tests are what pin `validate_regions` down.
+- **Results** (`bench_regions`, 1.1·10⁵ faces; this run's machine was slower, with
+  `build_regions` at 223 ms):
+  - after a split, `Local` now costs 21–25 ms more than `None`, against 220–260 ms
+    before;
+  - after a merge, it costs about 75 ms more.
+
+  The barrier is now essentially `build_regions` itself, which only incremental region
+  maintenance (OI-P3-1) can remove.
+- **R4 — the initial complex.** An editor never validates the complex it is given.
+  Callers that build or load one validate it (`validate(k, Global)`) before editing
+  in `Local` or `OnCommit`. Documented in 07.

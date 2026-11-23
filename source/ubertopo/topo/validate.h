@@ -129,6 +129,16 @@ struct VertexTopoView {
 
 /** Combinatorial layer over the coordinate-independent domains. */
 void validate_combinatorial(const ComplexBase &k, const VertexTopoView &v, ValidationReport &rep);
+/** The part of the combinatorial layer that reads what build_regions writes
+ * (plan 2026-11-22 §8): vertex and edge containers (live; none on a face
+ * vertex), unique region IDs, and the shell and region structure with
+ * invariant W (skipped while regions are dirty, as in the full layer). It
+ * assumes nothing about links: coedges it can't follow are skipped, never
+ * read out of range. It reports at least the region issues the full layer
+ * reports, and may report more where the full layer stops at a broken link.
+ * For rebuild_regions barriers, whose other topology earlier commits
+ * validated. */
+void validate_regions(const ComplexBase &k, const VertexTopoView &v, ValidationReport &rep);
 
 /** Restricts the embedding and global layers to some elements (sorted,
  * unique index lists; plan P3 §3.6). Face-face contact is checked for every

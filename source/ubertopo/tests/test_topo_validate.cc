@@ -165,6 +165,55 @@ template <geom::CoordType C> static void test_valid_models()
 
 template <geom::CoordType C> using Corrupt = std::function<void(Complex<C> &)>;
 
+template <geom::CoordType C> static ValidationReport region_report(const Complex<C> &k)
+{
+  ValidationReport rep;
+  const VertexTopoView v{k.verts.template get<".v.e">(), k.verts.template get<".v.container">(),
+                         k.verts.template get<".id">(), k.verts.template get<".live">(), k.verts.capacity()};
+  validate_regions(k, v, rep);
+  return rep;
+}
+
+/* the issues validate_regions must reproduce: the ones about regions,
+ * shells and containers (plan 2026-11-22 §8) */
+static bool region_issue(const ValidationIssue &is)
+{
+  switch (is.code) {
+    case VC::WedgeInvariant:
+    case VC::ShellPartition:
+    case VC::ShellRegion:
+    case VC::UnboundedRegion:
+    case VC::ContainerInvalid:
+    case VC::ContainerOnFaceVertex:
+      return true;
+    case VC::DuplicateId:
+      return is.kind == ident::ElemKind::Region;
+    default:
+      return false;
+  }
+}
+
+/* validate_regions reports every region issue the full layer reports (it
+ * may report more: it follows coedges the full layer gives up on), and it
+ * runs on any corruption without reading out of range (ASan builds) */
+template <geom::CoordType C> static void check_region_parity(const Complex<C> &k)
+{
+  const ValidationReport full = validate(k), rr = region_report(k);
+  for (const auto &is : full.issues) {
+    if (!region_issue(is)) {
+      continue;
+    }
+    bool found = false;
+    for (const auto &js : rr.issues) {
+      found = found || (js.code == is.code && js.kind == is.kind && js.index == is.index);
+    }
+    if (!found) {
+      fprintf(stderr, "validate_regions missed %s on %u\n", validate_code_name(is.code), is.index);
+    }
+    UT_CHECK(found);
+  }
+}
+
 template <geom::CoordType C> static void expect_code(const Complex<C> &base, VC code, const Corrupt<C> &corrupt)
 {
   Complex<C> k = base; /* a snapshot: base stays valid */
@@ -175,6 +224,21 @@ template <geom::CoordType C> static void expect_code(const Complex<C> &base, VC 
     rep.print(stderr);
   }
   UT_CHECK(rep.count(code) > 0);
+  check_region_parity(k);
+}
+
+/* a corruption validate_regions itself must report */
+template <geom::CoordType C> static void expect_region_code(const Complex<C> &base, VC code, const Corrupt<C> &corrupt)
+{
+  Complex<C> k = base;
+  corrupt(k);
+  const ValidationReport rep = region_report(k);
+  if (rep.count(code) == 0) {
+    fprintf(stderr, "validate_regions: %s not detected; got: ", validate_code_name(code));
+    rep.print(stderr);
+  }
+  UT_CHECK(rep.count(code) > 0);
+  check_region_parity(k);
 }
 
 template <geom::CoordType C> static void test_corruptions()
@@ -279,6 +343,82 @@ template <geom::CoordType C> static void test_corruptions()
   });
   expect_code<C>(base, VC::ShellRegion, [](Complex<C> &k) { k.shells.template get<".s.region">().set(1, 2u); });
   expect_code<C>(base, VC::UnboundedRegion, [](Complex<C> &k) { k.regions.template get<".r.flags">().set(0, uint8_t(0)); });
+
+  /* validate_regions on its own (plan 2026-11-22 §8) */
+  {
+    const ValidationReport clean = region_report(base);
+    UT_CHECK(clean.ok());
+    expect_region_code<C>(base, VC::WedgeInvariant, [](Complex<C> &k) {
+      auto reg = k.faces.template get<".f.region">()[0];
+      std::swap(reg[0], reg[1]);
+      k.faces.template get<".f.region">().set(0, reg);
+    });
+    expect_region_code<C>(base, VC::ShellPartition, [](Complex<C> &k) {
+      auto sh = k.faces.template get<".f.shell">()[0];
+      sh[0] = sh[0] == 0 ? 1 : 0;
+      k.faces.template get<".f.shell">().set(0, sh);
+    });
+    expect_region_code<C>(base, VC::ShellRegion, [](Complex<C> &k) { k.shells.template get<".s.region">().set(1, 2u); });
+    expect_region_code<C>(base, VC::UnboundedRegion,
+                          [](Complex<C> &k) { k.regions.template get<".r.flags">().set(0, uint8_t(0)); });
+    expect_region_code<C>(base, VC::DuplicateId, [](Complex<C> &k) {
+      k.regions.template get<".id">().set(2, k.regions.template get<".id">()[1]);
+    });
+    /* containers: a dead region, one past the domain, a kind that doesn't
+     * exist, and a region container on a face vertex (an edge's too) */
+    for (const uint32_t bits : {(uint32_t(ident::ContainerKind::Region) << 30) | 2u,
+                                (uint32_t(ident::ContainerKind::Region) << 30) | 999u, (3u << 30) | 1u})
+    {
+      expect_region_code<C>(base, VC::ContainerInvalid, [bits](Complex<C> &k) {
+        if ((bits & 0x3fffffffu) == 2u) {
+          k.regions.free(2); /* the region dies; a vertex still names it */
+        }
+        const uint32_t v = k.verts.alloc();
+        ident::ContainerRef c;
+        c.bits = bits;
+        k.verts.template get<".v.container">().set(v, c);
+        k.verts.template get<".id">().set(v, pid(77778));
+      });
+    }
+    expect_region_code<C>(base, VC::ContainerInvalid, [](Complex<C> &k) {
+      ident::ContainerRef c;
+      c.bits = (uint32_t(ident::ContainerKind::Region) << 30) | 999u;
+      k.edges.template get<".e.container">().set(0, c);
+    });
+    expect_region_code<C>(base, VC::ContainerOnFaceVertex, [](Complex<C> &k) {
+      ident::ContainerRef c;
+      UT_CHECK(ident::ContainerRef::region(RegionRef(1), c));
+      k.verts.template get<".v.container">().set(0, c);
+    });
+    /* dirty regions: the shell and region structure isn't checked */
+    {
+      Complex<C> k = base;
+      k.shells.template get<".s.region">().set(1, 2u);
+      k.regions_dirty = true;
+      UT_CHECK(region_report(k).count(VC::ShellRegion) == 0);
+    }
+    /* links far out of range: validate_regions skips what it can't follow
+     * (ASan builds check it reads nothing outside the domains) */
+    const uint32_t far = 2 * std::max({base.coedges.capacity(), base.loops.capacity(), base.faces.capacity(),
+                                       base.shells.capacity()}) + 7;
+    const std::vector<Corrupt<C>> wild = {
+        [](Complex<C> &k) { k.coedges.template get<".c.radial_next">().set(0, NONE); },
+        [far](Complex<C> &k) { k.coedges.template get<".c.radial_next">().set(0, far); },
+        [](Complex<C> &k) { k.coedges.template get<".c.l">().set(0, NONE); },
+        [far](Complex<C> &k) { k.coedges.template get<".c.l">().set(1, far); },
+        [](Complex<C> &k) { k.loops.template get<".l.f">().set(0, NONE); },
+        [far](Complex<C> &k) { k.loops.template get<".l.f">().set(0, far); },
+        [far](Complex<C> &k) { k.shells.template get<".s.first">().set(1, far); },
+        [far](Complex<C> &k) { k.faces.sides().template get<".fs.shell_next">().set(0, far); },
+        [far](Complex<C> &k) { k.regions.template get<".r.shell">().set(1, far); },
+    };
+    for (const auto &w : wild) {
+      Complex<C> k = base;
+      w(k);
+      (void)region_report(k);
+      check_region_parity(k);
+    }
+  }
 }
 
 template <geom::CoordType C>

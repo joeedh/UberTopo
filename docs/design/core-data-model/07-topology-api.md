@@ -408,7 +408,7 @@ the only writer of a complex during editing.
 | `flip_face(f)` | Reverses loops, swaps side rows and hints, toggles `Reversed`; regions go dirty |
 | `set_side_hint(f, side, h)` | Regions go dirty; refuses removing the last carrier of a used hint |
 | `set_attr(group, row, column, bytes)` | Journaled write of a non-`Topo` column (not `pos`) |
-| `rebuild_regions()` | A barrier: `build_regions`, then validation; it snapshots the complex for undo. `Full` mode validates to Embedding. `Local` and `OnCommit` run the combinatorial layer in full and `ContainerGeometry` on region-contained elements, the one geometric check that reads regions (plan [2026-11-22](../../plans/2026-11-22-region-barrier-cost.md)). Earlier commits validated the geometry the barrier leaves unchanged |
+| `rebuild_regions()` | A barrier: `build_regions`, then validation; it snapshots the complex for undo. `Full` mode validates to Embedding. `Local` and `OnCommit` run `validate_regions` (the combinatorial checks that read regions: containers, region IDs, shells, regions, invariant W) and `ContainerGeometry` on region-contained elements, the one geometric check that reads regions (plan [2026-11-22](../../plans/2026-11-22-region-barrier-cost.md)). Earlier commits validated the topology and geometry the barrier leaves unchanged. An editor never validates the complex it is given: validate a built or loaded complex before editing it in `Local` or `OnCommit` |
 
 **Regions are derived.** Only `rebuild_regions` writes region and shell columns.
 - Face edits (make, kill, split, join, flip, hints) set `regions_dirty`.

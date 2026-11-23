@@ -553,3 +553,18 @@ Entry format:
   - To find costs like these, put temporary timers on each step behind an
     environment variable (`CLAUDENOTE`), and count the calls each step makes.
     Totals alone pointed at the wrong layer here.
+
+## A failed scripted edit empties the file it was editing
+- **Symptom:** `docs/index.md` was suddenly 0 bytes after a Python edit script
+  stopped with an `AssertionError`. Uncommitted lines in the file were lost from
+  the working copy.
+- **Cause:** `open(p, 'w').write(edit(text))` opens, and so truncates, the file
+  before `edit()` runs. When `edit()` raises, nothing is written.
+- **Fix / technique:**
+  - Compute the new text first, then open the file: `out = edit(text);
+    open(p, 'w').write(out)`.
+  - Copy a file holding someone else's uncommitted work aside before
+    scripting edits to it.
+  - Recovery: HEAD plus the lost lines. The session transcript (the `.jsonl`
+    under `~/.claude/projects/`) holds earlier diffs and reads that show their
+    exact text and position.

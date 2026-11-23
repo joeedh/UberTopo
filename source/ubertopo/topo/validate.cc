@@ -648,6 +648,60 @@ struct Checker {
       check_regions();
     }
   }
+
+  /* Only the checks that read what build_regions writes (plan 2026-11-22
+   * §8): containers (live, and none on a face vertex), unique region IDs,
+   * and check_regions. coedge_ok is computed quietly, without the link
+   * checks: a coedge counts if it, its loop and its radial next are live,
+   * which bounds every read check_regions makes. */
+  void run_regions()
+  {
+    NV = v.capacity;
+    NE = k.edges.capacity();
+    NC = k.coedges.capacity();
+    NL = k.loops.capacity();
+    NF = k.faces.capacity();
+    coedge_ok.resize(NC);
+    for (uint32_t c = 0; c < NC; c++) {
+      const CoedgeRef cr(c);
+      coedge_ok[c] = uint8_t(clive(c) && llive(k.loop_of(cr).i) && clive(k.radial_next(cr).i));
+    }
+    util::Vector<uint8_t> on_face;
+    on_face.resize(NV);
+    for (uint32_t i = 0; i < NV; i++) {
+      on_face[i] = 0;
+    }
+    const auto &ec = k.edges.get<".e.container">();
+    for (uint32_t e = 0; e < NE; e++) {
+      if (!elive(e)) {
+        continue;
+      }
+      check_container(ec[e], ElemKind::Edge, e);
+      const auto vs = k.edge_verts(EdgeRef(e));
+      if (k.edge_coedge(EdgeRef(e))) {
+        for (const VertRef x : vs) {
+          if (vlive(x.i)) {
+            on_face[x.i] = 1;
+          }
+        }
+      }
+    }
+    for (uint32_t i = 0; i < NV; i++) {
+      if (!vlive(i)) {
+        continue;
+      }
+      const ident::ContainerRef cr = v.container[i];
+      check_container(cr, ElemKind::Vertex, i);
+      if (!cr.is_none() && on_face[i]) {
+        rep.add(VC::ContainerOnFaceVertex, ElemKind::Vertex, i);
+      }
+    }
+    check_unique_ids(
+        k.regions.get<".id">(), k.regions.capacity(), [&](uint32_t i) { return k.regions.live(i); }, ElemKind::Region);
+    if (!k.regions_dirty) {
+      check_regions();
+    }
+  }
 };
 
 } // namespace
@@ -656,6 +710,12 @@ void validate_combinatorial(const ComplexBase &k, const VertexTopoView &v, Valid
 {
   Checker c{k, v, rep, 0, 0, 0, 0, 0, {}};
   c.run();
+}
+
+void validate_regions(const ComplexBase &k, const VertexTopoView &v, ValidationReport &rep)
+{
+  Checker c{k, v, rep, 0, 0, 0, 0, 0, {}};
+  c.run_regions();
 }
 
 } // namespace ubertopo::topo

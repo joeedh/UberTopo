@@ -18,8 +18,8 @@
  *    loop IDs among the in-scope loops;
  *  - invariant W on in-scope coedges when regions are clean.
  *
- * Shell and region structure is changed only by barriers, which validate
- * in full. */
+ * Shell and region structure is changed only by barriers, which check it
+ * in full (validate_regions, or the whole layer in Full mode). */
 
 #include <algorithm>
 #include <unordered_map>
