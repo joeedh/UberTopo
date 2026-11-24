@@ -52,6 +52,7 @@
 #include "ubertopo/topo/edit/edit_types.h"
 #include "ubertopo/topo/edit/editor_grid.h"
 #include "ubertopo/topo/edit/editor_index.h"
+#include "ubertopo/topo/edit/editor_region_hints.h"
 #include "ubertopo/topo/edit/journal.h"
 #include "ubertopo/topo/edit/propagate.h"
 
@@ -257,6 +258,12 @@ public:
     grid_.flush(k_);
     return grid_.same_as_fresh(k_);
   }
+  /** Test hook: the cached winning hints of regions, if current, equal fresh
+   * ones. Leaves the cache current. */
+  bool region_hints_consistent() const
+  {
+    return region_hints_.consistent(k_);
+  }
   /** The edge joining @p a and @p b, if any. */
   EdgeRef find_edge(VertRef a, VertRef b) const;
 
@@ -385,8 +392,6 @@ private:
   bool live(Grp g, uint32_t i) const;
   void inclusions(FaceRef f, litestl::util::Vector<uint32_t, 16> &out) const; /* (index << 1) | is_edge */
   bool hint_in_use(ident::PersistentId h) const;
-  /** build_regions' winning hint of region @p r (kNoId if none). */
-  ident::PersistentId region_winning_hint(uint32_t r) const;
   bool hint_carried(ident::PersistentId h, uint32_t skip_side_a, uint32_t skip_side_b) const;
   uint32_t edge_slot(EdgeRef e, VertRef v) const;
   litestl::util::Vector<CoedgeRef, 8> radial_members(EdgeRef e) const;
@@ -425,6 +430,9 @@ private:
   litestl::util::Vector<uint32_t> txn_touched_[kGroupCount];
   /* the face-box grid (editor_grid.h), kept like the index */
   mutable EditGrid<C> grid_;
+  /* regions' winning hints (editor_region_hints.h), validated by column
+   * versions: nothing marks or invalidates it */
+  mutable EditRegionHints<C> region_hints_;
   /** The index as an IdOracle for validate_local. */
   struct IndexIds final : IdOracle {
     const EditIndex<C> *idx = nullptr;

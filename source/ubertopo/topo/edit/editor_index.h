@@ -6,11 +6,13 @@
  * whole complex:
  *  - persistent IDs of vertices, edges and faces, with a count per ID, so
  *    duplicates are visible (check-on-insert);
- *  - inclusions: container (face or region) -> sorted packed elements
+ *  - inclusions: container face -> sorted packed elements
  *    ((index << 1) | is_edge);
  *  - container users per hint (hint_in_use);
- *  - side carriers per hint (hint_carried), and per-region votes for
- *    build_regions' winning hint.
+ *  - side carriers per hint (hint_carried).
+ * Nothing here depends on region indices, which most region rebuilds shift
+ * (plan 2026-11-24). Regions' winning hints are a separate cache,
+ * editor_region_hints.h.
  *
  * Maintenance is by dirty rows, not by write helpers: Editor::touch() marks
  * every row it is about to write, restore() marks every row it puts back or
@@ -20,8 +22,7 @@
  * ID re-used by another row in the same transaction never look like a
  * duplicate. A compact barrier (and its undo) renumbers rows, so it
  * rebuilds everything in O(N log N); rebuild_regions and its undo change
- * only regions and resolved containers, so they re-key just those
- * (refresh_regions). */
+ * only regions and resolved containers (refresh_containers). */
 
 #include <cstdint>
 #include <map>
@@ -90,42 +91,37 @@ public:
     dirty_.clear();
   }
   /** Brings the index up to date after build_regions, or after restoring
-   * the state before one (plan 2026-11-22 §2.2). build_regions changes only
-   * faces' regions and the containers of hinted elements, never IDs, hints
-   * or row counts, so only those keys are compared and re-keyed, the stored
-   * keys with the maps. O(N) column reads; map work only for changed rows. */
-  void refresh_regions(const Complex<C> &k)
+   * the state before one (plans 2026-11-22 §2.2, 2026-11-24). Of what the
+   * index holds, build_regions changes only containers of hinted elements:
+   * it resolves them to regions, so a hinted element whose container was a
+   * face (the editor makes none, but a loaded complex may hold one) leaves
+   * that face's inclusions. */
+  void refresh_containers(const Complex<C> &k)
   {
     if (!valid_) {
       rebuild(k);
       return;
     }
     flush(k);
-    const auto &vc = k.verts.template get<".v.container">();
-    const auto &ec = k.edges.template get<".e.container">();
-    const auto &fr = k.faces.template get<".f.region">();
+    if (users_.empty()) {
+      return; /* no hinted element */
+    }
     auto elems = [&](std::vector<ElemKey> &keys, const auto &col, uint32_t tag) {
       for (uint32_t i = 0; i < uint32_t(keys.size()); i++) {
         ElemKey &x = keys[i];
-        if (x.live && !(x.c == col[i])) {
+        if (!x.live || x.hint == ident::kNoId) {
+          continue;
+        }
+        const ident::ContainerRef c = face_only(col[i]);
+        if (!(x.c == c)) {
           container(x.c, (i << 1) | tag, -1);
-          x.c = col[i];
+          x.c = c;
           container(x.c, (i << 1) | tag, +1);
         }
       }
     };
-    elems(vkeys_, vc, 0);
-    elems(ekeys_, ec, 1);
-    for (uint32_t f = 0; f < uint32_t(fkeys_.size()); f++) {
-      FaceKey &x = fkeys_[f];
-      const U32x2 r = x.live ? fr[f] : U32x2{};
-      if (x.live && (x.region[0] != r[0] || x.region[1] != r[1])) {
-        face_regions(x, -1);
-        x.region[0] = r[0];
-        x.region[1] = r[1];
-        face_regions(x, +1);
-      }
-    }
+    elems(vkeys_, k.verts.template get<".v.container">(), 0);
+    elems(ekeys_, k.edges.template get<".e.container">(), 1);
   }
 
   /* ---- queries (flush first) ---- */
@@ -159,45 +155,13 @@ public:
     auto it = carriers_.find(h);
     return it == carriers_.end() ? 0 : it->second;
   }
-  /** build_regions' winning hint of region @p r (most sides; ties to the
-   * smaller hint), or kNoId. The unbounded hint never wins here. */
-  PersistentId winning_hint(uint32_t r) const
-  {
-    auto it = votes_.find(r);
-    PersistentId best{};
-    uint32_t n = 0;
-    if (it != votes_.end()) {
-      for (auto &[h, c] : it->second) {
-        if (c > n) {
-          n = c;
-          best = h;
-        }
-      }
-    }
-    return best == ident::unbounded_region_id() ? PersistentId{} : best;
-  }
-  /** True if a region other than @p r and region 0 also wins @p h. */
-  bool other_winner(uint32_t r, PersistentId h) const
-  {
-    auto it = hint_regions_.find(h);
-    if (it == hint_regions_.end()) {
-      return false;
-    }
-    for (auto &[r2, n] : it->second) {
-      if (r2 != r && r2 != 0 && n > 0 && winning_hint(r2) == h) {
-        return true;
-      }
-    }
-    return false;
-  }
 
   /** Same contents as @p o (tests: an index maintained by dirty rows must
    * equal one rebuilt from scratch). Both must be flushed. */
   bool same_as(const EditIndex &o) const
   {
     return ids_[0] == o.ids_[0] && ids_[1] == o.ids_[1] && ids_[2] == o.ids_[2] && dups_ == o.dups_ &&
-           incl_ == o.incl_ && users_ == o.users_ && carriers_ == o.carriers_ && votes_ == o.votes_ &&
-           hint_regions_ == o.hint_regions_;
+           incl_ == o.incl_ && users_ == o.users_ && carriers_ == o.carriers_;
   }
 
 private:
@@ -208,24 +172,27 @@ private:
   struct ElemKey { /* vertices and edges */
     bool live = false;
     PersistentId id{};
-    ident::ContainerRef c{};
+    ident::ContainerRef c{}; /* face_only */
     PersistentId hint{};
   };
   struct FaceKey {
     bool live = false;
     PersistentId id{};
-    uint32_t region[2] = {NONE, NONE};
     PersistentId hint[2] = {};
   };
 
-
+  /* the part of a container the index holds: a face */
+  static ident::ContainerRef face_only(ident::ContainerRef c)
+  {
+    return c.kind() == ident::ContainerKind::Face ? c : ident::ContainerRef{};
+  }
   ElemKey vkey(const Complex<C> &k, uint32_t v) const
   {
     ElemKey x;
     if (v < k.verts.capacity() && k.verts.live(v)) {
       x.live = true;
       x.id = k.verts.template get<".id">()[v];
-      x.c = k.verts.template get<".v.container">()[v];
+      x.c = face_only(k.verts.template get<".v.container">()[v]);
       x.hint = k.verts.template get<".v.container_hint">()[v];
     }
     return x;
@@ -236,7 +203,7 @@ private:
     if (e < k.edges.capacity() && k.edges.live(e)) {
       x.live = true;
       x.id = k.edges.template get<".id">()[e];
-      x.c = k.edges.template get<".e.container">()[e];
+      x.c = face_only(k.edges.template get<".e.container">()[e]);
       x.hint = k.edges.template get<".e.container_hint">()[e];
     }
     return x;
@@ -247,10 +214,8 @@ private:
     if (f < k.faces.capacity() && k.faces.live(f)) {
       x.live = true;
       x.id = k.faces.template get<".id">()[f];
-      const U32x2 r = k.faces.template get<".f.region">()[f];
       const auto &sh = k.faces.sides().template get<".fs.hint">();
       for (uint32_t s = 0; s < 2; s++) {
-        x.region[s] = r[s];
         x.hint[s] = sh[2 * f + s];
       }
     }
@@ -274,7 +239,7 @@ private:
       }
     }
   }
-  /* an element's entry in its container's inclusion list */
+  /* an element's entry in its container face's inclusion list */
   void container(ident::ContainerRef c, uint32_t packed, int delta)
   {
     if (c.is_none()) {
@@ -321,39 +286,7 @@ private:
         bump(carriers_, x.hint[s], delta);
       }
     }
-    face_regions(x, delta);
   }
-  /* the part of a face's keys that depends on its regions: the votes of its
-   * hinted sides */
-  void face_regions(const FaceKey &x, int delta)
-  {
-    if (!x.live) {
-      return;
-    }
-    for (uint32_t s = 0; s < 2; s++) {
-      const PersistentId h = x.hint[s];
-      if (h == ident::kNoId) {
-        continue;
-      }
-      if (x.region[s] != NONE) {
-        auto &v = votes_[x.region[s]];
-        bump(v, h, delta);
-        if (v.empty()) {
-          votes_.erase(x.region[s]);
-        }
-        auto &hr = hint_regions_[h];
-        uint32_t &n = hr[x.region[s]];
-        n = uint32_t(int(n) + delta);
-        if (n == 0) {
-          hr.erase(x.region[s]);
-          if (hr.empty()) {
-            hint_regions_.erase(h);
-          }
-        }
-      }
-    }
-  }
-
   void remove_row(uint8_t kind, uint32_t row)
   {
     if (kind == 0) {
@@ -419,8 +352,6 @@ private:
     incl_.clear();
     users_.clear();
     carriers_.clear();
-    votes_.clear();
-    hint_regions_.clear();
     vkeys_.assign(k.verts.capacity(), ElemKey{});
     ekeys_.assign(k.edges.capacity(), ElemKey{});
     fkeys_.assign(k.faces.capacity(), FaceKey{});
@@ -439,8 +370,6 @@ private:
   uint32_t dups_ = 0;
   std::map<uint32_t, std::set<uint32_t>> incl_; /* container bits -> packed */
   std::map<PersistentId, uint32_t> users_, carriers_;
-  std::map<uint32_t, std::map<PersistentId, uint32_t>> votes_; /* region -> hint -> sides */
-  std::map<PersistentId, std::map<uint32_t, uint32_t>> hint_regions_;
 };
 
 } // namespace ubertopo::topo

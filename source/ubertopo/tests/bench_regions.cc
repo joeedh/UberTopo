@@ -4,7 +4,8 @@
  *  - build_regions on room-grid cities of ~1e4, ~3e4 and ~1e5 faces, at the
  *    default band count and at 1 band;
  *  - the editor's rebuild_regions barrier after a face split (Local and None
- *    validation), and its undo, against the split itself;
+ *    validation), and its undo, against the split itself, and the first embed
+ *    into a region after it;
  *  - build_regions on the road-on-terrain case (curved edges). */
 
 #include <algorithm>
@@ -112,7 +113,7 @@ void city(int n)
   ed.options().verify_redo = false;
   for (const bool merge : {false, true}) {
     litestl::test::SplitMix64 r(7);
-    std::vector<double> edit, barrier[2], undo_b, undo_e;
+    std::vector<double> edit, barrier[2], embed, undo_b, undo_e;
     int done = 0;
     for (int tries = 0; tries < 20000 && done < 10; tries++) {
       const uint32_t f = uint32_t(r.below(k.faces.capacity()));
@@ -139,6 +140,17 @@ void city(int n)
         printf("  rebuild_regions failed: %s\n", edit_code_name(c));
         return;
       }
+      /* the first embed into a region after the barrier finds every region's
+       * winning hint */
+      ed.options().validate = ValidateMode::None;
+      VertRef pv;
+      ed.begin("embed");
+      ed.make_vertex({0, 0, 0}, ident::derive(ident::tag::TestOnly, std::string_view("probe")), &pv);
+      t0 = Clock::now();
+      ed.embed_vertex(pv, EmbedTarget::region(RegionRef(1)));
+      embed.push_back(ms_since(t0));
+      ed.rollback();
+      ed.options().validate = ValidateMode::Local;
       t0 = Clock::now();
       ed.undo();
       undo_b.push_back(ms_since(t0));
@@ -148,9 +160,9 @@ void city(int n)
       done++;
     }
     printf("  %s %.3f ms; rebuild_regions barrier %.1f ms (Local), %.1f ms (None); undo of the barrier "
-           "%.1f ms, of the edit %.3f ms (%d samples)\n",
+           "%.1f ms, of the edit %.3f ms; first region embed %.2f ms (%d samples)\n",
            merge ? "kill_face (merge)" : "split_face", median(edit), median(barrier[0]), median(barrier[1]),
-           median(undo_b), median(undo_e), done);
+           median(undo_b), median(undo_e), median(embed), done);
   }
 }
 

@@ -530,6 +530,12 @@ template <geom::CoordType C> struct Run {
         fprintf(stderr, "  step %u: editor index diverged after %s\n", n, edit_code_name(c));
         return {};
       }
+      /* the editor's cached winning hints, if current, equal fresh ones */
+      if (!ed.region_hints_consistent()) {
+        UT_CHECK(false);
+        fprintf(stderr, "  step %u: editor region hints diverged after %s\n", n, edit_code_name(c));
+        return {};
+      }
       /* the editor's dirty-row face-box grid equals a rebuilt one (P3b W5, C6) */
       if (!ed.grid_consistent()) {
         UT_CHECK(false);
@@ -575,7 +581,7 @@ template <geom::CoordType C> struct Run {
     const PersistentId h_end = content_hash(k);
     const uint32_t applied = j.undo_count();
     for (uint32_t i = 0; i < applied; i++) {
-      UT_CHECK(ed.undo() == EditCode::Ok);
+      UT_CHECK(ed.undo() == EditCode::Ok && ed.region_hints_consistent());
     }
     UT_CHECK(content_hash(k) == h0);
     UT_CHECK(ed.index_consistent() && ed.grid_consistent());
@@ -587,6 +593,7 @@ template <geom::CoordType C> struct Run {
         fprintf(stderr, "  redo %u failed: %s\n", i, edit_code_name(c));
         break;
       }
+      UT_CHECK(ed.region_hints_consistent());
     }
     /* the redo stack held only what the run itself had undone at the end
      * plus everything undone here; replaying all of it reaches h_end only if

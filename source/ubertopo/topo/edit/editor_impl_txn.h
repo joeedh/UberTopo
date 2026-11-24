@@ -348,8 +348,8 @@ template <geom::CoordType C> EditCode Editor<C>::undo()
     restore_snapshot(std::move(*t.snapshot));
     if (!t.ops.empty() && t.ops.front().kind == OpKind::RebuildRegions) {
       /* the state before build_regions differs only in regions and resolved
-       * containers: re-key those; the grid holds geometry only */
-      idx_.refresh_regions(k_);
+       * containers; the grid holds geometry only */
+      idx_.refresh_containers(k_);
     }
     else {
       idx_.invalidate();
@@ -952,12 +952,6 @@ void Editor<C>::inclusions(FaceRef f, litestl::util::Vector<uint32_t, 16> &out) 
   }
   idx_.flush(k_);
   idx_.inclusions(target, out);
-}
-
-template <geom::CoordType C> ident::PersistentId Editor<C>::region_winning_hint(uint32_t r) const
-{
-  idx_.flush(k_);
-  return idx_.winning_hint(r);
 }
 
 template <geom::CoordType C> bool Editor<C>::hint_in_use(ident::PersistentId h) const

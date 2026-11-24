@@ -488,18 +488,21 @@ and both are redone by running them again.
 - New codes: `ChainNotSimple`, `NotEmbedded`, `HoleInside` (OI-P3b-1: cycles around
   existing holes are refused), `EdgeShared`, `Coincident`.
 
-**Derived editor state** (`edit/editor_index.h`, `edit/editor_grid.h`):
-- **What is kept:** the ID and inclusion index, and a face-box grid
-  (`topo/face_grid.h`).
-- **How:** both are maintained by dirty rows. `touch`, `alloc` and `restore` mark
+**Derived editor state** (`edit/editor_index.h`, `edit/editor_grid.h`,
+`edit/editor_region_hints.h`):
+- **What is kept:** the ID, hint and face-inclusion index, a face-box grid
+  (`topo/face_grid.h`), and a cache of regions' winning hints. Nothing but that cache
+  depends on region indices.
+- **How:** the index and the grid are maintained by dirty rows. `touch`, `alloc` and `restore` mark
   rows; a flush re-reads them from the current state.
 - **Barriers and outside writes:**
   - `compact` and its undo rebuild both eagerly, since they renumber rows.
-  - `rebuild_regions` and its undo re-key only the index entries that depend on
-    regions (`EditIndex::refresh_regions`: face sides' votes, region-container
-    inclusions) and leave the grid, which holds geometry only. A failed
-    `rebuild_regions` rolls back before touching either.
+  - `rebuild_regions` and its undo re-key only hinted elements whose container was or
+    becomes a face (`EditIndex::refresh_containers`), and leave the grid, which holds
+    geometry only. A failed `rebuild_regions` rolls back before touching either.
   - A write outside the editor invalidates both, and they are rebuilt on next use.
+- **Winning hints** are rebuilt, in O(F), by the first embed into a region after
+  `.fs.hint` or `.f.region` changed (the cache remembers their version stamps).
 - **Grid cells** are the smallest power of two at least the median face-box extent.
 - **Large faces** spanning more than 64 cells are entered by their T(f) triangles.
 - **Wires** are entered along their segment.

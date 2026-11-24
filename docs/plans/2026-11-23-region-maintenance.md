@@ -1,7 +1,8 @@
 # Plan: cheaper region rebuilds (OI-P3-1)
 
-Status: **v2**, after a fresh-context review (§7). **Stage A implemented** (§9);
-Stage B is a design outline waiting on decision D1.
+Status: **v2**, after a fresh-context review (§7). **Stage A implemented** (§9), and
+B0 ([2026-11-24](2026-11-24-edit-index-regions.md)); Stage B is a design outline
+waiting on decision D1.
 
 ## 1. Why and scope
 
@@ -243,8 +244,9 @@ The steps:
 - **A3:** before/after `bench_regions`; phase timers removed; docs: 01 §7's OI-P3-1
   line, the P3b plan's OI-P3-1 entry, 07's barrier row if its numbers change, the
   index, `docs/debugging.md` for anything non-obvious.
-- **B0 (after D1):** the `EditIndex` rework of option (c), measured on the merge
-  barrier and its undo.
+- **B0:** the `EditIndex` rework of option (c), measured on the merge barrier and its
+  undo. Done in [2026-11-24](2026-11-24-edit-index-regions.md): the region-keyed state
+  turned out not to be needed, so it was removed rather than remapped.
 - **B:** a separate plan for incremental maintenance.
 
 ## 7. Review (fresh context, 2026-11-23, of v1)

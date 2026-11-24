@@ -9,6 +9,7 @@
 #include "litestl/util/sort.h"
 #include "litestl/util/task.h"
 #include "ubertopo/geom/predicates.h"
+#include "ubertopo/topo/hint_votes.h"
 #include "ubertopo/topo/radial.h"
 
 namespace ubertopo::topo {
@@ -511,46 +512,9 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
     util::KeyGroups preg_shells;
     util::group_by_key(S, PR, [&](uint32_t sh) { return shell_preg[sh]; }, preg_shells);
     const auto &hints = k.faces.sides().template get<".fs.hint">();
-    /* distinct hints and their counts, scanned linearly; past 8 a map
-     * indexes them (region 0 has ~one hint over many sides) */
-    struct Vote {
-      PersistentId h;
-      uint32_t n;
-    };
-    util::Vector<Vote> votes;
-    util::Map<PersistentId, uint32_t> vpos;
-    bool use_map = false;
-    auto vote = [&](PersistentId h) {
-      if (!use_map) {
-        for (Vote &v : votes) {
-          if (v.h == h) {
-            v.n++;
-            return;
-          }
-        }
-        votes.append({h, 1});
-        if (votes.size() > 8) {
-          use_map = true;
-          for (uint32_t i = 0; i < votes.size(); i++) {
-            vpos.add(votes[i].h, i);
-          }
-        }
-        return;
-      }
-      if (uint32_t *p = vpos.lookup_ptr(h)) {
-        votes[*p].n++;
-      }
-      else {
-        vpos.add(h, uint32_t(votes.size()));
-        votes.append({h, 1});
-      }
-    };
+    HintVotes votes; /* unb votes like any hint */
     for (uint32_t r = 0; r < PR; r++) {
       votes.clear();
-      if (use_map) {
-        vpos = util::Map<PersistentId, uint32_t>();
-        use_map = false;
-      }
       PersistentId min_side{};
       bool have_min = false;
       for (uint32_t sh : preg_shells[r]) {
@@ -561,26 +525,19 @@ template <geom::CoordType C> bool build_regions(Complex<C> &k, RegionReport &rep
           }
           const PersistentId h = hints[s];
           if (!(h == ident::kNoId)) {
-            vote(h);
+            votes.add(h);
           }
         }
       }
-      /* the most votes; ties keep the smaller hint. unb votes like any hint */
-      PersistentId hint{};
-      uint32_t best = 0;
-      for (const Vote &v : votes) {
-        if (v.n > best || (v.n == best && v.h < hint)) {
-          best = v.n;
-          hint = v.h;
-        }
-      }
-      if (votes.size() > 1 || (r == 0 && best > 0 && !(hint == unb)) || (r != 0 && hint == unb)) {
+      const PersistentId hint = votes.winner();
+      const size_t nhints = votes.votes().size();
+      if (nhints > 1 || (r == 0 && nhints > 0 && !(hint == unb)) || (r != 0 && hint == unb)) {
         report.add(RegionCode::HintConflict, r);
       }
       preg_hint[r] = (r == 0 || hint == unb) ? PersistentId{} : hint;
       preg_min[r] = min_side;
       if (r != 0) {
-        for (const Vote &v : votes) {
+        for (const HintVotes::Vote &v : votes.votes()) {
           if (v.h == hint || v.h == unb) {
             continue;
           }

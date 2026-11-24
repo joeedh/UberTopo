@@ -773,8 +773,7 @@ template <geom::CoordType C> void test_on_commit()
 }
 
 /* The rebuild_regions barrier in Local and OnCommit modes (plan
- * 2026-11-22): the index re-keys only regions and resolved containers, the
- * grid stays, and validation is the combinatorial layer plus the
+ * 2026-11-22): the index re-keys only resolved containers, the grid stays, and validation is the combinatorial layer plus the
  * region-container geometry. Each step checks the index and grid against
  * fresh rebuilds, then edits rows the refresh re-keyed, since stale stored
  * keys only show when such a row is flushed again. */

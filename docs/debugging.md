@@ -580,3 +580,23 @@ Entry format:
   - After restoring a file by copying, touch it:
     `(Get-Item f).LastWriteTime = Get-Date`, or `touch f`.
   - Compare the binaries' hashes before trusting an A/B timing.
+
+## A test of the editor index across a barrier passes whatever the code does
+
+- **Symptom:** a test writes a column directly (to make a state the editor can't), then
+  runs `rebuild_regions()` and checks `index_consistent()`. It passes even with the
+  index's refresh deleted.
+- **Cause:** the direct write bumps `version()`. The barrier's `begin_internal` sees that
+  the index stamp is stale and invalidates the index, so it is rebuilt from scratch and
+  the refresh never runs. A new `Editor` starts in the same state.
+- **Fix:** after the write, run an editor primitive that flushes the index (for example
+  `make_vertex`, whose ID check does), then the barrier. `test_edit_region_hints`
+  (`test_face_container_hint`) does this.
+
+## `node configureEnv.mjs cmd /c ...` hangs under Git Bash
+
+- **Symptom:** the command prints the Windows banner and never returns.
+- **Cause:** MSYS rewrites the argument `/c` as a path (`C:/`), so `cmd` starts an
+  interactive shell.
+- **Fix:** set `MSYS_NO_PATHCONV=1` for the command, and redirect stdin from `/dev/null`
+  so that a mistake can't wait for input. PowerShell has no such rewriting.

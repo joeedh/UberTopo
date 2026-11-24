@@ -246,9 +246,8 @@ template <geom::CoordType C> EditCode Editor<C>::embed_impl(bool is_edge, uint32
     else {
       /* the region's winning hint (build_regions' vote: most sides, ties to
        * the smaller hint), if no other region wins it (P3b C4) */
-      hint = region_winning_hint(t.index);
-      const bool ambiguous = !(hint == ident::kNoId) && idx_.other_winner(t.index, hint);
-      if (hint == ident::kNoId || ambiguous) {
+      hint = region_hints_.winner(k_, t.index);
+      if (hint == ident::kNoId || region_hints_.other_winner(k_, t.index, hint)) {
         return pr.fail(EditCode::UnhintedRegion, ident::ElemKind::Region, t.index);
       }
     }

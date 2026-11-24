@@ -681,14 +681,15 @@ template <geom::CoordType C> EditCode Editor<C>::run_barrier(OpKind kind)
   c = commit_internal(redoing_);
   /* eagerly, inside the barrier (C13). compact renumbers rows: both are
    * rebuilt. build_regions writes only regions and resolved containers: the
-   * index re-keys those, and the grid, which holds geometry only, stays */
+   * index re-keys face containers that became regions, and the grid, which
+   * holds geometry only, stays */
   if (kind == OpKind::Compact) {
     idx_.invalidate();
     idx_.flush(k_);
     grid_.rebuild_if_used(k_);
   }
   else {
-    idx_.refresh_regions(k_);
+    idx_.refresh_containers(k_);
   }
   sync_index_stamp();
   if (c == EditCode::Ok) {
