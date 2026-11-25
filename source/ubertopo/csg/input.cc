@@ -266,6 +266,16 @@ CsgCode read_operands(std::span<const Operand> leaves, Input &out, uint32_t *bad
     if (c != CsgCode::Ok) {
       return fail(c, l);
     }
+    /* (every vertex is a corner: wires and inclusions are refused) */
+    leaves[l].k->verts.for_each_live([&](uint32_t v) {
+      out.verts.append({l, r.point(leaves[l].k->pos(topo::VertRef(v))), v, kNone, 0});
+    });
+    leaves[l].k->edges.for_each_live([&](uint32_t x) {
+      uint32_t index = 0;
+      for (uint32_t id : r.sk.interior(topo::EdgeRef(x))) {
+        out.verts.append({l, r.point(r.sk.pos(id)), kNone, x, index++});
+      }
+    });
     for (const I3 &p : out.ipos) {
       if (!in_range(p)) {
         return CsgCode::OutOfRange; /* all of them together: no one's fault */

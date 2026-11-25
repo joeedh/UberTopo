@@ -57,12 +57,16 @@ CsgCode evaluate(const CsgTree &t, const OperandStore &store, const BoolOptions 
   report.facets = uint32_t(a.facets.size());
   litestl::util::Vector<Selected> selected;
   select_facets(a, c.expr, selected);
+  const NameSource names{{c.operands.data(), size_t(c.operands.size())},
+                         {c.leaf_ids.data(), size_t(c.leaf_ids.size())},
+                         {c.labels.data(), size_t(c.labels.size())}};
   for (int shift = 0;; shift++) {
     OutputOptions o;
     o.placement = options.placement;
     o.frame = options.frame;
     o.quantum_shift = shift;
     o.validate = options.validate_result;
+    o.names = &names;
     report.output = OutputReport();
     report.quantum_shift = shift;
     code = build_output(a, c.expr, selected, o, out, report.output);

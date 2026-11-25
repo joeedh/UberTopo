@@ -112,10 +112,18 @@ struct Outline {
   uint32_t first = kNone, count = 0; /* polygons */
 };
 
+/** A vertex of an operand, or a point of a curved edge's skeleton. */
+struct SrcVert {
+  uint32_t leaf, point;
+  uint32_t vert;        /* kNone for a skeleton point */
+  uint32_t edge, index; /* of a skeleton point: the edge, and the index along it */
+};
+
 struct Input {
   PlaneTable planes;
   PointTable points;
   litestl::util::Vector<I3> ipos; /* of the points below ipos.size(): the input points */
+  litestl::util::Vector<SrcVert> verts;
   litestl::util::Vector<SrcEdge> edges;
   litestl::util::Vector<Polygon> polygons;
   litestl::util::Vector<Outline> outlines;

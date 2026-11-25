@@ -1,6 +1,6 @@
 # Plan: exact Booleans with a CSG tree (P5)
 
-Status: **v3**, after two reviews (§9). S1, S2 (a, b, c) and S3 implemented; S2c's results and decision are in §7.1.
+Status: **v3**, after two reviews (§9). S1, S2 (a, b, c), S3 and the names of S4 implemented; S2c's results and decision are in §7.1.
 
 Phase P5 of [06](../design/core-data-model/06-modules-litestl-and-phasing.md). Background:
 [booleans-and-operations](../research/cad-kernels/booleans-and-operations.md) §1,
@@ -478,6 +478,32 @@ quantum shifts). Failures per 3000, at shifts 0 / 1 / 2 / 3 / 4:
   back) and `pair order` (another order, as good).
 - **An undefined read in S2c,** found by the UBSan job after the push: a `bool` of `Polygon` was copied
   before it was set. It had no effect on results. The commit after S2c fixes it.
+
+### 7.4 Results of S4 (names and regions)
+
+Differences from §4.6, found while implementing:
+
+- **The parts of a name are sorted by ID** before they are hashed. Tree order only decides which parts
+  are taken. So reordering children renames nothing but at coincidences (194 of 200 random trees keep
+  all their names when their cutters are put in the reverse order).
+- **Points of a curved edge's skeleton** are named (leaf, edge, index along it). By ordinals of one
+  common name, a cut through the curve would have renamed the points behind it.
+- **A cut's carrier has a direction bit:** which way the coedge runs along the two front normals' cross
+  product. Without it two pieces on both sides of a point can share a key.
+- **Ordinals** occur only on projected faces: a straight edge meets a plane, and three planes meet, only
+  once.
+- **Parts of one label** are ordered by the smallest face name of the *first leaf in tree order* that
+  they have. With the smallest of all, a door that moves past a window exchanged the parts' names.
+- **The unbounded region takes no name,** so an open room doesn't take the name of a closed one.
+- **Not stable under mirroring:** pieces that are named by coedges, as those have a direction. Vertices are.
+
+Tests: an oracle in doubles on the operands' own faces agrees with all 32,986 vertex names and with the names of
+7140 extra pieces (4398 of them by coedge); edits of windows, doors, partitions, sheets and rooms; a golden.
+**Mutations:** 54 of 57 killed. The others are equivalent as far as I can see: `carrier own` (a face's own
+leaf is never the later one at such an edge), `faces sort` (facets are made in leaf order, and one leaf has
+one face there), `faces parallel` (two kept coplanar faces don't overlap).
+
+**Left in S4:** attributes, `csg_diff`.
 
 ## 8. Open
 

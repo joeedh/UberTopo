@@ -15,6 +15,7 @@ struct Chain {
   uint32_t a, b;         /* a < b */
   uint32_t first;        /* an arrangement edge of it */
   bool along;            /* first runs along a -> b */
+  uint32_t arr[2];       /* the edges at a and at b */
 };
 
 struct Merger {
@@ -192,15 +193,20 @@ struct Merger {
       }
       uint32_t ends[2] = {a.edges[int(i)].a, a.edges[int(i)].b};
       done[int(i)] = 1;
-      for (uint32_t &p : ends) {
-        for (uint32_t x = i; dropped[int(p)];) {
+      uint32_t last[2] = {i, i};
+      for (int k = 0; k < 2; k++) {
+        uint32_t &p = ends[k], &x = last[k];
+        while (dropped[int(p)]) {
           x = at[int(p)][0] == x ? at[int(p)][1] : at[int(p)][0];
           done[int(x)] = 1;
           p = other(x, p);
         }
       }
       const uint32_t id = uint32_t(chains.size());
-      chains.append({std::min(ends[0], ends[1]), std::max(ends[0], ends[1]), i, ends[0] < ends[1]});
+      chains.append({std::min(ends[0], ends[1]), std::max(ends[0], ends[1]), i, ends[0] < ends[1], {}});
+      Chain &ch = chains[int(id)];
+      ch.arr[0] = last[ch.along ? 0 : 1];
+      ch.arr[1] = last[ch.along ? 1 : 0];
       for (const EdgeUse &u : uses[int(i)]) {
         auto &gc = group_chains[int(root(u.facet))];
         if (gc.size() == 0 || gc[int(gc.size()) - 1] != id) {
@@ -331,7 +337,7 @@ struct Merger {
     for (const Diagonal &d : diagonals) {
       const uint32_t lo = std::min(d.p, d.q), hi = std::max(d.p, d.q);
       const int8_t s = out.faces[int(*face_at.lookup_ptr(key(lo, hi)))].front;
-      ResultEdge x{lo, hi, {}};
+      ResultEdge x{lo, hi, {kNone, kNone}, {}};
       x.uses.append({*face_at.lookup_ptr(key(lo, hi)), s});
       x.uses.append({*face_at.lookup_ptr(key(hi, lo)), int8_t(-s)});
       out.edges.append(std::move(x));
@@ -405,7 +411,7 @@ struct Merger {
     }
     for (uint32_t c = 0; c < chains.size(); c++) {
       const Chain &ch = chains[int(c)];
-      ResultEdge x{ch.a, ch.b, {}};
+      ResultEdge x{ch.a, ch.b, {ch.arr[0], ch.arr[1]}, {}};
       const auto &us = uses[int(ch.first)];
       for (int i = 0; i < int(us.size()); i++) {
         const EdgeUse &u = us[ch.along ? i : int(us.size()) - 1 - i];

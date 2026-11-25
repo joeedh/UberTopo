@@ -80,6 +80,8 @@ struct Writer {
   ExactPlacement place;
   Vector<uint32_t> key;    /* by point: builder key */
   Vector<uint8_t> used;    /* by point */
+  Vector<uint32_t> order_; /* by builder key: point */
+  Vector<uint32_t> region_of; /* by result face and side: region of the complex */
 
   /* outlines whose triangulation is another one after rounding */
   bool check_whole(Vector<uint8_t> &split)
@@ -159,9 +161,20 @@ struct Writer {
     return CsgCode::RoundingFailed;
   }
 
-  CsgCode write(LComplex &k)
+  PersistentId vertex_id(uint32_t i, uint32_t point) const
+  {
+    return options.names ? rep.names.vertex[int(point)] : ident::derive(ident::tag::OpDerived, uint32_t(0), i);
+  }
+  PersistentId face_id(uint32_t f) const
+  {
+    return options.names ? rep.names.face[int(f)] : ident::derive(ident::tag::OpDerived, uint32_t(1), f);
+  }
+
+  /* hints: of regions, by the sides that rep.regions was made of (may be empty) */
+  CsgCode write(LComplex &k, std::span<const PersistentId> hints)
   {
     Vector<uint32_t> order;
+    key.clear();
     for (uint32_t p = 0; p < used.size(); p++) {
       key.append(kNone);
       if (used[int(p)]) {
@@ -183,7 +196,7 @@ struct Writer {
     topo::Builder<Lattice> b(frame);
     for (uint32_t i = 0; i < order.size(); i++) {
       key[int(order[int(i)])] =
-          b.vertex(ident::derive(ident::tag::OpDerived, uint32_t(0), i), lattice(rep.positions[int(order[int(i)])]));
+          b.vertex(vertex_id(i, order[int(i)]), lattice(rep.positions[int(order[int(i)])]));
     }
     Vector<uint32_t> keys, sizes;
     for (uint32_t i = 0; i < rep.result.faces.size(); i++) {
@@ -196,9 +209,13 @@ struct Writer {
       for (int l = 0; l + 1 < int(f.off.size()); l++) {
         sizes.append(f.off[l + 1] - f.off[l]);
       }
-      b.face(ident::derive(ident::tag::OpDerived, uint32_t(1), i), {keys.data(), size_t(keys.size())},
-             {sizes.data(), size_t(sizes.size())});
+      PersistentId hint[2];
+      for (uint32_t side = 0; side < 2 && hints.size() > 0; side++) {
+        hint[side] = hints[size_t(region_of[int(2 * i + side)])];
+      }
+      b.face(face_id(i), {keys.data(), size_t(keys.size())}, {sizes.data(), size_t(sizes.size())}, hint[0], hint[1]);
     }
+    order_ = order;
     topo::BuildPolicy policy;
     policy.allow_projectable_faces = true;
     topo::BuildReport br;
@@ -221,12 +238,11 @@ struct Writer {
     k.faces.for_each_live([&](uint32_t f) { face.add(k.face_id(topo::FaceRef(f)), f); });
     rep.face_of.clear();
     for (uint32_t i = 0; i < rep.result.faces.size(); i++) {
-      rep.face_of.append(*face.lookup_ptr(ident::derive(ident::tag::OpDerived, uint32_t(1), i)));
+      rep.face_of.append(*face.lookup_ptr(face_id(i)));
     }
     Vector<uint32_t> vert_of; /* by key */
-    for (uint32_t i = 0; i < k.verts.capacity(); i++) {
-      const uint32_t *v = vert.lookup_ptr(ident::derive(ident::tag::OpDerived, uint32_t(0), i));
-      vert_of.append(v ? *v : kNone);
+    for (uint32_t i = 0; i < order_.size(); i++) {
+      vert_of.append(*vert.lookup_ptr(vertex_id(i, order_[int(i)])));
     }
     litestl::util::Map<uint64_t, uint32_t> edge;
     auto pair = [](uint32_t x, uint32_t y) { return (uint64_t(std::min(x, y)) << 32) | std::max(x, y); };
@@ -286,10 +302,49 @@ struct Writer {
         }
       }
     }
+    note_regions(k);
     if (options.validate && !topo::validate(k, topo::ValidateLevel::Global).ok()) {
       return fail(RoundCode::Invalid);
     }
     return CsgCode::Ok;
+  }
+
+  void note_regions(const LComplex &k)
+  {
+    rep.regions.clear();
+    region_of.clear();
+    for (uint32_t i = 0; i < k.regions.capacity(); i++) {
+      rep.regions.append({});
+    }
+    for (uint32_t i = 0; i < rep.result.faces.size(); i++) {
+      const ResultFace &f = rep.result.faces[int(i)];
+      const PersistentId id = face_id(i);
+      for (uint32_t side = 0; side < 2; side++) {
+        const uint32_t region = k.region(topo::FaceRef(rep.face_of[int(i)]), side).i;
+        region_of.append(region);
+        RegionSides &r = rep.regions[int(region)];
+        r.solid = f.solid[side];
+        if (f.label[side] != f.solid[side] && (r.air == kVoid || f.label[side] < r.air)) {
+          r.air = f.label[side];
+        }
+        /* (the first leaf's, so that a cutter that moves from one part to
+         * another doesn't exchange their names) */
+        const uint32_t leaf = a.in.polygons[int(f.source)].leaf;
+        if (r.leaf == kNone || leaf < r.leaf || (leaf == r.leaf && id < r.min_face)) {
+          r.leaf = leaf;
+          r.min_face = id;
+        }
+      }
+    }
+  }
+
+  /* builds again, with names for the regions */
+  CsgCode write_regions(LComplex &k)
+  {
+    Vector<PersistentId> hints;
+    name_regions({rep.regions.data(), size_t(rep.regions.size())}, *options.names, hints);
+    const CsgCode c = write(k, {hints.data(), size_t(hints.size())});
+    return c == CsgCode::Ok ? check(k) : c;
   }
 
   CsgCode merge(std::span<const uint8_t> split)
@@ -309,9 +364,15 @@ struct Writer {
     if (c == CsgCode::Ok && check_whole(split)) {
       c = merge({split.data(), size_t(split.size())});
     }
+    if (c == CsgCode::Ok && options.names) {
+      name_elements(a, e, sel, rep.result, *options.names, rep.names);
+    }
     LComplex k;
-    c = c == CsgCode::Ok ? write(k) : c;
+    c = c == CsgCode::Ok ? write(k, {}) : c;
     c = c == CsgCode::Ok ? check(k) : c;
+    if (c == CsgCode::Ok && options.names) {
+      c = write_regions(k);
+    }
     if (c == CsgCode::Ok) {
       out = std::move(k);
     }
@@ -324,7 +385,7 @@ struct Writer {
 CsgCode build_output(const Arrangement &a, const Expression &e, const Vector<Selected> &selected,
                      const OutputOptions &options, LComplex &out, OutputReport &report)
 {
-  Writer w{a, e, selected, options, report, {}, {}, {}};
+  Writer w{a, e, selected, options, report, {}, {}, {}, {}, {}};
   return w.run(out);
 }
 

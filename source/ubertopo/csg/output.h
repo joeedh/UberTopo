@@ -3,7 +3,7 @@
 /* Places and rounds the result of a CSG expression, and builds a complex (plan
  * 2026-11-25-exact-booleans §4.7). */
 
-#include "ubertopo/csg/merge.h"
+#include "ubertopo/csg/names.h"
 
 namespace ubertopo::csg {
 
@@ -32,6 +32,7 @@ struct OutputOptions {
   geom::TileFrame frame; /* of the output, before the shift */
   int quantum_shift = 0; /* finer than the operands' quantum by 2^this */
   bool validate = true;
+  const NameSource *names = nullptr; /* none: IDs are ordinals */
 };
 
 /** Why a result couldn't be rounded. */
@@ -52,9 +53,11 @@ struct OutputReport {
   Result result;
   litestl::util::Vector<I3> positions;       /* by point: rounded; points not in the result are 0 */
   litestl::util::Vector<uint32_t> face_of;   /* by result face: in the complex */
+  Names names;
+  litestl::util::Vector<RegionSides> regions; /* by region of the complex; 0 is the unbounded one */
 };
 
-/** Merges, places, rounds and builds. (IDs are ordinals.)
+/** Merges, places, rounds and builds.
  * @p out is written only if the result is Ok. */
 CsgCode build_output(const Arrangement &a, const Expression &e, const litestl::util::Vector<Selected> &selected,
                      const OutputOptions &options, topo::Complex<geom::Lattice> &out, OutputReport &report);

@@ -23,6 +23,7 @@ struct ResultFace {
 /** An edge of the result, with its faces counter-clockwise about a -> b. */
 struct ResultEdge {
   uint32_t a, b; /* points, a < b */
+  uint32_t arr[2]; /* the arrangement's edge at each end; kNone for a diagonal */
   litestl::util::Vector<EdgeUse, 2> uses; /* facet: a result face; dir: +1 if the face's loop runs a -> b */
 };
 
