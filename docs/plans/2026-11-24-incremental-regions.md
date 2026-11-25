@@ -1,7 +1,9 @@
 # Plan: incremental region maintenance (Stage B of OI-P3-1)
 
-Status: **v2**, after a fresh-context review (§10). W0, W1 and W4 implemented (§11);
-W2, W3 and W5 are not.
+Status: **v2**, after a fresh-context review (§10). W0, W1 and W4 implemented (§11).
+W2 and W3 are **deferred** (owner, 2026-11-24), and W5 with them: a city barrier is now
+45–50 ms in `None` at 1.1·10⁵ faces. Interactive editing with a barrier after nearly
+every edit would be a reason to return to them.
 
 ## 1. Why and scope
 
