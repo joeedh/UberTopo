@@ -15,6 +15,10 @@ PersistentId evaluation_key(const CsgTree &t, const BoolOptions &o)
     h.f64_canonical(o.frame.origin[i]);
   }
   h.i32(o.frame.quantum_log2).u64(o.frame.frame_id).i32(o.max_quantum_shift);
+  /* (in the order they were given: the first rule of a column counts) */
+  for (const topo::ColumnRule &r : o.rules ? o.rules->rules() : std::span<const topo::ColumnRule>()) {
+    h.u32(uint32_t(r.group)).str(r.name).i32(r.split ? int32_t(*r.split) : -1);
+  }
   return h.finish();
 }
 
@@ -57,9 +61,7 @@ CsgCode evaluate(const CsgTree &t, const OperandStore &store, const BoolOptions 
   report.facets = uint32_t(a.facets.size());
   litestl::util::Vector<Selected> selected;
   select_facets(a, c.expr, selected);
-  const NameSource names{{c.operands.data(), size_t(c.operands.size())},
-                         {c.leaf_ids.data(), size_t(c.leaf_ids.size())},
-                         {c.labels.data(), size_t(c.labels.size())}};
+  const NameSource names = c.names();
   for (int shift = 0;; shift++) {
     OutputOptions o;
     o.placement = options.placement;
@@ -67,9 +69,13 @@ CsgCode evaluate(const CsgTree &t, const OperandStore &store, const BoolOptions 
     o.quantum_shift = shift;
     o.validate = options.validate_result;
     o.names = &names;
+    o.rules = options.rules;
     report.output = OutputReport();
     report.quantum_shift = shift;
     code = build_output(a, c.expr, selected, o, out, report.output);
+    if (report.output.bad_leaf != kNone) {
+      report.node = c.leaf_ids[int(report.output.bad_leaf)];
+    }
     if (code != CsgCode::RoundingFailed || shift >= options.max_quantum_shift) {
       return done(code);
     }

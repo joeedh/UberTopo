@@ -18,6 +18,8 @@ struct BoolOptions {
   /** If the result can't be rounded: how many finer quanta (by 2 each) are
    * tried. The output then has that quantum. */
   int max_quantum_shift = 0;
+  /** How attributes of faces and edges are split (default: copied). */
+  const topo::PropagationRules *rules = nullptr;
   bool validate_operands = true;
   bool validate_result = true;
 };

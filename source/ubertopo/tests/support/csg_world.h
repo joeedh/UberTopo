@@ -66,7 +66,11 @@ struct Out {
 inline Out run(const CsgTree &t, const OperandStore &store, const BoolOptions &opt = {})
 {
   Out o;
-  UT_CHECK(csg::evaluate(t, store, opt, o.k, o.rep) == CsgCode::Ok);
+  const CsgCode code = csg::evaluate(t, store, opt, o.k, o.rep);
+  if (code != CsgCode::Ok) {
+    printf("evaluate: code %d, round %d\n", int(code), int(o.rep.output.round));
+  }
+  UT_CHECK(code == CsgCode::Ok);
   o.k.verts.for_each_live([&](uint32_t v) {
     UT_CHECK(o.verts.emplace(key(o.k.vert_id(topo::VertRef(v))), o.at(topo::VertRef(v))).second);
   });
@@ -92,6 +96,13 @@ inline LComplex build(const GridBuilder<L> &g, const topo::BuildPolicy &policy =
   topo::RegionReport rr;
   UT_CHECK(g.b.build(k, br, policy) && topo::build_regions(k, rr));
   return k;
+}
+
+inline LComplex box_complex(const I3 &lo, const I3 &hi)
+{
+  GridBuilder<L> g;
+  g.box(lo, hi);
+  return build(g);
 }
 
 struct World {

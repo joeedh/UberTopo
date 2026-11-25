@@ -1,6 +1,6 @@
 # Plan: exact Booleans with a CSG tree (P5)
 
-Status: **v3**, after two reviews (§9). S1, S2 (a, b, c), S3 and the names of S4 implemented; S2c's results and decision are in §7.1.
+Status: **v3**, after two reviews (§9). S1 to S4 implemented; S2c's results and decision are in §7.1.
 
 Phase P5 of [06](../design/core-data-model/06-modules-litestl-and-phasing.md). Background:
 [booleans-and-operations](../research/cad-kernels/booleans-and-operations.md) §1,
@@ -503,7 +503,27 @@ Tests: an oracle in doubles on the operands' own faces agrees with all 32,986 ve
 leaf is never the later one at such an edge), `faces sort` (facets are made in leaf order, and one leaf has
 one face there), `faces parallel` (two kept coplanar faces don't overlap).
 
-**Left in S4:** attributes, `csg_diff`.
+### 7.5 Results of S4 (attributes, provenance, `csg_diff`)
+
+- **Edges:** pieces of an operand's edge take its columns too (§5 said only whole ones); parts by length.
+- **Columns** are created only for leaves that an element comes from. So a leaf that adds nothing also
+  adds no column, and a type conflict with it doesn't matter.
+- **Ref columns** are imported into the result's geometry store.
+- **Corner (coedge) and loop columns aren't copied** (OI-BOOL-7).
+- **A conserved region column is copied to every part** of a label; nothing divides it.
+- **`csg_diff`:** kept, gone and added names; `moved`: a face that has no vertex in common with the old face
+  of its name, but with another piece of their source. It refuses reports of failures.
+- **Rules** (`PropagationRules`) are an option of `evaluate` and part of `evaluation_key`.
+- **Mutations:** 49 of 49 killed.
+
+**With the BVH branch** (tried on a scratch merge of `session/bvh` at `7d0f0f4`):
+
+- The only text conflicts are lists in `docs/debugging.md`, `docs/index.md` and `tests/CMakeLists.txt`.
+- **It doesn't compile as merged:** `face_triangles` is gone. `csg/input.cc` needs `FaceTess::build`
+  (three lines).
+- **§7.2 is confirmed and gone with it:** without it 46 of 300 random cuts through a box were refused (41
+  `TouchingShell`, 5 `NestingDegenerate`); with it none, and all `test_csg_*` pass. Until then
+  `test_diff_random` skips such cases, and counts them.
 
 ## 8. Open
 
@@ -516,6 +536,8 @@ one face there), `faces parallel` (two kept coplanar faces don't overlap).
 - **OI-BOOL-5:** open sheets as half-spaces (terrain as "below the sheet").
 - **OI-BOOL-6:** plane-defined operands, for flush contact at angles that aren't on the
   object's axes (an octagonal tower against a wall).
+
+- **OI-BOOL-7:** columns of coedges (corners) and loops.
 
 ## 9. Review (fresh context, 2026-11-25, of v1)
 

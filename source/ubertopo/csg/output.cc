@@ -80,7 +80,6 @@ struct Writer {
   ExactPlacement place;
   Vector<uint32_t> key;    /* by point: builder key */
   Vector<uint8_t> used;    /* by point */
-  Vector<uint32_t> order_; /* by builder key: point */
   Vector<uint32_t> region_of; /* by result face and side: region of the complex */
 
   /* outlines whose triangulation is another one after rounding */
@@ -170,6 +169,13 @@ struct Writer {
     return options.names ? rep.names.face[int(f)] : ident::derive(ident::tag::OpDerived, uint32_t(1), f);
   }
 
+  uint8_t flags(uint32_t f) const
+  {
+    const Polygon &g = a.in.polygons[int(rep.result.faces[int(f)].source)];
+    return options.names->operands[g.leaf].k->faces.get<".f.flags">()[g.face] &
+           (topo::face_flags::Virtual | topo::face_flags::Aperture);
+  }
+
   /* hints: of regions, by the sides that rep.regions was made of (may be empty) */
   CsgCode write(LComplex &k, std::span<const PersistentId> hints)
   {
@@ -213,9 +219,9 @@ struct Writer {
       for (uint32_t side = 0; side < 2 && hints.size() > 0; side++) {
         hint[side] = hints[size_t(region_of[int(2 * i + side)])];
       }
-      b.face(face_id(i), {keys.data(), size_t(keys.size())}, {sizes.data(), size_t(sizes.size())}, hint[0], hint[1]);
+      b.face(face_id(i), {keys.data(), size_t(keys.size())}, {sizes.data(), size_t(sizes.size())}, hint[0], hint[1],
+             options.names ? flags(i) : uint8_t(0));
     }
-    order_ = order;
     topo::BuildPolicy policy;
     policy.allow_projectable_faces = true;
     topo::BuildReport br;
@@ -240,9 +246,10 @@ struct Writer {
     for (uint32_t i = 0; i < rep.result.faces.size(); i++) {
       rep.face_of.append(*face.lookup_ptr(face_id(i)));
     }
-    Vector<uint32_t> vert_of; /* by key */
-    for (uint32_t i = 0; i < order_.size(); i++) {
-      vert_of.append(*vert.lookup_ptr(vertex_id(i, order_[int(i)])));
+    rep.vert_of.clear();
+    rep.edge_of.clear();
+    for (uint32_t p = 0; p < used.size(); p++) {
+      rep.vert_of.append(used[int(p)] ? *vert.lookup_ptr(vertex_id(key[int(p)], p)) : kNone);
     }
     litestl::util::Map<uint64_t, uint32_t> edge;
     auto pair = [](uint32_t x, uint32_t y) { return (uint64_t(std::min(x, y)) << 32) | std::max(x, y); };
@@ -255,12 +262,13 @@ struct Writer {
     }
     Vector<std::pair<uint32_t, bool>, 8> got, want;
     for (const ResultEdge &x : rep.result.edges) {
-      const uint32_t va = vert_of[int(key[int(x.a)])], vb = vert_of[int(key[int(x.b)])];
+      const uint32_t va = rep.vert_of[int(x.a)], vb = rep.vert_of[int(x.b)];
       const uint32_t *ke = edge.lookup_ptr(pair(va, vb));
       if (!ke) {
         return CsgCode::Inconsistent;
       }
       const topo::EdgeRef er(*ke);
+      rep.edge_of.append(*ke);
       const bool along = k.edge_verts(er)[0].i == va; /* vs[0] -> vs[1] is a -> b */
       want.clear();
       got.clear();
@@ -347,6 +355,26 @@ struct Writer {
     return c == CsgCode::Ok ? check(k) : c;
   }
 
+  CsgCode attributes(LComplex &k)
+  {
+    const NameSource &n = *options.names;
+    k.regions.for_each_live([&](uint32_t r) {
+      while (rep.names.region.size() <= r) {
+        rep.names.region.append(ident::kNoId);
+      }
+      rep.names.region[int(r)] = k.regions.get<".id">()[r];
+    });
+    for (const ResultFace &f : rep.result.faces) {
+      const Polygon &g = a.in.polygons[int(f.source)];
+      rep.sources.append({n.leaf_ids[g.leaf], n.operands[g.leaf].k->face_id(topo::FaceRef(g.face)), f.reversed});
+    }
+    const ElementMap map{{rep.vert_of.data(), size_t(rep.vert_of.size())},
+                         {rep.edge_of.data(), size_t(rep.edge_of.size())},
+                         {rep.face_of.data(), size_t(rep.face_of.size())},
+                         {rep.regions.data(), size_t(rep.regions.size())}};
+    return copy_attributes(a, rep.result, rep.names, n, map, options.rules, k, &rep.bad_leaf);
+  }
+
   CsgCode merge(std::span<const uint8_t> split)
   {
     rep.result = Result();
@@ -372,6 +400,7 @@ struct Writer {
     c = c == CsgCode::Ok ? check(k) : c;
     if (c == CsgCode::Ok && options.names) {
       c = write_regions(k);
+      c = c == CsgCode::Ok ? attributes(k) : c;
     }
     if (c == CsgCode::Ok) {
       out = std::move(k);
@@ -385,7 +414,7 @@ struct Writer {
 CsgCode build_output(const Arrangement &a, const Expression &e, const Vector<Selected> &selected,
                      const OutputOptions &options, LComplex &out, OutputReport &report)
 {
-  Writer w{a, e, selected, options, report, {}, {}, {}, {}, {}};
+  Writer w{a, e, selected, options, report, {}, {}, {}, {}};
   return w.run(out);
 }
 

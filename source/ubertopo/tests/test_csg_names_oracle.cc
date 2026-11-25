@@ -35,9 +35,7 @@ struct Scene {
     UT_CHECK(csg::compile(w.t, w.store, c) == CsgCode::Ok);
     UT_CHECK(csg::arrange({c.operands.data(), size_t(c.operands.size())}, a) == CsgCode::Ok);
     csg::select_facets(a, c.expr, sel);
-    const csg::NameSource names{{c.operands.data(), size_t(c.operands.size())},
-                                {c.leaf_ids.data(), size_t(c.leaf_ids.size())},
-                                {c.labels.data(), size_t(c.labels.size())}};
+    const csg::NameSource names = c.names();
     csg::OutputOptions opt;
     opt.quantum_shift = shift;
     opt.names = &names;

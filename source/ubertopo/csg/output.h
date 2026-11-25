@@ -3,7 +3,7 @@
 /* Places and rounds the result of a CSG expression, and builds a complex (plan
  * 2026-11-25-exact-booleans §4.7). */
 
-#include "ubertopo/csg/names.h"
+#include "ubertopo/csg/attributes.h"
 
 namespace ubertopo::csg {
 
@@ -32,7 +32,8 @@ struct OutputOptions {
   geom::TileFrame frame; /* of the output, before the shift */
   int quantum_shift = 0; /* finer than the operands' quantum by 2^this */
   bool validate = true;
-  const NameSource *names = nullptr; /* none: IDs are ordinals */
+  const NameSource *names = nullptr; /* none: IDs are ordinals, and no attributes */
+  const topo::PropagationRules *rules = nullptr;
 };
 
 /** Why a result couldn't be rounded. */
@@ -46,6 +47,12 @@ enum class RoundCode : uint8_t {
   Invalid,      /* validate(Global) */
 };
 
+/** Where a face of the result comes from. */
+struct FaceSource {
+  PersistentId leaf, face;
+  bool reversed;
+};
+
 struct OutputReport {
   RoundCode round = RoundCode::None;
   uint32_t split_whole = 0; /* projected source faces that were output as triangles */
@@ -53,6 +60,10 @@ struct OutputReport {
   Result result;
   litestl::util::Vector<I3> positions;       /* by point: rounded; points not in the result are 0 */
   litestl::util::Vector<uint32_t> face_of;   /* by result face: in the complex */
+  litestl::util::Vector<uint32_t> vert_of;   /* by point */
+  litestl::util::Vector<uint32_t> edge_of;   /* by result edge */
+  litestl::util::Vector<FaceSource> sources; /* by result face */
+  uint32_t bad_leaf = kNone;                 /* whose attributes don't go with the others' */
   Names names;
   litestl::util::Vector<RegionSides> regions; /* by region of the complex; 0 is the unbounded one */
 };

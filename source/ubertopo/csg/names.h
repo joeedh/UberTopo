@@ -11,16 +11,26 @@ namespace ubertopo::csg {
 
 using ident::PersistentId;
 
+/** A region with some label. */
+struct LabelSource {
+  uint32_t leaf, region;
+};
+
 /** What names are made of. */
 struct NameSource {
   std::span<const Operand> operands;     /* by leaf */
   std::span<const PersistentId> leaf_ids; /* by leaf */
   std::span<const PersistentId> labels;   /* by label */
+  std::span<const LabelSource> label_source; /* by label: the first region with it */
 };
 
 struct Names {
   litestl::util::Vector<PersistentId> vertex; /* by point; kNoId if it is not in the result */
   litestl::util::Vector<PersistentId> face;   /* by result face */
+  litestl::util::Vector<PersistentId> region; /* by region of the complex */
+  /* what elements of the result are in an operand; kNone for none */
+  litestl::util::Vector<uint32_t> vertex_src; /* by point: in Input::verts */
+  litestl::util::Vector<uint32_t> edge_src;   /* by result edge: in Input::edges */
   uint32_t ordinals = 0; /* vertices that share a name with others, beyond the first */
   uint32_t weak = 0;     /* vertices whose sources don't fix a point */
   uint32_t collisions = 0; /* faces that share a name with others, beyond the first */

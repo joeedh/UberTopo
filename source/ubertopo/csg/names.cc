@@ -114,6 +114,7 @@ struct Namer {
       edges_at.append({});
       rank.append(kNone);
       out.vertex.append(kNoId);
+      out.vertex_src.append(kNone);
     }
     for (uint32_t f = 0; f < res.faces.size(); f++) {
       for (uint32_t p : res.faces[int(f)].pts) {
@@ -208,6 +209,8 @@ struct Namer {
       add(faces, {g.leaf, face_id(g), a.in.planes[g.plane].n});
     }
     if (leaf != kNone) {
+      const uint32_t v = *own(leaf, p);
+      out.vertex_src[int(p)] = a.in.verts[int(v)].vert != kNone ? v : kNone;
       return derive(tag::BoolVertex, uint32_t(kOwn), src.leaf_ids[leaf], vert_id(*own(leaf, p)));
     }
     std::sort(edges.begin(), edges.end());
@@ -503,11 +506,46 @@ struct Namer {
     }
   }
 
+  /* pieces of operands' edges */
+  void find_edges()
+  {
+    for (const ResultEdge &re : res.edges) {
+      uint32_t best = kNone;
+      for (const EdgeUse &u : re.uses) {
+        const ResultFace &r = res.faces[int(u.facet)];
+        const Polygon &g0 = a.in.polygons[int(r.source)];
+        const uint32_t begin = r.whole ? a.in.outlines[int(g0.outline)].first : r.source;
+        const uint32_t count = r.whole ? a.in.outlines[int(g0.outline)].count : 1;
+        for (uint32_t s = begin; s < begin + count; s++) {
+          const Polygon &g = a.in.polygons[int(s)];
+          const PlanarGraph pg(a.in, g.plane, g.axis);
+          for (uint32_t x : g.edges) {
+            const SrcEdge &se = a.in.edges[int(x)];
+            if (se.edge == kNone || (best != kNone && !edge_before(x, best))) {
+              continue;
+            }
+            /* (p is in the plane of each triangle that it is a corner of only) */
+            if (r.whole ? (re.a == se.a && re.b == se.b) : (on(pg, se, re.a) && on(pg, se, re.b))) {
+              best = x;
+            }
+          }
+        }
+      }
+      out.edge_src.append(best);
+    }
+  }
+  bool edge_before(uint32_t x, uint32_t y) const
+  {
+    const SrcEdge &s = a.in.edges[int(x)], &t = a.in.edges[int(y)];
+    return s.leaf != t.leaf ? s.leaf < t.leaf : edge_id(s) < edge_id(t);
+  }
+
   void run()
   {
     index();
     name_vertices();
     name_faces();
+    find_edges();
   }
 };
 

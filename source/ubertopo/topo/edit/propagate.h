@@ -20,6 +20,7 @@
  *           Default CopyFirst. */
 
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -53,6 +54,10 @@ public:
       }
     }
     return nullptr;
+  }
+  std::span<const ColumnRule> rules() const
+  {
+    return rules_;
   }
   /** Convenience: a conserved float quantity (split by measure, sum on merge). */
   void conserved(Grp g, std::string_view name)

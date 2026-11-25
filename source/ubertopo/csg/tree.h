@@ -9,7 +9,7 @@
 #include "litestl/io/bytes.h"
 #include "litestl/util/vector.h"
 #include "ubertopo/csg/input.h"
-#include "ubertopo/csg/select.h"
+#include "ubertopo/csg/names.h"
 #include "ubertopo/ident/id.h"
 
 namespace ubertopo::csg {
@@ -154,10 +154,15 @@ struct Compiled {
   litestl::util::Vector<Operand> operands;       /* by leaf */
   litestl::util::Vector<PersistentId> leaf_ids;  /* by leaf */
   litestl::util::Vector<PersistentId> labels;    /* names, by label; kNoId for void */
-  struct Source {
-    uint32_t leaf, region;
-  };
-  litestl::util::Vector<Source> label_source; /* the first region with the label */
+  litestl::util::Vector<LabelSource> label_source; /* the first region with the label */
+
+  NameSource names() const
+  {
+    return {{operands.data(), size_t(operands.size())},
+            {leaf_ids.data(), size_t(leaf_ids.size())},
+            {labels.data(), size_t(labels.size())},
+            {label_source.data(), size_t(label_source.size())}};
+  }
 };
 
 /** *node: where a failure is. */
