@@ -129,6 +129,7 @@ struct Input {
   litestl::util::Vector<Outline> outlines;
   litestl::util::Vector<uint32_t> leaf_begin; /* first polygon of each leaf, and the end */
   I3 shift{0, 0, 0};                          /* added to all coordinates */
+  bool self = false;                          /* polygons of one leaf may cross */
 
   bool is_input(uint32_t point) const
   {

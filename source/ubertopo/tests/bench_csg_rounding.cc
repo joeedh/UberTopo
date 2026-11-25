@@ -1,5 +1,6 @@
 /* How often the result of a CSG tree can't be rounded (plan
- * 2026-11-25-exact-booleans §7, S2c). Not a test.
+ * 2026-11-25-exact-booleans §7, S2c), and what repair makes of that (plan
+ * 2026-11-25-boolean-repair). Not a test.
  *
  * Buildings (support/csg_buildings.h) and random polyhedra, at 1 mm and at
  * 2^-13 m; unrotated, turned about the vertical, and turned freely; at output
@@ -52,6 +53,9 @@ csg::RigidPlacement placement(SplitMix64 &r, int kind)
 struct Row {
   uint32_t runs = 0, failed = 0, code[8] = {};
   uint64_t faces = 0, projected = 0, illegal = 0;
+  uint32_t repaired = 0, other = 0, rounds = 0, max_rounds = 0, attempts = 0, vanished = 0, joined = 0, max_grown = 0;
+  uint64_t before = 0, after = 0;
+  double ms = 0, max_ms = 0;
 };
 
 using Clock = std::chrono::steady_clock;
@@ -128,6 +132,30 @@ void run(const char *name, int kind, int64_t metre, int n)
         if (c != CsgCode::Ok) {
           row.failed++;
           row.code[int(rep.round)]++;
+          /* and with repair */
+          const uint32_t faces = rep.result.faces.size();
+          opt.max_repair_rounds = 16;
+          const auto t2 = Clock::now();
+          csg::OutputReport rr;
+          const CsgCode c2 = csg::build_output(a, b.e, sel, opt, k, rr);
+          const double ms = ms_since(t2);
+          opt.max_repair_rounds = 0;
+          row.ms += ms;
+          row.max_ms = std::max(row.max_ms, ms);
+          if (c2 == CsgCode::Ok) {
+            row.repaired++;
+            row.rounds += rr.repair.rounds;
+            row.max_rounds = std::max(row.max_rounds, rr.repair.rounds);
+            row.attempts = std::max(row.attempts, rr.repair.attempts);
+            row.vanished += rr.repair.vanished;
+            row.joined += rr.repair.joined;
+            row.before += faces;
+            row.after += rr.result.faces.size();
+            row.max_grown = std::max(row.max_grown, uint32_t(rr.result.faces.size()) - std::min(faces, uint32_t(rr.result.faces.size())));
+          }
+          else {
+            row.other += c2 != CsgCode::RoundingFailed;
+          }
         }
       }
     }
@@ -144,6 +172,13 @@ void run(const char *name, int kind, int64_t metre, int n)
              turns[turn], shift, x.failed, x.runs, 1000.0 * x.failed / x.runs, 1000.0 * x.failed / double(x.faces),
              x.code[1], x.code[2], x.code[3], x.code[4], x.code[5], x.code[6], double(x.faces) / x.runs,
              double(x.projected) / x.runs, double(x.illegal) / x.runs);
+      if (x.failed) {
+        const double q = std::max(1u, x.repaired);
+        printf("      repaired %u (%u left, %u other codes): %.2f rounds (max %u), %u attempts more; faces %.1f -> %.1f "
+               "(max +%u), %.2f vanished, %.2f joined; %.1f ms, max %.0f\n",
+               x.repaired, x.failed - x.repaired, x.other, x.rounds / q, x.max_rounds, x.attempts, double(x.before) / q,
+               double(x.after) / q, x.max_grown, x.vanished / q, x.joined / q, x.ms / x.failed, x.max_ms);
+      }
     }
   }
 }

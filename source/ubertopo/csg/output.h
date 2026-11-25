@@ -4,6 +4,7 @@
  * 2026-11-25-exact-booleans §4.7). */
 
 #include "ubertopo/csg/attributes.h"
+#include "ubertopo/csg/repair.h"
 
 namespace ubertopo::csg {
 
@@ -18,8 +19,9 @@ class ExactPlacement {
 public:
   /** False: not a rotation (to 2^-40), or t out of range. */
   bool set(const RigidPlacement &p);
-  /** @p p (shifted as @p in is) at a quantum 2^-shift times the operands'. */
-  I3 round(const Input &in, const HPoint &p, int shift) const;
+  /** @p p (shifted as @p in is) at a quantum 2^-shift times the operands'.
+   * @p bias: added before rounding, in eighths of the result's quanta; below 4. */
+  I3 round(const Input &in, const HPoint &p, int shift, const I3 &bias = I3(0, 0, 0)) const;
 
 private:
   static constexpr int kRotBits = 62, kTransBits = 20;
@@ -34,6 +36,7 @@ struct OutputOptions {
   bool validate = true;
   const NameSource *names = nullptr; /* none: IDs are ordinals, and no attributes */
   const topo::PropagationRules *rules = nullptr;
+  int max_repair_rounds = 0; /* per attempt (repair.h); 0: no repair */
 };
 
 /** Why a result couldn't be rounded. */
@@ -47,6 +50,16 @@ enum class RoundCode : uint8_t {
   Invalid,      /* validate(Global) */
 };
 
+/** What it took to round a result. */
+struct RepairReport {
+  uint32_t rounds = 0;   /* of the last attempt; 0: it wasn't repaired, or only rounded otherwise */
+  uint32_t attempts = 0; /* beyond the first; each rounds differently */
+  RoundCode first = RoundCode::None; /* what failed without repair */
+  RepairCounts counts;
+  uint32_t vanished = 0; /* faces of the exact result that have no piece left */
+  uint32_t joined = 0;   /* faces that were joined again */
+};
+
 /** Where a face of the result comes from. */
 struct FaceSource {
   PersistentId leaf, face;
@@ -57,7 +70,8 @@ struct OutputReport {
   RoundCode round = RoundCode::None;
   uint32_t split_whole = 0; /* projected source faces that were output as triangles */
   uint32_t projected = 0;   /* faces that aren't planar */
-  Result result;
+  RepairReport repair;
+  Result result; /* with points of the last arrangement: the given one, if there were no rounds */
   litestl::util::Vector<I3> positions;       /* by point: rounded; points not in the result are 0 */
   litestl::util::Vector<uint32_t> face_of;   /* by result face: in the complex */
   litestl::util::Vector<uint32_t> vert_of;   /* by point */
@@ -65,10 +79,11 @@ struct OutputReport {
   litestl::util::Vector<FaceSource> sources; /* by result face */
   uint32_t bad_leaf = kNone;                 /* whose attributes don't go with the others' */
   Names names;
+  Provenance provenance;
   litestl::util::Vector<RegionSides> regions; /* by region of the complex; 0 is the unbounded one */
 };
 
-/** Merges, places, rounds and builds.
+/** Merges, places, rounds and builds; repairs if it must and may.
  * @p out is written only if the result is Ok. */
 CsgCode build_output(const Arrangement &a, const Expression &e, const litestl::util::Vector<Selected> &selected,
                      const OutputOptions &options, topo::Complex<geom::Lattice> &out, OutputReport &report);

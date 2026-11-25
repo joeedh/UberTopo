@@ -14,6 +14,7 @@ struct ResultFace {
   int8_t front = 0;        /* the front is the plane's positive (+1) or negative side */
   bool reversed = false;   /* the front is the source's back */
   bool whole = false;
+  bool joined = false; /* several pieces again (repair.h): not in one plane */
   uint32_t label[2] = {kNone, kNone}; /* front, back; air included */
   uint32_t solid[2] = {kNone, kNone}; /* the same, solid labels only */
   litestl::util::Vector<uint32_t, 8> pts; /* loops, the outer one first; the face on the left from the front */

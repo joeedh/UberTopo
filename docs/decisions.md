@@ -855,12 +855,15 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
 - **Rounding** fails visibly (`RoundingFailed`), never silently, and a finer output quantum is the
   first remedy. Buildings: none of 3000 models fails at 2^-13 m, shift 0, in any of three orientations.
   Random tetrahedra: 4.5% at shift 0, 0.4% at shift 4.
-- **Repair is planned** (OI-BOOL-2): by the plan's rule general polyhedra need it, buildings don't.
-  When, is open.
+- **Repair after rounding** (OI-BOOL-2, S7; [plan](plans/2026-11-25-boolean-repair.md)): the rounded faces
+  are arranged again exactly, and cells get the label with the largest winding number. On by default,
+  and reported. 5710 of 5711 failures of the benchmark are repaired. The result is valid, but it isn't
+  the exact one's topology: features under a quantum can vanish.
 - **The CSG tree is the stored model** (owner's request). Solids are derived, and never operands.
 - **Names** are made of source elements, and sorted by ID before hashing, so the order of children
   matters at coincidences only. Regions are named by labels.
-- **Open:** S5 (speed; after the face BVH), OI-BOOL-1 (comparison with Manifold or CGAL), OI-BOOL-2.
+- **Open:** S5 (speed) waits for the face BVH, and the comparison with Manifold or CGAL (OI-BOOL-1) is put off
+  (owner, 2026-11-25).
 
 ---
 

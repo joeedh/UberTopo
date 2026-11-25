@@ -10,7 +10,8 @@ namespace {
 
 using litestl::util::Vector;
 
-/* pairs of polygons of different leaves whose boxes meet: a sweep in x */
+/* pairs of polygons (of different leaves, else they don't cross) whose boxes
+ * meet: a sweep in x */
 void intersect_all(Arrangement &a, Vector<PolygonCuts> &cuts)
 {
   Input &in = a.in;
@@ -33,7 +34,7 @@ void intersect_all(Arrangement &a, Vector<PolygonCuts> &cuts)
         continue;
       }
       active[kept++] = j;
-      if (p.leaf != q.leaf && p.lo[1] <= q.hi[1] && q.lo[1] <= p.hi[1] && p.lo[2] <= q.hi[2] && q.lo[2] <= p.hi[2]) {
+      if ((in.self || p.leaf != q.leaf) && p.lo[1] <= q.hi[1] && q.lo[1] <= p.hi[1] && p.lo[2] <= q.hi[2] && q.lo[2] <= p.hi[2]) {
         a.stats.pairs++;
         intersect_polygons(in, i, j, cuts[int(i)], cuts[int(j)]);
       }

@@ -4,6 +4,7 @@
  * §5). */
 
 #include "ubertopo/csg/names.h"
+#include "ubertopo/csg/provenance.h"
 #include "ubertopo/topo/edit/propagate.h"
 
 namespace ubertopo::csg {
@@ -21,8 +22,8 @@ struct ElementMap {
  * first region with their label. Columns are created for the leaves that
  * something comes from. BadOperand: one name with two types (*bad_leaf: the
  * later one). */
-CsgCode copy_attributes(const Arrangement &a, const Result &result, const Names &names, const NameSource &source,
-                        const ElementMap &map, const topo::PropagationRules *rules,
-                        topo::Complex<geom::Lattice> &k, uint32_t *bad_leaf = nullptr);
+CsgCode copy_attributes(const Provenance &from, const NameSource &source, const ElementMap &map,
+                        const topo::PropagationRules *rules, topo::Complex<geom::Lattice> &k,
+                        uint32_t *bad_leaf = nullptr);
 
 } // namespace ubertopo::csg

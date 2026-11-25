@@ -647,3 +647,19 @@ Entry format:
 
 - **Cause:** fans of faces with holes in the nesting test. Fixed by plan 2026-11-24-bvh, W4a (see
   its entry here once merged). `test_csg_output` avoids the case until then.
+
+## `classify_face` accepts a planar face whose loops cross
+
+- **Symptom:** a planar bow-tie passes `classify_face`, and what is built from it is wrong later.
+- **Cause:** for planar faces it doesn't look for loops that cross.
+- **Technique:** where loops may cross (positions that were moved), require `geom::cdt_proj` to give `Ok`
+  too, as `csg/repair.cc` does.
+
+## Repair repeats the same polygons in every round
+
+- **Symptom:** `polygons_hash` is that of an earlier round, or the face count swings between two values.
+- **Cause:** an exact fixed point of "arrange, then round". Usually a new point rounds to a vertex, the face
+  bends there, and its triangulation has the old edge as a diagonal again.
+- **Technique:** print attempt, round, `RoundCode` and face count per round. More rounds don't help
+  with a fixed point. Triangulate the exact face and move its corners, so the vertex stays a corner
+  (`kExactFrom`), or start again with other rounding thresholds (`kBias`).

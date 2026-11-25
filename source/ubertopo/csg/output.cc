@@ -43,7 +43,7 @@ bool ExactPlacement::set(const RigidPlacement &p)
   return true;
 }
 
-I3 ExactPlacement::round(const Input &in, const HPoint &p, int shift) const
+I3 ExactPlacement::round(const Input &in, const HPoint &p, int shift, const I3 &bias) const
 {
   /* the operands' coordinates, over w */
   Int512 x[3];
@@ -58,8 +58,8 @@ I3 ExactPlacement::round(const Input &in, const HPoint &p, int shift) const
     for (int j = 0; j < 3; j++) {
       s += Int512::from(r_[i][j]) * x[j];
     }
-    /* floor(s 2^shift / one + 1/2) */
-    out[i] = floor_div((s << (shift + 1)) + one, one << 1);
+    /* floor(s 2^shift / one + 1/2 + bias / 8) */
+    out[i] = floor_div((s << (shift + 3)) + Int512::from(4 + bias[i]) * one, one << 3);
   }
   return out;
 }
@@ -78,6 +78,8 @@ struct Writer {
   const OutputOptions &options;
   OutputReport &rep;
   ExactPlacement place;
+  int shift;
+  I3 bias;
   Vector<uint32_t> key;    /* by point: builder key */
   Vector<uint8_t> used;    /* by point */
   Vector<uint32_t> region_of; /* by result face and side: region of the complex */
@@ -145,7 +147,7 @@ struct Writer {
     }
     for (uint32_t p = 0; p < a.in.points.size(); p++) {
       if (used[int(p)]) {
-        rep.positions[int(p)] = place.round(a.in, a.in.points[p], options.quantum_shift);
+        rep.positions[int(p)] = place.round(a.in, a.in.points[p], shift, bias);
         if (!in_range(rep.positions[int(p)])) {
           return CsgCode::OutOfRange;
         }
@@ -171,7 +173,7 @@ struct Writer {
 
   uint8_t flags(uint32_t f) const
   {
-    const Polygon &g = a.in.polygons[int(rep.result.faces[int(f)].source)];
+    const Provenance::Face &g = rep.provenance.faces[int(f)];
     return options.names->operands[g.leaf].k->faces.get<".f.flags">()[g.face] &
            (topo::face_flags::Virtual | topo::face_flags::Aperture);
   }
@@ -337,7 +339,7 @@ struct Writer {
         }
         /* (the first leaf's, so that a cutter that moves from one part to
          * another doesn't exchange their names) */
-        const uint32_t leaf = a.in.polygons[int(f.source)].leaf;
+        const uint32_t leaf = rep.provenance.faces[int(i)].leaf;
         if (r.leaf == kNone || leaf < r.leaf || (leaf == r.leaf && id < r.min_face)) {
           r.leaf = leaf;
           r.min_face = id;
@@ -364,15 +366,14 @@ struct Writer {
       }
       rep.names.region[int(r)] = k.regions.get<".id">()[r];
     });
-    for (const ResultFace &f : rep.result.faces) {
-      const Polygon &g = a.in.polygons[int(f.source)];
-      rep.sources.append({n.leaf_ids[g.leaf], n.operands[g.leaf].k->face_id(topo::FaceRef(g.face)), f.reversed});
+    for (const Provenance::Face &f : rep.provenance.faces) {
+      rep.sources.append({n.leaf_ids[f.leaf], n.operands[f.leaf].k->face_id(topo::FaceRef(f.face)), f.reversed});
     }
     const ElementMap map{{rep.vert_of.data(), size_t(rep.vert_of.size())},
                          {rep.edge_of.data(), size_t(rep.edge_of.size())},
                          {rep.face_of.data(), size_t(rep.face_of.size())},
                          {rep.regions.data(), size_t(rep.regions.size())}};
-    return copy_attributes(a, rep.result, rep.names, n, map, options.rules, k, &rep.bad_leaf);
+    return copy_attributes(rep.provenance, n, map, options.rules, k, &rep.bad_leaf);
   }
 
   CsgCode merge(std::span<const uint8_t> split)
@@ -382,30 +383,254 @@ struct Writer {
     return c == CsgCode::Ok ? round_points() : c;
   }
 
-  CsgCode run(LComplex &out)
+  CsgCode merge_whole()
   {
-    if (!place.set(options.placement)) {
-      return CsgCode::BadPlacement;
-    }
     CsgCode c = merge({});
     Vector<uint8_t> split;
     if (c == CsgCode::Ok && check_whole(split)) {
       c = merge({split.data(), size_t(split.size())});
     }
-    if (c == CsgCode::Ok && options.names) {
-      name_elements(a, e, sel, rep.result, *options.names, rep.names);
-    }
-    LComplex k;
-    c = c == CsgCode::Ok ? write(k, {}) : c;
+    return c;
+  }
+
+  CsgCode build(LComplex &k)
+  {
+    CsgCode c = write(k, {});
     c = c == CsgCode::Ok ? check(k) : c;
     if (c == CsgCode::Ok && options.names) {
       c = write_regions(k);
       c = c == CsgCode::Ok ? attributes(k) : c;
     }
+    return c;
+  }
+};
+
+/* An attempt: the exact result, rounded, then repaired in rounds. Its points are
+ * rounded with one bias. */
+struct Attempt {
+  const OutputOptions &options;
+  const ExactPlacement &place;
+  I3 bias;
+  OutputReport &rep;
+  LComplex &out;
+
+  uint32_t roots = 0, face_limit = 0;
+  Vector<PersistentId> root_names; /* of the exact result's faces */
+  Provenance first;
+  Vector<PersistentId> seen;       /* hashes of the rounds' polygons */
+  bool hopeless = false;           /* a round found nothing to repair */
+
+  static constexpr int kExactFrom = 3; /* round */
+
+  CsgCode start(const Arrangement &a, const Expression &e, const Vector<Selected> &sel)
+  {
+    Writer w{a, e, sel, options, rep, place, options.quantum_shift, bias, {}, {}, {}};
+    CsgCode c = w.merge_whole();
+    if (c == CsgCode::Ok && options.names) {
+      name_elements(a, e, sel, rep.result, *options.names, rep.names);
+    }
+    LComplex k;
+    if (c == CsgCode::Ok) {
+      find_provenance(a, rep.result, rep.names, rep.provenance);
+      c = w.build(k);
+    }
     if (c == CsgCode::Ok) {
       out = std::move(k);
     }
-    return c;
+    if (c != CsgCode::RoundingFailed || options.max_repair_rounds <= 0) {
+      return c;
+    }
+    if (rep.repair.first == RoundCode::None) {
+      rep.repair.first = rep.round;
+    }
+    roots = uint32_t(rep.result.faces.size());
+    face_limit = 4 * roots + 300;
+    root_names = rep.names.face;
+    first = rep.provenance;
+    Vector<uint32_t> root;
+    for (uint32_t f = 0; f < roots; f++) {
+      root.append(f);
+    }
+    return round(w, root, 1);
+  }
+
+  /* repairs what w has (a result that failed); root: by its faces, the exact
+   * result's face */
+  CsgCode round(const Writer &w, const Vector<uint32_t> &root, int number)
+  {
+    if (number > options.max_repair_rounds) {
+      return CsgCode::RoundingFailed;
+    }
+    rep.repair.rounds = uint32_t(number);
+    const Result before = rep.result;
+    const Vector<I3> positions = rep.positions;
+    const Names names = std::move(rep.names);
+    const Provenance provenance = std::move(rep.provenance);
+    const Rounded rounded{w.a,
+                          before,
+                          {positions.data(), size_t(positions.size())},
+                          {w.used.data(), size_t(w.used.size())},
+                          names,
+                          provenance};
+    Arrangement a;
+    Vector<uint32_t> point_of, solid;
+    RepairCounts &counts = rep.repair.counts;
+    CsgCode c = read_rounded(rounded, number >= kExactFrom, a.in, point_of, counts);
+    if (c != CsgCode::Ok) {
+      return c;
+    }
+    const PersistentId hash = polygons_hash(a.in);
+    if (number > kExactFrom && std::any_of(seen.begin(), seen.end(), [&](const PersistentId &x) { return x == hash; })) {
+      return CsgCode::RoundingFailed;
+    }
+    seen.append(hash);
+    a.leaf_count = 1;
+    c = build_arrangement(a);
+    std::span<const PersistentId> labels;
+    if (options.names) {
+      labels = options.names->labels;
+    }
+    /* (thin faces that cross along their length can multiply) */
+    c = c == CsgCode::Ok && a.facets.size() > 4 * face_limit ? CsgCode::RoundingFailed : c;
+    c = c == CsgCode::Ok ? label_by_winding(a, labels, solid, counts) : c;
+    if (c != CsgCode::Ok) {
+      return c;
+    }
+    if (number == 1 && counts.merged == 0 && counts.broken == 0 && unchanged(a, solid)) {
+      hopeless = true;
+      return CsgCode::RoundingFailed;
+    }
+    Vector<Selected> sel;
+    select_repaired(a, solid, rounded, w.e, sel);
+    Expression e;
+    e.kinds = w.e.kinds;
+    Vector<uint32_t> ids;
+    for (uint32_t l = 0; l < e.kinds.size(); l++) {
+      ids.append(l);
+    }
+    e.add_leaf(true, {ids.data(), size_t(ids.size())});
+    ExactPlacement same;
+    same.set(RigidPlacement());
+    Writer x{a, e, sel, options, rep, same, 0, bias, {}, {}, {}};
+    c = x.merge_whole();
+    c = c == CsgCode::Ok && rep.result.faces.size() > face_limit ? CsgCode::RoundingFailed : c;
+    if (c != CsgCode::Ok) {
+      return c;
+    }
+    Vector<uint32_t> next_root;
+    for (const ResultFace &f : rep.result.faces) {
+      next_root.append(root[int(a.in.polygons[int(f.source)].face)]);
+    }
+    const PreviousNames previous{before,
+                                 {names.vertex.data(), size_t(names.vertex.size())},
+                                 {names.face.data(), size_t(names.face.size())},
+                                 {point_of.data(), size_t(point_of.size())}};
+    const PersistentId no_leaf = ident::kNoId;
+    auto name = [&](const Vector<uint32_t> &of) {
+      if (options.names) {
+        NameSource n = *options.names;
+        n.previous = &previous;
+        n.leaf_ids = {&no_leaf, 1};
+        name_elements(a, e, sel, rep.result, n, rep.names);
+        keep_names(of);
+      }
+      compose_provenance(provenance, first, {of.data(), size_t(of.size())}, a, rep.result, rep.names, rep.provenance);
+    };
+    auto done = [&](LComplex &k, const Vector<uint32_t> &of) {
+      Vector<uint8_t> there;
+      there.resize(roots);
+      std::fill(there.begin(), there.end(), uint8_t(0));
+      for (uint32_t f : of) {
+        there[int(f)] = 1;
+      }
+      rep.repair.vanished = uint32_t(std::count(there.begin(), there.end(), uint8_t(0)));
+      rep.round = RoundCode::None;
+      out = std::move(k);
+      return CsgCode::Ok;
+    };
+    name(next_root);
+    /* whole faces again, if that does */
+    Result joined;
+    Vector<Vector<uint32_t, 2>> members;
+    if (join_faces(rep.result, {rep.positions.data(), size_t(rep.positions.size())},
+                   {next_root.data(), size_t(next_root.size())}, joined, members))
+    {
+      const Result pieces = std::move(rep.result);
+      Vector<uint32_t> joined_root;
+      for (int f = 0; f < int(members.size()); f++) {
+        joined_root.append(next_root[int(members[f][0])]);
+        for (uint32_t m : members[f]) {
+          /* it goes on as the piece that has the face's name */
+          const ResultFace &piece = pieces.faces[int(m)];
+          const uint32_t src = a.in.polygons[int(piece.source)].face;
+          if (options.names && names.face[int(src)] == root_names[int(joined_root[f])]) {
+            joined.faces[f].source = piece.source;
+            break;
+          }
+        }
+      }
+      rep.result = std::move(joined);
+      name(joined_root);
+      LComplex k;
+      c = x.build(k);
+      if (c == CsgCode::Ok) {
+        rep.repair.joined = uint32_t(pieces.faces.size() - members.size());
+        return done(k, joined_root);
+      }
+      if (c != CsgCode::RoundingFailed) {
+        return c;
+      }
+      rep.result = pieces;
+      name(next_root);
+    }
+    LComplex k;
+    c = x.build(k);
+    if (c == CsgCode::Ok) {
+      return done(k, next_root);
+    }
+    return c == CsgCode::RoundingFailed ? round(x, next_root, number + 1) : c;
+  }
+
+  /* a face that has pieces left, but not the one with its name: the piece with
+   * the smallest name takes it */
+  void keep_names(const Vector<uint32_t> &root)
+  {
+    Vector<uint32_t> best;
+    best.resize(root_names.size());
+    std::fill(best.begin(), best.end(), kNone);
+    auto &face = rep.names.face;
+    for (uint32_t f = 0; f < root.size(); f++) {
+      uint32_t &b = best[int(root[int(f)])];
+      const PersistentId &name = root_names[int(root[int(f)])];
+      if (b == kNone || face[int(f)] == name || (!(face[int(b)] == name) && face[int(f)] < face[int(b)])) {
+        b = f;
+      }
+    }
+    for (uint32_t i = 0; i < best.size(); i++) {
+      if (best[int(i)] != kNone) {
+        face[int(best[int(i)])] = root_names[int(i)];
+      }
+    }
+  }
+
+  /* the rounded faces meet as the exact ones do */
+  static bool unchanged(const Arrangement &a, const Vector<uint32_t> &solid)
+  {
+    if (a.facets.size() != a.in.polygons.size()) {
+      return false;
+    }
+    for (uint32_t f = 0; f < a.facets.size(); f++) {
+      const Facet &fc = a.facets[int(f)];
+      if (fc.sources.size() != 1) {
+        return false;
+      }
+      const Polygon &g = a.in.polygons[int(fc.sources[0])];
+      const uint32_t front = g.sign > 0 ? 0 : 1;
+      if (solid[int(2 * f + front)] != g.region[0] || solid[int(2 * f + 1 - front)] != g.region[1]) {
+        return false;
+      }
+    }
+    return true;
   }
 };
 
@@ -414,8 +639,33 @@ struct Writer {
 CsgCode build_output(const Arrangement &a, const Expression &e, const Vector<Selected> &selected,
                      const OutputOptions &options, LComplex &out, OutputReport &report)
 {
-  Writer w{a, e, selected, options, report, {}, {}, {}, {}};
-  return w.run(out);
+  ExactPlacement place;
+  if (!place.set(options.placement)) {
+    return CsgCode::BadPlacement;
+  }
+  /* of what is added before rounding: nothing that moves an integer */
+  constexpr int8_t kBias[8][3] = {{0, 0, 0},   {1, 1, 1},  {-1, -1, -1}, {1, -1, 1},
+                                  {-1, 1, -1}, {1, 1, -1}, {-1, -1, 1},  {1, -1, -1}};
+  RoundCode first = RoundCode::None;
+  CsgCode c = CsgCode::RoundingFailed;
+  const int attempts = options.max_repair_rounds > 0 ? 8 : 1;
+  for (int i = 0; i < attempts; i++) {
+    OutputReport rep;
+    rep.repair.first = first;
+    rep.repair.attempts = uint32_t(i);
+    Attempt x{options, place, I3(3 * kBias[i][0], 3 * kBias[i][1], 3 * kBias[i][2]), rep, out, 0, 0, {}, {}, {}, false};
+    c = x.start(a, e, selected);
+    first = rep.repair.first;
+    if (i > 0 && c == CsgCode::OutOfRange) {
+      c = CsgCode::RoundingFailed; /* (the first attempt was in range) */
+      continue;
+    }
+    report = std::move(rep);
+    if (c != CsgCode::RoundingFailed || x.hopeless) {
+      break;
+    }
+  }
+  return c;
 }
 
 } // namespace ubertopo::csg

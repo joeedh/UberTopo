@@ -1,10 +1,5 @@
 #include "ubertopo/csg/attributes.h"
 
-#include <algorithm>
-#include <cmath>
-
-#include "litestl/util/map.h"
-
 namespace ubertopo::csg {
 
 namespace {
@@ -37,9 +32,7 @@ template <typename K> auto &group_of(K &k, Grp g)
 }
 
 struct Copier {
-  const Arrangement &a;
-  const Result &res;
-  const Names &names;
+  const Provenance &from;
   const NameSource &src;
   const ElementMap &map;
   const topo::PropagationRules *rules;
@@ -52,48 +45,11 @@ struct Copier {
     return mixes[int(leaf * kGroups) + group];
   }
 
-  /* exact coordinates cut off at 2^-20, so that measures don't depend on the
-   * compiler */
-  double coord(uint32_t p, int axis) const
-  {
-    return double(floor_at(a.in.points[p], axis, 20));
-  }
-  double length(uint32_t p, uint32_t q) const
-  {
-    double s = 0;
-    for (int i = 0; i < 3; i++) {
-      const double d = coord(q, i) - coord(p, i);
-      s += d * d;
-    }
-    return std::sqrt(s);
-  }
-  template <typename P, typename O> double area(const P &pts, const O &off) const
-  {
-    double n[3] = {0, 0, 0};
-    for (int l = 0; l + 1 < int(off.size()); l++) {
-      for (uint32_t i = off[l]; i < off[l + 1]; i++) {
-        const uint32_t o = pts[0], p = pts[int(i)], q = pts[int(i + 1 < off[l + 1] ? i + 1 : off[l])];
-        for (int c = 0; c < 3; c++) {
-          const int u = (c + 1) % 3, v = (c + 2) % 3;
-          n[c] += (coord(p, u) - coord(o, u)) * (coord(q, v) - coord(o, v)) -
-                  (coord(p, v) - coord(o, v)) * (coord(q, u) - coord(o, u));
-        }
-      }
-    }
-    return std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-  }
-
-  static uint64_t key(uint32_t leaf, uint32_t slot)
-  {
-    return (uint64_t(leaf) << 32) | slot;
-  }
-
   void vertices()
   {
-    for (uint32_t p = 0; p < names.vertex_src.size(); p++) {
-      const uint32_t i = names.vertex_src[int(p)];
-      if (i != kNone) {
-        const SrcVert &v = a.in.verts[int(i)];
+    for (uint32_t p = 0; p < from.verts.size(); p++) {
+      const Provenance::Vertex &v = from.verts[int(p)];
+      if (v.leaf != kNone && map.vert_of[p] != kNone) {
         mix(v.leaf, 0).add(map.vert_of[p], {{v.vert, 1.0}});
       }
     }
@@ -101,41 +57,22 @@ struct Copier {
 
   void edges()
   {
-    /* a source edge is as long as its pieces */
-    litestl::util::Map<uint64_t, double> total;
-    for (const SrcEdge &e : a.in.edges) {
-      if (e.edge != kNone) {
-        const double l = length(e.a, e.b);
-        double *t = total.lookup_ptr(key(e.leaf, e.edge));
-        t ? void(*t += l) : void(total.add(key(e.leaf, e.edge), l));
-      }
-    }
-    for (uint32_t x = 0; x < names.edge_src.size(); x++) {
-      const uint32_t i = names.edge_src[int(x)];
-      if (i != kNone) {
-        const SrcEdge &e = a.in.edges[int(i)];
-        const double part = length(res.edges[int(x)].a, res.edges[int(x)].b) / *total.lookup_ptr(key(e.leaf, e.edge));
-        mix(e.leaf, 1).add(map.edge_of[x], {{e.edge, part}});
+    for (uint32_t x = 0; x < from.edges.size(); x++) {
+      const Provenance::Edge &e = from.edges[int(x)];
+      if (e.leaf != kNone) {
+        mix(e.leaf, 1).add(map.edge_of[x], {{e.edge, e.part}});
       }
     }
   }
 
   void faces()
   {
-    litestl::util::Map<uint64_t, double> total;
-    for (const Polygon &g : a.in.polygons) {
-      const double s = area(g.pts, g.off);
-      double *t = total.lookup_ptr(key(g.leaf, g.face));
-      t ? void(*t += s) : void(total.add(key(g.leaf, g.face), s));
-    }
-    for (uint32_t f = 0; f < res.faces.size(); f++) {
-      const ResultFace &r = res.faces[int(f)];
-      const Polygon &g = a.in.polygons[int(r.source)];
-      const double part = r.whole ? 1.0 : area(r.pts, r.off) / *total.lookup_ptr(key(g.leaf, g.face));
-      mix(g.leaf, 2).add(map.face_of[f], {{g.face, part}});
+    for (uint32_t f = 0; f < from.faces.size(); f++) {
+      const Provenance::Face &r = from.faces[int(f)];
+      mix(r.leaf, 2).add(map.face_of[f], {{r.face, r.part}});
       for (uint32_t side = 0; side < 2; side++) {
-        const uint32_t from = r.reversed ? 1 - side : side;
-        mix(g.leaf, 3).add(2 * map.face_of[f] + side, {{2 * g.face + from, part}});
+        const uint32_t s = r.reversed ? 1 - side : side;
+        mix(r.leaf, 3).add(2 * map.face_of[f] + side, {{2 * r.face + s, r.part}});
       }
     }
   }
@@ -156,8 +93,8 @@ struct Copier {
     if (m.empty()) {
       return true;
     }
-    const LComplex &from = *src.operands[leaf].k;
-    const AttrGroup &sg = group_of(from, kGroup[g]);
+    const LComplex &op = *src.operands[leaf].k;
+    const AttrGroup &sg = group_of(op, kGroup[g]);
     AttrGroup &dg = group_of(k, kGroup[g]);
     auto policy = [&](std::string_view name, uint32_t, const ColumnBase &col) {
       if (kGroup[g] == Grp::Verts && name == "pos") {
@@ -179,7 +116,7 @@ struct Copier {
     for (uint32_t i = 0; i < dg.column_count(); i++) {
       ColumnBase &c = dg.column(i);
       if (!has_flag(c.flags(), ColumnFlags::Topo) && c.holds_refs() && sg.find_any(dg.name(i)) &&
-          !k.geom.import_rows(c, m.batch().targets, from.geom, memo[int(leaf)]))
+          !k.geom.import_rows(c, m.batch().targets, op.geom, memo[int(leaf)]))
       {
         return false;
       }
@@ -216,10 +153,10 @@ struct Copier {
 
 } // namespace
 
-CsgCode copy_attributes(const Arrangement &a, const Result &result, const Names &names, const NameSource &source,
-                        const ElementMap &map, const topo::PropagationRules *rules, LComplex &k, uint32_t *bad_leaf)
+CsgCode copy_attributes(const Provenance &from, const NameSource &source, const ElementMap &map,
+                        const topo::PropagationRules *rules, LComplex &k, uint32_t *bad_leaf)
 {
-  Copier c{a, result, names, source, map, rules, k, {}, {}};
+  Copier c{from, source, map, rules, k, {}, {}};
   return c.run(bad_leaf);
 }
 

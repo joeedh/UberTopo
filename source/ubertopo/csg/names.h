@@ -16,12 +16,22 @@ struct LabelSource {
   uint32_t leaf, region;
 };
 
+/** Names of a result, whose faces are the polygons of another arrangement
+ * (repair.h). */
+struct PreviousNames {
+  const Result &result;
+  std::span<const PersistentId> vertex; /* by point */
+  std::span<const PersistentId> face;
+  std::span<const uint32_t> point_of; /* by point: that of the arrangement */
+};
+
 /** What names are made of. */
 struct NameSource {
   std::span<const Operand> operands;     /* by leaf */
   std::span<const PersistentId> leaf_ids; /* by leaf */
   std::span<const PersistentId> labels;   /* by label */
   std::span<const LabelSource> label_source; /* by label: the first region with it */
+  const PreviousNames *previous = nullptr; /* instead of the operands'; elements that stay keep theirs */
 };
 
 struct Names {

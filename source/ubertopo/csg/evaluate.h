@@ -8,7 +8,7 @@
 namespace ubertopo::csg {
 
 /** Part of every cache key: results can change when it does. */
-inline constexpr uint32_t kEngineVersion = 1;
+inline constexpr uint32_t kEngineVersion = 2;
 
 struct BoolOptions {
   /** From the tree's frame to the output's, in quanta of the operands. */
@@ -18,6 +18,10 @@ struct BoolOptions {
   /** If the result can't be rounded: how many finer quanta (by 2 each) are
    * tried. The output then has that quantum. */
   int max_quantum_shift = 0;
+  /** If that doesn't do either: how often the rounded faces are arranged again
+   * (repair.h), at the finest of these quanta. What is smaller than a quantum
+   * may vanish then; the report tells. 0: not at all. */
+  int max_repair_rounds = 16;
   /** How attributes of faces and edges are split (default: copied). */
   const topo::PropagationRules *rules = nullptr;
   bool validate_operands = true;

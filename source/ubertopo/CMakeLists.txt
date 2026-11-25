@@ -67,9 +67,13 @@ add_library(ubertopo_csg STATIC
   csg/output.cc
   csg/pairs.cc
   csg/planar.cc
+  csg/provenance.cc
+  csg/relabel.cc
+  csg/repair.cc
   csg/select.cc
   csg/subdivide.cc
   csg/tree.cc
+  csg/triangulate.cc
 )
 target_link_libraries(ubertopo_csg PUBLIC ubertopo_topo)
 

@@ -79,13 +79,31 @@ struct Namer {
   PersistentId vert_id(uint32_t i) const
   {
     const SrcVert &v = a.in.verts[int(i)];
+    if (src.previous) {
+      return src.previous->vertex[v.vert];
+    }
     const topo::Complex<geom::Lattice> &k = *src.operands[v.leaf].k;
     return v.vert != kNone ? k.vert_id(topo::VertRef(v.vert))
                            : derive(tag::BoolVertex, uint32_t(kSkeleton), k.edge_id(topo::EdgeRef(v.edge)), v.index);
   }
   PersistentId face_id(const Polygon &g) const
   {
-    return src.operands[g.leaf].k->face_id(topo::FaceRef(g.face));
+    return src.previous ? src.previous->face[g.face] : src.operands[g.leaf].k->face_id(topo::FaceRef(g.face));
+  }
+  PersistentId primary(const Polygon &g) const
+  {
+    return src.previous ? face_id(g) : derive(tag::BoolFace, src.leaf_ids[g.leaf], face_id(g));
+  }
+  /* p is a vertex of the face that g is of */
+  const uint32_t *own_corner(const Polygon &g, uint32_t p) const
+  {
+    if (src.previous) {
+      const auto &pts = src.previous->result.faces[int(g.face)].pts;
+      if (std::none_of(pts.begin(), pts.end(), [&](uint32_t q) { return src.previous->point_of[q] == p; })) {
+        return nullptr;
+      }
+    }
+    return own(g.leaf, p);
   }
   const uint32_t *own(uint32_t leaf, uint32_t p) const
   {
@@ -94,7 +112,7 @@ struct Namer {
   /* a diagonal of T(f) is named as an edge between its vertices would be */
   PersistentId edge_id(const SrcEdge &x) const
   {
-    if (x.edge != kNone) {
+    if (x.edge != kNone && !src.previous) {
       return src.operands[x.leaf].k->edge_id(topo::EdgeRef(x.edge));
     }
     const uint32_t *va = own(x.leaf, x.a), *vb = own(x.leaf, x.b);
@@ -211,6 +229,9 @@ struct Namer {
     if (leaf != kNone) {
       const uint32_t v = *own(leaf, p);
       out.vertex_src[int(p)] = a.in.verts[int(v)].vert != kNone ? v : kNone;
+      if (src.previous) {
+        return vert_id(v);
+      }
       return derive(tag::BoolVertex, uint32_t(kOwn), src.leaf_ids[leaf], vert_id(*own(leaf, p)));
     }
     std::sort(edges.begin(), edges.end());
@@ -312,7 +333,7 @@ struct Namer {
   PersistentId carrier(const ResultFace &r, uint32_t p, uint32_t q, uint32_t &kind) const
   {
     const Polygon &g = a.in.polygons[int(r.source)];
-    if (!r.whole) {
+    if (!r.whole && !r.joined) {
       PlanarGraph pg(a.in, g.plane, g.axis);
       for (uint32_t x : g.edges) {
         const SrcEdge &se = a.in.edges[int(x)];
@@ -408,12 +429,12 @@ struct Namer {
   Piece piece(uint32_t face) const
   {
     const ResultFace &r = res.faces[int(face)];
-    const uint32_t leaf = a.in.polygons[int(r.source)].leaf;
+    const Polygon &src_polygon = a.in.polygons[int(r.source)];
     Piece x;
     x.face = face;
     uint32_t at = kNone;
     for (uint32_t p : r.pts) {
-      if (const uint32_t *v = own(leaf, p)) {
+      if (const uint32_t *v = own_corner(src_polygon, p)) {
         const PersistentId id = vert_id(*v);
         if (!x.has_own || id < x.vertex) {
           x.has_own = true;
@@ -481,7 +502,7 @@ struct Namer {
       const Polygon &g = a.in.polygons[int(res.faces[int(group[0])].source)];
       const PersistentId leaf = src.leaf_ids[g.leaf], face = face_id(g);
       if (group.size() == 1) {
-        out.face[int(group[0])] = unique(derive(tag::BoolFace, leaf, face), tag::BoolFace, out.collisions);
+        out.face[int(group[0])] = unique(primary(g), tag::BoolFace, out.collisions);
         continue;
       }
       Vector<Piece> pieces;
@@ -493,7 +514,7 @@ struct Namer {
       });
       for (int i = 0; i < int(pieces.size()); i++) {
         const Piece &x = pieces[i];
-        PersistentId id = derive(tag::BoolFace, leaf, face);
+        PersistentId id = primary(g);
         if (i > 0) {
           const bool shared = std::any_of(pieces.begin(), pieces.end(), [&](const Piece &y) {
             return y.face != x.face && y.has_own && y.vertex == x.vertex;
@@ -514,10 +535,23 @@ struct Namer {
       for (const EdgeUse &u : re.uses) {
         const ResultFace &r = res.faces[int(u.facet)];
         const Polygon &g0 = a.in.polygons[int(r.source)];
-        const uint32_t begin = r.whole ? a.in.outlines[int(g0.outline)].first : r.source;
-        const uint32_t count = r.whole ? a.in.outlines[int(g0.outline)].count : 1;
-        for (uint32_t s = begin; s < begin + count; s++) {
+        uint32_t begin = r.whole ? a.in.outlines[int(g0.outline)].first : r.source;
+        uint32_t end = begin + (r.whole ? a.in.outlines[int(g0.outline)].count : 1);
+        if (r.joined) {
+          /* (a joined face's pieces may be of several faces: names don't need
+           * more than its first one's) */
+          for (; begin > 0 && same_face(begin - 1, r.source); begin--) {
+          }
+          for (; end < a.in.polygons.size() && same_face(end, r.source); end++) {
+          }
+        }
+        for (uint32_t s = begin; s < end; s++) {
           const Polygon &g = a.in.polygons[int(s)];
+          if (r.joined && (classify(a.in.points[re.a], a.in.planes[g.plane]) != 0 ||
+                           classify(a.in.points[re.b], a.in.planes[g.plane]) != 0))
+          {
+            continue;
+          }
           const PlanarGraph pg(a.in, g.plane, g.axis);
           for (uint32_t x : g.edges) {
             const SrcEdge &se = a.in.edges[int(x)];
@@ -533,6 +567,11 @@ struct Namer {
       }
       out.edge_src.append(best);
     }
+  }
+  bool same_face(uint32_t s, uint32_t t) const
+  {
+    const Polygon &g = a.in.polygons[int(s)], &h = a.in.polygons[int(t)];
+    return g.leaf == h.leaf && g.face == h.face;
   }
   bool edge_before(uint32_t x, uint32_t y) const
   {

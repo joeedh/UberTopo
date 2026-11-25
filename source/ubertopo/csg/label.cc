@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include "ubertopo/csg/arrangement.h"
+#include "ubertopo/csg/ray.h"
 
 namespace ubertopo::csg {
 
@@ -72,41 +73,6 @@ struct Labeller {
     }
   }
 
-  /* -1: t doesn't do, 0: missed, 1: hit */
-  int hits(const Mid &o, const I3 &dir, const Polygon &g, int side)
-  {
-    const Plane &pl = a.in.planes[g.plane];
-    const int toward = dot(pl.n, dir).sign();
-    if (side == 0) {
-      /* the polygon doesn't contain the origin. A ray in its plane leaves it
-       * at an edge, where the next polygons rule t out */
-      return 0;
-    }
-    if (side * toward >= 0) {
-      return 0;
-    }
-    /* the winding number of the boundary, as a fan about its first point */
-    const Input &in = a.in;
-    const I3 &p0 = in.ipos[int(g.pts[0])];
-    int winding = 0;
-    bool bad = false;
-    g.for_each_edge([&](uint32_t i, uint32_t j) {
-      if (bad) {
-        return;
-      }
-      const I3 &p = in.ipos[int(g.pts[int(i)])], &q = in.ipos[int(g.pts[int(j)])];
-      const int s = ray_side(o, dir, p, q);
-      bad = s == 0;
-      if (bad || i == 0 || j == 0) {
-        return;
-      }
-      const int s1 = ray_side(o, dir, p0, p), s2 = ray_side(o, dir, q, p0);
-      bad = s1 == 0 || s2 == 0;
-      winding += s1 == s && s2 == s ? s : 0;
-    });
-    return bad ? -1 : winding != 0;
-  }
-
   /* the leaf's region at the middle of an edge it doesn't touch */
   uint32_t ray(const ArrEdge &e)
   {
@@ -145,7 +111,7 @@ struct Labeller {
       add(0, 1);
       for (uint32_t i = 0; i < n && !bad; i++) {
         const Polygon &g = in.polygons[int(b + i)];
-        const int hit = hits(o, dir, g, sides[int(i)]);
+        const int hit = ray_hits(in, o, dir, g, sides[int(i)]);
         bad = hit < 0;
         if (hit > 0) {
           const uint32_t near = sides[int(i)] == g.sign ? 0 : 1;

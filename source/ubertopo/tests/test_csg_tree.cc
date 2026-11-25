@@ -518,6 +518,7 @@ void test_evaluate()
     UT_CHECK(f.add_op(id(1), kNoId, Op::Difference) == CsgCode::Ok && f.add_leaf(id(2), id(1), leaf(cube)) == CsgCode::Ok &&
              f.add_leaf(id(3), id(1), leaf(wh)) == CsgCode::Ok);
     /* (an operand that isn't valid is told apart; this one is) */
+    opt.max_repair_rounds = 0;
     const CsgCode c0 = csg::evaluate(f, w.store, opt, k, rep);
     UT_CHECK(c0 == CsgCode::RoundingFailed && rep.output.round != csg::RoundCode::None && shape(k) == before);
     opt.max_quantum_shift = 3;
@@ -562,6 +563,7 @@ void test_validate()
     LComplex k;
     BoolReport rep;
     BoolOptions opt;
+    opt.max_repair_rounds = 0;
     if (csg::evaluate(t, store, opt, k, rep) == CsgCode::Ok || rep.output.round != csg::RoundCode::Invalid) {
       continue;
     }

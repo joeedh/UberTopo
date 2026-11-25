@@ -18,7 +18,7 @@ struct FacetEdge {
  * positive side of the plane, side 1 the negative one. */
 struct Facet {
   uint32_t plane;
-  litestl::util::Vector<uint32_t, 2> sources; /* polygons, one per leaf at most */
+  litestl::util::Vector<uint32_t, 2> sources; /* polygons, one per leaf at most (but for Input::self) */
   litestl::util::Vector<FacetEdge, 8> edges;
   litestl::util::Vector<uint32_t, 4> off; /* cycles */
   litestl::util::Vector<uint32_t, 1> dots;

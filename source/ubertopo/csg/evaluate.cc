@@ -14,7 +14,7 @@ PersistentId evaluation_key(const CsgTree &t, const BoolOptions &o)
     h.f64_canonical(o.placement.t[i]);
     h.f64_canonical(o.frame.origin[i]);
   }
-  h.i32(o.frame.quantum_log2).u64(o.frame.frame_id).i32(o.max_quantum_shift);
+  h.i32(o.frame.quantum_log2).u64(o.frame.frame_id).i32(o.max_quantum_shift).i32(o.max_repair_rounds);
   /* (in the order they were given: the first rule of a column counts) */
   for (const topo::ColumnRule &r : o.rules ? o.rules->rules() : std::span<const topo::ColumnRule>()) {
     h.u32(uint32_t(r.group)).str(r.name).i32(r.split ? int32_t(*r.split) : -1);
@@ -63,7 +63,7 @@ CsgCode evaluate(const CsgTree &t, const OperandStore &store, const BoolOptions 
   litestl::util::Vector<Selected> selected;
   select_facets(a, c.expr, selected);
   const NameSource names = c.names();
-  for (int shift = 0;; shift++) {
+  auto output = [&](int shift, bool repair) {
     OutputOptions o;
     o.placement = options.placement;
     o.frame = options.frame;
@@ -71,13 +71,23 @@ CsgCode evaluate(const CsgTree &t, const OperandStore &store, const BoolOptions 
     o.validate = options.validate_result;
     o.names = &names;
     o.rules = options.rules;
+    o.max_repair_rounds = repair ? options.max_repair_rounds : 0;
     report.output = OutputReport();
     report.quantum_shift = shift;
-    code = build_output(a, c.expr, selected, o, out, report.output);
+    const CsgCode r = build_output(a, c.expr, selected, o, out, report.output);
     if (report.output.bad_leaf != kNone) {
       report.node = c.leaf_ids[int(report.output.bad_leaf)];
     }
-    if (code != CsgCode::RoundingFailed || shift >= options.max_quantum_shift) {
+    return r;
+  };
+  for (int shift = 0;; shift++) {
+    const bool last = shift >= options.max_quantum_shift;
+    code = output(shift, last);
+    if (code == CsgCode::OutOfRange && shift > 0 && options.max_repair_rounds > 0) {
+      /* the quantum before was the finest one */
+      return done(output(shift - 1, true));
+    }
+    if (code != CsgCode::RoundingFailed || last) {
       return done(code);
     }
   }

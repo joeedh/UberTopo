@@ -1,6 +1,6 @@
 # Plan: exact Booleans with a CSG tree (P5)
 
-Status: **v3**, after two reviews (§9). S1 to S4 and S6 implemented (S5 waits for the BVH plan); S2c's results and decision are in §7.1.
+Status: **v3**, after two reviews (§9). S1 to S4, S6 and S7 implemented (S5 waits for the BVH plan); S2c's results and decision are in §7.1.
 
 Phase P5 of [06](../design/core-data-model/06-modules-litestl-and-phasing.md). Background:
 [booleans-and-operations](../research/cad-kernels/booleans-and-operations.md) §1,
@@ -414,7 +414,7 @@ section of §3 and §4, below 40 KB each.
   it, results have no names to compare.)
 - **S4 — names** (§4.6), regions, provenance, attributes; stability tests.
 - **S5 — speed:** filters, grid or BVH for pairs and rays, threads; `bench_boolean`.
-- **S7 — repair** (OI-BOOL-2), if the owner wants it; see §7.1.
+- **S7 — repair** (OI-BOOL-2): done 2026-11-25. Plan and results: [2026-11-25-boolean-repair.md](2026-11-25-boolean-repair.md).
 - **S6 — docs:** 02 §5, 06 P5, a new 08 for the engine, DEC-022, index.
 
 ### 7.1 Results of S2c
@@ -458,7 +458,7 @@ quantum shifts). Failures per 3000, at shifts 0 / 1 / 2 / 3 / 4:
   - tetrahedra: 26 of 6000, 4.3 in 1000. **The rule is met for general polyhedra,** so repair
     stays planned (OI-BOOL-2, S7).
   - It doesn't hold up S3 to S6, which don't depend on it, and the failures are reported, not
-    wrong. Whether to do S7 before or after P5 is closed is the owner's decision.
+    wrong. Whether to do S7 before or after P5 is closed is the owner's decision. (Before: done.)
 
 ### 7.2 Known limits after S2c
 
@@ -529,8 +529,8 @@ one face there), `faces parallel` (two kept coplanar faces don't overlap).
 
 - **OI-BOOL-1:** the exit criterion in 06 names Manifold and CGAL Nef as oracles. The
   membership and volume oracles of §6 are stronger for what they test, and in-tree. Whether
-  to write an out-of-tree comparison too is the owner's decision.
-- **OI-BOOL-2:** repair after rounding: planned for general polyhedra, not needed for buildings (§7.1).
+  to write an out-of-tree comparison too is the owner's decision: **put off** (owner, 2026-11-25).
+- **OI-BOOL-2:** repair after rounding: closed by S7 (2026-11-25-boolean-repair.md).
 - **OI-BOOL-3:** applying a result to an existing complex, with lineage in the journal.
 - **OI-BOOL-4:** incremental evaluation after one leaf changed.
 - **OI-BOOL-5:** open sheets as half-spaces (terrain as "below the sheet").

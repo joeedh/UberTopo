@@ -57,7 +57,7 @@ struct Merger {
   bool same_face(uint32_t f, uint32_t g) const
   {
     const Polygon &p = source(f), &q = source(g);
-    return p.leaf == q.leaf && p.face == q.face;
+    return p.leaf == q.leaf && p.face == q.face && p.sign == q.sign;
   }
 
   void join()
