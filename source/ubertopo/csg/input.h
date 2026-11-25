@@ -19,6 +19,8 @@ enum class CsgCode : uint8_t {
   UnsupportedOperand, /* surfaced faces, wires or inclusions */
   MixedFrames,        /* operands of different quanta */
   OutOfRange,         /* the operands' box is too large */
+  BadPlacement,       /* not a rotation, or its translation is out of range */
+  RoundingFailed,     /* the rounded result isn't arranged as the exact one */
   Inconsistent,       /* internal: a self-check failed */
 };
 
@@ -73,6 +75,7 @@ struct SrcEdge {
  * left, seen from the front. */
 struct Polygon {
   uint32_t leaf, face, plane;
+  uint32_t outline = kNone; /* of a triangle: its face's */
   uint32_t region[2]; /* front, back */
   int8_t sign;        /* the front normal along (+1) or against the plane's */
   int8_t axis;        /* a projection axis: the plane's normal is non-zero there */
@@ -97,12 +100,20 @@ struct Polygon {
   }
 };
 
+/** The loops of a face that was read as triangles, seen from its front. */
+struct Outline {
+  litestl::util::Vector<uint32_t, 8> pts;
+  litestl::util::Vector<uint32_t, 2> off;
+  uint32_t first, count; /* polygons */
+};
+
 struct Input {
   PlaneTable planes;
   PointTable points;
   litestl::util::Vector<I3> ipos; /* of the points below ipos.size(): the input points */
   litestl::util::Vector<SrcEdge> edges;
   litestl::util::Vector<Polygon> polygons;
+  litestl::util::Vector<Outline> outlines;
   litestl::util::Vector<uint32_t> leaf_begin; /* first polygon of each leaf, and the end */
   I3 shift{0, 0, 0};                          /* added to all coordinates */
 

@@ -58,7 +58,11 @@ add_library(ubertopo_csg STATIC
   csg/arrangement.cc
   csg/input.cc
   csg/label.cc
+  csg/legal.cc
+  csg/merge.cc
+  csg/output.cc
   csg/pairs.cc
+  csg/planar.cc
   csg/select.cc
   csg/subdivide.cc
 )

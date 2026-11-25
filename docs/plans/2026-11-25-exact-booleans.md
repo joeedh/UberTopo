@@ -1,6 +1,6 @@
 # Plan: exact Booleans with a CSG tree (P5)
 
-Status: **v3**, after two reviews (§9). S1, S2a and S2b implemented.
+Status: **v3**, after two reviews (§9). S1 and S2 (a, b, c) implemented; S2c's results and decision are in §7.1.
 
 Phase P5 of [06](../design/core-data-model/06-modules-litestl-and-phasing.md). Background:
 [booleans-and-operations](../research/cad-kernels/booleans-and-operations.md) §1,
@@ -412,7 +412,54 @@ section of §3 and §4, below 40 KB each.
 - **S3 — the tree:** `CsgTree`, its edits, hash and serialisation; `evaluate`; `csg_diff`.
 - **S4 — names** (§4.6), regions, provenance, attributes; stability tests.
 - **S5 — speed:** filters, grid or BVH for pairs and rays, threads; `bench_boolean`.
+- **S7 — repair** (OI-BOOL-2), if the owner wants it; see §7.1.
 - **S6 — docs:** 02 §5, 06 P5, a new 08 for the engine, DEC-022, index.
+
+### 7.1 Results of S2c
+
+`bench_csg_rounding 3000`: 3000 models of each kind, each output 15 times (three rotations, five
+quantum shifts). Failures per 3000, at shifts 0 / 1 / 2 / 3 / 4:
+
+| | unrotated | about the vertical | free |
+|---|---|---|---|
+| buildings, 1 mm | 4 / 3 / 1 / 1 / 0 | 7 / 2 / 1 / 1 / 1 | 4 / 3 / 2 / 0 / 0 |
+| buildings, 2^-13 m | 0 / 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 / 0 |
+| tetrahedra, 1 mm | 763 / 438 / 227 / 139 / 73 | 712 / 418 / 241 / 142 / 80 | 737 / 424 / 230 / 135 / 77 |
+| tetrahedra, 2^-13 m | 139 / 77 / 37 / 17 / 12 | 135 / 64 / 42 / 23 / 12 | 136 / 77 / 41 / 20 / 14 |
+
+- *Buildings* (`tests/support/csg_buildings.h`): thick walls, rooms, windows, a gabled roof with
+  skylights, a dormer and a chimney; some 155 faces from 350 facets; dimensions with random
+  quanta, so most cuts of the roof end between lattice points.
+- *Tetrahedra:* (four random ones) minus (two others), within ±1 m; 42 faces. Slivers and
+  near-coincident points at any scale: the worst case, and nothing like a building.
+- **What fails:** mostly two points that round to one position; then crossing faces
+  (`validate`), loops that cross (builder), and facets that change their order about an edge.
+  Rates halve with each shift, and hardly depend on the rotation.
+- **No silent failure seen:** in `test_csg_output`, all 734 random results at 2^-20 (with labels checked at
+  points) and the 120 of 250 piles of tetrahedra that were `Ok` at a coarse quantum are valid
+  and have the right labels.
+- **The named fixtures** (tests/test_csg_output.cc) all pass unrotated at shift 0.
+- **Diagonals** are needed by 0.0 faces of a building, and by some 1.4% of the faces of random
+  trees on a small grid.
+- **Time** (no filters, one thread): 3 ms for the arrangement of a building, and 7 ms for merging,
+  building, regions, and full validation.
+
+**Decision** (DEC-022):
+
+- **OI-1 stands:** the plane table is the engine's own, rebuilt per evaluation. No stored plane pool.
+- **Repair:** the rule of this section says it is needed if more than 1 in 1000 rotated
+  evaluations fails at 2^-13 m with shift 4.
+  - buildings: 0 of 6000 (so below 0.5 in 1000, at 95%);
+  - tetrahedra: 26 of 6000, 4.3 in 1000. **The rule is met for general polyhedra,** so repair
+    stays planned (OI-BOOL-2, S7).
+  - It doesn't hold up S3 to S6, which don't depend on it, and the failures are reported, not
+    wrong. Whether to do S7 before or after P5 is closed is the owner's decision.
+
+### 7.2 Known limits after S2c
+
+- `build_regions` says `TouchingShell` for a solid that is flush with a face with a hole around
+  it (a pillar in a courtyard, level with the ring). Plan 2026-11-24-bvh fixes it (W4a); until
+  that is merged the result is `RoundingFailed` / `Regions`.
 
 **With the BVH branch:** everything up to S4 is new files on committed `topo` interfaces
 (`face_triangles` until `FaceTess` is on master). S5 waits for it.
@@ -422,7 +469,7 @@ section of §3 and §4, below 40 KB each.
 - **OI-BOOL-1:** the exit criterion in 06 names Manifold and CGAL Nef as oracles. The
   membership and volume oracles of §6 are stronger for what they test, and in-tree. Whether
   to write an out-of-tree comparison too is the owner's decision.
-- **OI-BOOL-2:** repair after rounding.
+- **OI-BOOL-2:** repair after rounding: planned for general polyhedra, not needed for buildings (§7.1).
 - **OI-BOOL-3:** applying a result to an existing complex, with lineage in the journal.
 - **OI-BOOL-4:** incremental evaluation after one leaf changed.
 - **OI-BOOL-5:** open sheets as half-spaces (terrain as "below the sheet").
@@ -460,3 +507,15 @@ section of §3 and §4, below 40 KB each.
   (N10); unique region hints (N11); exact placement (N12); checks after rounding (N13);
   diagonals in S2c (N14); the threshold (N15).
 - **Minor, adopted:** all.
+
+### While implementing (S2)
+
+- **Simplified,** because the geometry implies it (mutations showed the checks to be dead): labels
+  aren't compared when facets are merged (a change of label across an edge has a facet of its own
+  there); two collinear edges that are alone at a point have the same faces; the triangles of a
+  whole face have the same labels if only they meet at their diagonals.
+- **Also checked** after rounding: the number of edges, and that every exact edge exists.
+- **A whole projected face** keeps its side, also if its operand is mirrored: ties in the CDT may go
+  the other way then, and it is output as triangles.
+- **Reversed faces:** a result face is turned round if exactly one side of its source is solid,
+  exactly one side of it is solid in the result, and these differ.

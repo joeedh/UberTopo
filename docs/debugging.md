@@ -620,3 +620,17 @@ Entry format:
   refused; one on the left child's is outside, so it passed. Fixed 2026-11-24.
 - **Technique:** classify an element that shares a vertex with the boundary by that vertex,
   not by its position. Test every cut in both directions.
+
+## A random test gives other numbers under MSVC than under clang
+
+- **Symptom:** the same seed gives another model, so counts differ between presets (bench and test
+  numbers of `csg_buildings.h`: 1543 and 1535 faces). It looks like nondeterminism of the engine.
+- **Cause:** function arguments are evaluated in any order, so `f(len(1), len(2))` draws random
+  numbers in different orders. Elements of a braced list are evaluated in order.
+- **Technique:** in generators, one random draw per statement or list element. Compare the printed
+  counts of both presets.
+
+## `TouchingShell` for a solid that is flush with a ring around it
+
+- **Cause:** fans of faces with holes in the nesting test. Fixed by plan 2026-11-24-bvh, W4a (see
+  its entry here once merged). `test_csg_output` avoids the case until then.

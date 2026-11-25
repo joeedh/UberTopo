@@ -10,6 +10,7 @@ namespace ubertopo::csg {
 struct FacetEdge {
   uint32_t edge;
   int8_t dir; /* +1: from the edge's a to b */
+  uint32_t cut; /* the edge is on the facet's plane and this one */
 };
 
 /** A facet, once for all the polygons it lies on. Its boundary runs with the

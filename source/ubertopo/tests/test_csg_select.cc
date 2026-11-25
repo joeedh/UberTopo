@@ -13,6 +13,7 @@
 #include "ut_test.h"
 
 #include "support/csg_oracle.h"
+#include "support/csg_trees.h"
 #include "ubertopo/csg/select.h"
 
 using namespace ubertopo;
@@ -29,96 +30,6 @@ namespace {
 
 using Selection = litestl::util::Vector<Selected>;
 
-/* ---- the meaning, written a second time ---- */
-
-struct Tree {
-  Op op = Op::Leaf;
-  uint32_t leaf = 0;
-  std::vector<Tree> kids;
-};
-
-/* void: -1, air: -2 - name, solid: name */
-struct Meaning {
-  std::vector<std::vector<int>> label; /* by leaf and region */
-  std::vector<bool> thin;
-
-  int at(const Tree &t, const std::vector<uint32_t> &region) const
-  {
-    if (t.op == Op::Leaf) {
-      return label[t.leaf][region[t.leaf]];
-    }
-    std::vector<int> v;
-    for (const Tree &k : t.kids) {
-      v.push_back(at(k, region));
-    }
-    const int others = int(std::count_if(v.begin() + 1, v.end(), [](int x) { return x >= 0; }));
-    switch (t.op) {
-      case Op::Union: {
-        const auto s = std::find_if(v.begin(), v.end(), [](int x) { return x >= 0; });
-        const auto air = std::find_if(v.begin(), v.end(), [](int x) { return x < -1; });
-        return s != v.end() ? *s : air != v.end() ? *air : -1;
-      }
-      case Op::Intersection:
-        return others == int(v.size()) - 1 ? v[0] : -1;
-      default:
-        return others == 0 ? v[0] : -1;
-    }
-  }
-  /* 2: leaf not in t; else whether it is present */
-  int present(const Tree &t, uint32_t leaf, const std::vector<uint32_t> &region) const
-  {
-    if (t.op == Op::Leaf) {
-      return t.leaf == leaf ? 1 : 2;
-    }
-    for (size_t i = 0; i < t.kids.size(); i++) {
-      const int p = present(t.kids[i], leaf, region);
-      if (p == 2) {
-        continue;
-      }
-      if (p == 0 || (t.op == Op::Difference && i > 0)) {
-        return 0;
-      }
-      for (size_t j = 0; j < t.kids.size(); j++) {
-        const bool solid = j != i && at(t.kids[j], region) >= 0;
-        if (j != i && solid != (t.op == Op::Intersection)) {
-          return 0;
-        }
-      }
-      return 1;
-    }
-    return 2;
-  }
-};
-
-/* numbers the leaves of a random tree in order */
-Tree random_tree(SplitMix64 &r, int depth, uint32_t &leaves)
-{
-  Tree t;
-  if (depth == 0 || (depth < 3 && r.below(4) == 0)) {
-    t.leaf = leaves++;
-    return t;
-  }
-  t.op = Op(1 + r.below(3));
-  const int n = 1 + int(r.below(3));
-  for (int i = 0; i < n; i++) {
-    t.kids.push_back(random_tree(r, depth - 1, leaves));
-  }
-  return t;
-}
-
-uint32_t add_tree(Expression &e, const Tree &t, const std::vector<std::vector<uint32_t>> &labels,
-                  const std::vector<bool> &thin)
-{
-  if (t.op == Op::Leaf) {
-    return e.add_leaf(thin[t.leaf], labels[t.leaf]);
-  }
-  std::vector<uint32_t> kids;
-  for (const Tree &k : t.kids) {
-    kids.push_back(add_tree(e, k, labels, thin));
-  }
-  return e.add_op(t.op, kids);
-}
-
 /* ---- random trees ---- */
 
 void test_random()
@@ -127,42 +38,15 @@ void test_random()
   uint32_t kept = 0, thin_kept = 0, dropped = 0, samples = 0;
   std::vector<uint32_t> src_kind(4, 0);
   for (int s = 0; s < 400; s++) {
-    uint32_t n = 0;
-    const Tree t = random_tree(r, 1 + int(r.below(3)), n);
-    if (n > 7) {
+    RandomCase c;
+    if (!c.make(r)) {
       continue;
     }
-    Operands o;
-    for (uint32_t i = 0; i < n; i++) {
-      if (r.below(3) == 0) {
-        /* big ones, so that they overlap */
-        GridBuilder<L> g;
-        const I3 a = vertex(r, 1);
-        g.box({a[0] - 3, a[1] - 3, a[2] - 3}, {a[0] + 2, a[1] + 2, a[2] + 2});
-        o.add(g);
-      }
-      else {
-        add_random(r, 3, o);
-      }
-    }
-    Expression e;
-    Meaning m;
-    std::vector<uint32_t> name[3]; /* air and solid labels */
-    const uint32_t air[2] = {e.add_label(LabelKind::Air), e.add_label(LabelKind::Air)};
-    const uint32_t solid[3] = {e.add_label(LabelKind::Solid), e.add_label(LabelKind::Solid),
-                               e.add_label(LabelKind::Solid)};
-    std::vector<std::vector<uint32_t>> labels;
-    for (uint32_t i = 0; i < n; i++) {
-      labels.push_back({kVoid});
-      m.label.push_back({-1});
-      m.thin.push_back(r.below(2) == 0);
-      for (uint32_t q = 1; q < o.k[i]->regions.capacity(); q++) {
-        const uint64_t c = r.below(8);
-        labels.back().push_back(c == 0 ? kVoid : c < 3 ? air[c - 1] : solid[c % 3]);
-        m.label.back().push_back(c == 0 ? -1 : c < 3 ? -2 - int(c - 1) : int(c % 3));
-      }
-    }
-    UT_CHECK(add_tree(e, t, labels, m.thin) == e.root);
+    const Operands &o = c.o;
+    const Expression &e = c.e;
+    const Meaning &m = c.m;
+    const Tree &t = c.t;
+    const uint32_t n = c.n, *air = c.air, *solid = c.solid;
     auto as_meaning = [&](uint32_t l) {
       return l == kVoid ? -1 : l == air[0] ? -2 : l == air[1] ? -3 : int(l - solid[0]);
     };

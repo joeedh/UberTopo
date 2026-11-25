@@ -844,6 +844,20 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
 - **Open:** OI-CL-1 to OI-CL-3 (plan §6): cuts between holes only, cuts along wires or
   curves, and surfaced faces.
 
+## DEC-022 — Exact Booleans: representation and rounding (S2c of the plan)
+
+[Plan](plans/2026-11-25-exact-booleans.md) §7.1. The decision log of the whole phase follows with S6.
+
+- **OI-1 (DEC-008) holds:** integer vertices and the engine's own plane table, rebuilt per
+  evaluation; homogeneous integer points in the engine only. No stored plane pool.
+- **Modelling frame:** a CSG tree is modelled in its object's frame, and one rotation is applied when
+  the result is rounded, so flush contact survives any orientation.
+- **Rounding** fails visibly (`RoundingFailed`), never silently, and a finer output quantum is the
+  first remedy. Buildings: 0 of 9000 outputs fail at 2^-13 m, shift 0. Random tetrahedra: 4.5% at shift
+  0, 0.4% at shift 4.
+- **Repair is planned** (OI-BOOL-2): by the plan's rule general polyhedra need it, buildings don't.
+  When, is open.
+
 ---
 
 ## Open questions

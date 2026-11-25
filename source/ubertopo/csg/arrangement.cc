@@ -107,7 +107,7 @@ struct Merger {
       facet_of.add({plane, h.from, h.to}, id);
       const int8_t dir = h.from < h.to ? 1 : -1;
       const uint32_t e = edge(h.from, h.to);
-      g.edges.append({e, dir});
+      g.edges.append({e, dir, h.cut});
       a.edges[int(e)].uses.append({id, dir});
     }
     g.off = f.off;

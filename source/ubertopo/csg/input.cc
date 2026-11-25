@@ -175,6 +175,19 @@ struct Reader {
     if (!topo::face_triangles<Lattice>(k, f, tris, &sk) || tris.size() == 0) {
       return CsgCode::BadOperand;
     }
+    Outline o;
+    o.first = uint32_t(in.polygons.size());
+    o.count = uint32_t(tris.size());
+    o.off.append(0);
+    for (uint32_t l = 0; l + 1 < fp.off.size(); l++) {
+      const uint32_t b = fp.off[int(l)], n = fp.off[int(l) + 1] - b;
+      for (uint32_t i = 0; i < n; i++) {
+        o.pts.append(point(fp.pts[int(b + (mirrored ? n - 1 - i : i))]));
+      }
+      o.off.append(uint32_t(o.pts.size()));
+    }
+    g.outline = uint32_t(in.outlines.size());
+    in.outlines.append(std::move(o));
     for (const geom::Triangle &t : tris) {
       Polygon h = g;
       h.whole = false;

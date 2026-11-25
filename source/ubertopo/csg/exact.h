@@ -252,10 +252,10 @@ inline bool same_point(const HPoint &a, const HPoint &b)
 
 /** floor(num / den) for den > 0, if it is below 2^50 in size. The double only
  * guesses; the result is exact. */
-inline int64_t floor_div(const Int256 &num, const Int256 &den)
+template <int N> int64_t floor_div(const lmath::WideInt<N> &num, const lmath::WideInt<N> &den)
 {
   int64_t q = int64_t(num.to_double() / den.to_double());
-  Int256 r = num - Int256::from(q) * den;
+  lmath::WideInt<N> r = num - lmath::WideInt<N>::from(q) * den;
   while (r.is_negative()) {
     r += den;
     q--;
