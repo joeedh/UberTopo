@@ -300,10 +300,20 @@ private:
                       std::span<const EdgeRef> chain,
                       litestl::util::Vector<uint32_t, 32> &vs,
                       bool &closed);
+  /** A piece of a cut: its vertices, and its edges (none: a chord). */
+  struct CutPiece {
+    std::span<const uint32_t> e, v;
+  };
+  /** A hole between two pieces: the coedges that start where the cut enters
+   * it and where it leaves it. */
+  struct CutHole {
+    CoedgeRef in, out;
+  };
   EditCode split_core(FaceRef f,
-                      std::span<const uint32_t> chain_e,
-                      std::span<const uint32_t> chain_v,
+                      std::span<const CutPiece> pieces,
+                      std::span<const CutHole> cut_holes,
                       bool make_chord,
+                      std::string_view tag,
                       FaceRef *other,
                       EdgeRef *chord);
   EditCode island_core(FaceRef f,

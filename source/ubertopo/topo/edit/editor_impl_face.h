@@ -331,9 +331,10 @@ EditCode Editor<C>::split_face(FaceRef f, VertRef a, VertRef b, FaceRef *other, 
   if (surfaced(f)) {
     return pr.fail(EditCode::SurfacedFace, ElemKind::Face, f.i);
   }
-  /* the shared split core (editor_impl_imprint.h) with a new chord a -> b */
+  /* the shared split core (editor_impl_split.h) with a new chord a -> b */
   const uint32_t ab[2] = {a.i, b.i};
-  const EditCode c = split_core(f, {}, std::span<const uint32_t>(ab, 2), true, other, chord);
+  const CutPiece piece{{}, ab};
+  const EditCode c = split_core(f, std::span(&piece, 1), {}, true, "split_face", other, chord);
   if (c != EditCode::Ok) {
     return pr.fail(c, rep_.kind, rep_.index, rep_.detail);
   }

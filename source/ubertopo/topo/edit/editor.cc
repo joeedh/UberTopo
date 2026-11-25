@@ -8,6 +8,7 @@
 #include "ubertopo/topo/edit/editor_impl_cycles.h"
 #include "ubertopo/topo/edit/editor_impl_face.h"
 #include "ubertopo/topo/edit/editor_impl_imprint.h"
+#include "ubertopo/topo/edit/editor_impl_split.h"
 #include "ubertopo/topo/edit/editor_impl_unimprint.h"
 #include "ubertopo/topo/edit/editor_impl_weld.h"
 #include "ubertopo/topo/edit/editor_impl_txn.h"
