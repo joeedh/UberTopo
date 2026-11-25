@@ -53,9 +53,15 @@ add_library(ubertopo_topo STATIC
 )
 target_link_libraries(ubertopo_topo PUBLIC ubertopo_curves ubertopo_geom ubertopo_ident attr util)
 
-# csg/: exact Booleans from a CSG tree (header-only so far).
-add_library(ubertopo_csg INTERFACE)
-target_link_libraries(ubertopo_csg INTERFACE ubertopo_topo)
+# csg/: exact Booleans from a CSG tree.
+add_library(ubertopo_csg STATIC
+  csg/arrangement.cc
+  csg/input.cc
+  csg/label.cc
+  csg/pairs.cc
+  csg/subdivide.cc
+)
+target_link_libraries(ubertopo_csg PUBLIC ubertopo_topo)
 
 if (BUILD_TESTING)
   add_subdirectory(tests)
