@@ -1,6 +1,6 @@
 # Plan: exact Booleans with a CSG tree (P5)
 
-Status: **v2**, after a fresh-context review (§9). Not implemented.
+Status: **v3**, after two reviews (§9). S1 implemented.
 
 Phase P5 of [06](../design/core-data-model/06-modules-litestl-and-phasing.md). Background:
 [booleans-and-operations](../research/cad-kernels/booleans-and-operations.md) §1,
@@ -70,7 +70,12 @@ class CsgTree {                           // a value; topo/ and geom/ types only
   - *void*: the unbounded region.
 - **Default names** are `derive(leaf, region)`, so two leaves of one snapshot have
   different labels. The caller can give equal names to make parts fuse.
-- **Name → (leaf, region)** is kept, so that region attributes can be copied.
+- **Name → (leaf, region)** is kept, so that region attributes can be copied. A name equal to
+  `unbounded_region_id()` is refused.
+- **Thin content** of a leaf: the faces whose two sides are empty in it (one-face walls), or
+  the same region (sheets, apertures). Only a leaf with `thin = true` contributes it.
+  Without it an air leaf only names a room, and has no faces in the result. Two solid
+  regions with one name fuse: the face between them is not thin content.
 
 ### 2.3 Meaning
 
@@ -80,20 +85,22 @@ A leaf is a function from points to labels. Operations combine the labels at eac
 | Op | Result |
 |---|---|
 | `Union(c1..cn)` | the first solid label in child order; else the first air; else void |
-| `Intersection(c1..cn)` | c1's, if all are solid, else empty (c1's air, if it has one) |
+| `Intersection(c1..cn)` | if all others are solid, c1's label (solid or air); else void |
 | `Difference(c1, c2..cn)` | c1's, if no other is solid, else void |
 
 - **Faces of the result:**
   1. where the solid label changes. Air and void are the same for this, so there is no
      face across an opening;
-  2. *thin content:* a source face of leaf L where L is *present* on both sides. This is
-     how one-face walls, sheets and aperture faces survive.
+  2. thin content of a leaf L, where L is *present* on at least one side.
 - **L is present in a cell** if at each operation on its path to the root:
   - Union: no sibling is solid there;
   - Intersection: every sibling is solid there;
   - Difference: L is under the first child, and no other child is solid there.
 
-  So a cutter removes thin walls inside it and leaves no faces of its own in the air.
+  So a cutter removes the thin walls inside it, and leaves those it only touches. Walls
+  between two abutting cutters go.
+- **Air never beats solid.** A thin-walled house in solid soil is erased by `Union`; it
+  needs `Difference(soil, house)` first, with the house as solid.
 - **Child order** is priority where operands overlap. The solid set doesn't depend on it.
 - The tree is evaluated **at once**: one arrangement of all the leaves' faces, a vector of
   labels per cell, one expression per cell. There are no intermediate solids.
@@ -111,7 +118,7 @@ A leaf is a function from points to labels. Operations combine the labels at eac
 
 ## 3. Exact geometry
 
-All within the Boolean engine (`source/ubertopo/boolean/`), on litestl's `WideInt`
+All within the Boolean engine (`source/ubertopo/csg/`), on litestl's `WideInt`
 (wrapping, so only final values must fit). |coordinate| <= 2^26 after moving the operands'
 common box to the origin (`OutOfRange` if it is larger). Bounds are analytic; the review
 ran 1.2·10^5 random and extreme inputs against them:
@@ -224,24 +231,36 @@ A facet has, for each leaf, a region on each of its sides.
 - **Kept facets** are those of §2.3.
 - **The source** of a facet with several: the leaf that provides the solid label (on either
   side; if both sides have one, the first in tree order), if it has a face here; else the
-  first leaf in tree order that has one.
-- **Merging.** Kept facets with the same source face, plane and labels that meet in an edge
-  with no other kept facet are joined, and slits that nothing else uses disappear. Facets
-  in different planes (triangles of a projected face) are never joined. A projected source
-  face with all its facets kept, unchanged and uncut is put out as it was.
+  first leaf in tree order whose region change here changes the result; else the first
+  that has a face here.
+- **Merging.** Kept facets with the same source face, plane and solid labels that meet in an
+  edge with no other kept facet are joined. Then slits and isolated points that no kept
+  facet or thin content uses are dropped, then collinear points, then §4.5's legality test
+  runs. Facets in different planes (triangles of a projected face) are never joined.
+- **A projected source face** whose facets are all kept, with no edge gaining a vertex, is
+  put out as it was if the CDT of its placed, rounded points is the same triangulation.
+  Otherwise its triangles are put out. So it never changes shape by more than rounding.
 - **Collinear points** with the same facets on both sides are removed, unless they are
   vertices of a source face of those facets.
 - **Faces the complex can't hold.** Loops of a face must be simple and disjoint, no edge may
   be used twice by a face, and nothing may touch its interior. A merged face with a pinch,
   touching loops, a slit or an isolated point is cut along diagonals:
-  - candidate diagonals between its points are tried in lexicographic order of their ends,
-    and taken if they lie inside and cross nothing, until the pieces are triangles;
+  - candidate diagonals from the offending points first, then from the others if needed, are
+    tried in lexicographic order of their ends, and taken if they lie inside and meet
+    nothing else, until every piece is legal;
   - they are then removed again, in reverse order, wherever the joined piece is legal.
+
+  Triangles are legal, so this ends.
 
 ### 4.6 Names
 
 Tags `BoolVertex`, `BoolFace` and `BoolRegion` (new `DomainTag`s), each with a kind field.
-Only elements of kept facets take part.
+A name is made of the source elements that meet there:
+
+- the source faces and edges of the kept facets at that point;
+- if these don't fix a point (a door's corner in a thin wall, where every face of the
+  cutter is dropped): for each kept edge there, the first leaf in tree order with a facet
+  across it (not in the kept facets' planes).
 
 | Element | Name |
 |---|---|
@@ -249,25 +268,32 @@ Only elements of kept facets take part.
 | Vertex of two crossing edges | (leaf, edge, leaf', edge'), in tree order |
 | Vertex where an edge crosses a face | (leaf, edge, leaf', face') |
 | Vertex of three faces | the three, in tree order (the first three, if more meet there) |
-| Several vertices with one name | plus the ordinal along the line or edge they share |
+| Several vertices with one name | plus the ordinal in lexicographic order, in the object's frame |
 | Face, primary piece of its source | (leaf, face) |
 | Face, other piece | (leaf, face, anchor) |
 | Edge, loop | `edge_id`, `loop_id`, as everywhere |
-| Solid region | hint = its label's name |
-| Air region (bounded) | hint = the first air name in tree order inside it, else none |
+| Solid region, primary component of its label | hint = its label's name |
+| Air region (bounded) | hint = the first air name in tree order on a kept side of it, else none |
+| Other components of one solid or air name | hint = `derive(BoolRegion, name, anchor)`, the anchor being its smallest face name |
 
-- **The anchor of a piece** is the smallest (by ID) of the source face's own vertices on
-  its boundary. If another piece has that vertex too, or if there is none, it is the
-  smallest coedge (start name, end name), of those from that vertex, or of those on source
-  edges, or of all. Two pieces never share a coedge.
-- **The primary piece** is the one with the smallest surviving own vertex of the source. So a
-  window, a door or a trimmed corner doesn't rename a wall that stays in one piece, and the
-  larger part of a wall cut in two often keeps its name.
+- **A diagonal of T(f)** of a projected source counts as an edge, named by its two source
+  vertices.
+- **The anchor of a piece:** its smallest own vertex (a vertex of the source face, by ID), if no
+  other piece has it; else its smallest coedge key (start vertex name, carrier), of those
+  from that vertex, or of those on source edges, or of all. The carrier is the source edge
+  or the cutting (leaf', face'), so adding a vertex further along changes nothing.
+- **The primary piece** is the one with the smallest own vertex, then the smallest coedge
+  key. There is always exactly one. So a window, a door or a trimmed corner doesn't rename a
+  wall that stays in one piece, and one part of a wall cut in two keeps its name.
 - **Not stable:**
-  - a cut that separates the anchor vertex from the rest gives the name to the piece with
+  - a cut that separates the primary vertex from the rest gives the name to the piece with
     that vertex, however small;
   - if a split face loses its smallest vertex, the primary name moves to another piece;
+  - a piece whose anchor vertex becomes shared with another piece changes to its coedge
+    form;
   - pieces without own vertices are named by their cutters;
+  - diagonals: a new contact can change how an illegal face is cut up;
+  - components of one label, and a room that is joined to the outside;
   - holes' loop IDs (ordinals);
   - which leaf is first at a coincidence, when the tree order changes.
 
@@ -276,26 +302,37 @@ Only elements of kept facets take part.
 - **Uniqueness is checked** at the end. A collision takes an ordinal by position and is
   counted in the report.
 - **Regions** are named in a second pass: build, `build_regions`, then set the hints of
-  each region's sides, then again. Region 0 gets none.
+  each region's sides (unique, so `region_id_from_hint` applies), then again. Region 0
+  gets none.
 
 ### 4.7 Rounding and output
 
 - **Output:** a `Complex<Lattice>` built by `Builder`, with regions, in a given frame:
-  `RigidPlacement` (a rotation as a `double` matrix, and a translation) and quantum. Each
-  point is placed and rounded once, half up. With the identity and the operands' quantum,
-  integer points are unchanged.
+  `RigidPlacement` (a rotation as a `double` matrix, and a translation in quanta of the
+  output) and quantum. Each point is placed and rounded once, half up. With the identity and
+  the operands' quantum, integer points are unchanged.
+- **Exactly:** the matrix is converted once to integers of 2^-62, and the translation to a
+  fixed fraction. Then each coordinate is a floor of a quotient of integers (2^257, so 512
+  bits), found like §3's keys. In `double` the result would depend on the point's
+  representation (42.8% of points differ in the last bit; review, run). A matrix that isn't
+  orthonormal to 2^-40, or has a negative determinant, is refused (`BadPlacement`).
 - **The topology is fixed before rounding,** so flush faces share their edges and stay
   closed whatever the rotation.
 - **Faces that stop being planar** are stored as projected faces (P2 A1): exact
   piecewise-linear surfaces with the same boundary as their neighbours. A face none of
   whose edges gains a vertex, in an unrotated result, keeps its vertices and stays planar.
-  Inside one projected face, T(f) differs from the exact face by less than a quantum or so.
-- **What can go wrong:** points that round to one position; slivers that round to a line;
-  loops that cross after rounding (`NotProjectable`); faces that cross. All are found by
-  the builder and by `validate(Global)`.
-- **Then:** `RoundingFailed`, naming the faces. `evaluate` retries at a finer output quantum
-  if the caller allows it (`max_quantum_shift`; a 100 m building has some 6 bits to spare
-  at 2^-13 m).
+  After a rotation almost every wall with an opening is projected: wires are refused on it,
+  and it isn't exactly flush with separately evaluated objects any more.
+- **Checked after rounding,** besides `validate(Global)`: the radial cycles equal the exact
+  ones, and every region's sides carry one solid label. Without this a sliver turned inside
+  out would swap regions silently.
+- **What can go wrong:** points that round to one position; slivers that round to a line or
+  turn over; loops that cross after rounding (`NotProjectable`); faces that cross; points
+  outside the output's range.
+- **Then:** `RoundingFailed` (or `OutOfRange`), naming the faces. `evaluate` retries at a finer
+  output quantum if the caller allows it (`max_quantum_shift`; a 100 m building has some 6
+  bits to spare at 2^-13 m). The output then has another quantum than its neighbours in the
+  tile.
 - **Repair** (collapsing, or repeating the arrangement on the rounded facets) is
   OI-BOOL-2. It is planned only if S2c's numbers ask for it.
 
@@ -309,7 +346,7 @@ BoolCode evaluate(const CsgTree &, const BoolOptions &, topo::Complex<Lattice> &
   faces, names with ordinals, quantum used); provenance of each output face: leaf, source
   face, reversed or not; label name → (leaf, region).
 - **Codes:** `Ok`, `EmptyTree`, `DuplicateId`, `BadOperand`, `UnsupportedOperand`,
-  `MixedFrames`, `OutOfRange`, `RoundingFailed`, `Inconsistent`.
+  `MixedFrames`, `BadPlacement`, `OutOfRange`, `RoundingFailed`, `Inconsistent`.
 - **All or nothing:** a failed evaluation doesn't touch `out`.
 - **Attributes** (S4): face, face-side and region columns, copied from the source with
   `AttrGroup::mix_from` and `PropagationRules` (`Split`). Columns are created in the output
@@ -328,13 +365,16 @@ BoolCode evaluate(const CsgTree &, const BoolOptions &, topo::Complex<Lattice> &
   independent evaluation of the tree, must equal the label of the arrangement's cell, found
   by a second ray on the facets. It shares no code with §4.2–4.5. On the rounded output,
   points more than 2 quanta from every face, with `locate` by rays.
+- **Thin content:** random short segments across source faces. One must cross an output face
+  exactly when an independent evaluation of §2.3's two rules says so. (The oracle above
+  can't see sheets.)
 - **Volume identities,** exactly, as residues modulo a 61-bit prime:
   |A∪B| + |A∩B| = |A| + |B|; |A−B| + |A∩B| = |A|; per label, the sum over the cells.
 - **Structure:** every evaluated arrangement is closed around edges; the output is valid
   (`Global`) and `build_regions` finds the labels.
 - **Invariance of the arrangement** (exact points, before rounding): signed permutations and
   translations; nesting (A∪B)∪C = A∪(B∪C), IDs and bytes included; (A−B)−C = A−(B∪C) and
-  De Morgan inside a box, as sets; child order of commutative operations, as sets.
+  De Morgan inside a box, as solid sets; child order of commutative operations, as sets.
 - **Locality:** adding a leaf far away that adds no faces and shares no label changes
   nothing, byte for byte. One that adds faces leaves all other IDs alone.
 - **ID stability:** edit one window of a wall with many; a full-height door; trim a corner;
@@ -352,7 +392,7 @@ BoolCode evaluate(const CsgTree &, const BoolOptions &, topo::Complex<Lattice> &
 
 ## 7. Work items
 
-Each is a commit with a green gate. Files under `source/ubertopo/boolean/`, one per
+Each is a commit with a green gate. Files under `source/ubertopo/csg/`, one per
 section of §3 and §4, below 40 KB each.
 
 - **S1 — exact numbers.** `exact.h`, `points.h`: planes, points, tables, classify,
@@ -361,15 +401,16 @@ section of §3 and §4, below 40 KB each.
   checks.
 - **S2b — labels, selection** (§4.4, §2.3) on a plain expression; membership and volume
   oracles.
-- **S2c — merging, rounding, `Builder`** (§4.5, §4.7), with placeholder IDs. Then measured,
-  on random operands and the named fixtures, at 1 mm and 2^-13 m, unrotated and rotated:
-  points that fall together, faces that become non-planar, results that are invalid, and
-  how many a finer quantum saves. **Decision,** recorded here and in `decisions.md`:
+- **S2c — merging, diagonals, rounding, `Builder`** (§4.5, §4.7), with placeholder IDs. Then
+  measured on random operands and the named fixtures, at 1 mm and 2^-13 m, unrotated, rotated
+  about the vertical and freely: points that fall together, faces that become non-planar,
+  results that are invalid, per 1000 evaluations and per 1000 result faces, at quantum shifts
+  0 to 4. **Decision,** recorded here and in `decisions.md`:
   - OI-1;
-  - repair is needed if more than 1 in 1000 of the fixtures' rotated variants fail at
-    2^-13 m with `max_quantum_shift` = 4, or if any unrotated one does.
+  - repair is needed if any unrotated fixture fails at shift 0, or if more than 1 in 1000 of
+    at least 3000 rotated evaluations fails at 2^-13 m with shift 4.
 - **S3 — the tree:** `CsgTree`, its edits, hash and serialisation; `evaluate`; `csg_diff`.
-- **S4 — names** (§4.6), diagonals, regions, provenance, attributes; stability tests.
+- **S4 — names** (§4.6), regions, provenance, attributes; stability tests.
 - **S5 — speed:** filters, grid or BVH for pairs and rays, threads; `bench_boolean`.
 - **S6 — docs:** 02 §5, 06 P5, a new 08 for the engine, DEC-022, index.
 
@@ -408,3 +449,14 @@ section of §3 and §4, below 40 KB each.
   snapshots; det −1; cache key; tags; attributes; box culling; file layout; DEC number.
 - **Not adopted:** plane-defined operands as the base (its option 2): OI-BOOL-6. It would
   change how generators emit geometry; modelling in the object's frame covers most cases.
+
+### Second pass (same reviewer, on the new parts of v2)
+
+- **Blockers, adopted:** no name for a door's corner in a thin wall (N1, §4.6); projected
+  operands re-triangulated under a rotation (N2, §4.5).
+- **Major, adopted:** presence on one side (N3); thin content is opt-in (N4) and excludes
+  partitions between equal names (N5); Intersection and air (N6); an oracle for thin content
+  (N7); the primary piece always exists (N8); coedge keys by carrier (N9); diagonals as edges
+  (N10); unique region hints (N11); exact placement (N12); checks after rounding (N13);
+  diagonals in S2c (N14); the threshold (N15).
+- **Minor, adopted:** all.
