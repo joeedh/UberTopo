@@ -620,7 +620,7 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
   `{0x09421988ba58a022, 0x96f79940201fa554}`. The P0–P2 and P1b goldens are unchanged.
 - **Deferred to P3b:**
   - compaction and a generation floor (the DEC-014 limit stands);
-  - `imprint`, `add_hole`, `merge_vertices`, `connect_loops`;
+  - `imprint`, `add_hole`, `merge_vertices`, `connect_loops` (DEC-021);
   - incremental region maintenance (OI-P3-1);
   - container hints outvoted by a region merge (OI-P3-2);
   - wire–face crossing checks.
@@ -821,6 +821,28 @@ template <ExactPredicates Coord> struct Complex { /* SoA domains, positions: Vec
   - OI-P4b-5: skeleton_tol is in frame units, so `Lattice` generators must set it;
   - OI-P4b-6: no inversion queries;
   - OI-P4b-7: a planar face's curved carriers aren't checked against its plane.
+
+---
+
+## DEC-021 — `connect_loops`: a cut through holes is one primitive
+
+- **Date:** 2026-11-24. Plan:
+  [2026-11-24-connect-loops.md](plans/2026-11-24-connect-loops.md). (DEC-020 is the BVH
+  plan's.)
+- **Changed from design 01 §7.** That listed an edge from a hole to the outer loop, with
+  one face on both sides, to be used only transiently. The validator, the radial order and
+  the skeleton all rule that out, and nothing needs it. Instead
+  `connect_loops(f, path)` makes the whole cut at once, so the complex is valid before and
+  after.
+- **`disconnect_loops(e)`** joins faces that share several separate edges, from any of
+  them. `join_faces` keeps its one-edge case and `unimprint` its chain case.
+- **Two fixes came with it:**
+  - an embedded wire beside a cut is placed by the loops its ends are on, so the answer no
+    longer depends on the cut's direction;
+  - `unimprint` finds a face's outer loop geometrically rather than taking its first
+    loop, and `remove_hole` can remove a hole that comes first.
+- **Open:** OI-CL-1 to OI-CL-3 (plan §6): cuts between holes only, cuts along wires or
+  curves, and surfaced faces.
 
 ---
 

@@ -1,6 +1,6 @@
 # Plan: connect_loops and disconnect_loops
 
-Status: **v2**, after a fresh-context review (§8). Not implemented.
+Status: **implemented** (v2, after a fresh-context review, §8; notes in §9).
 
 ## 1. Why, and what it becomes
 
@@ -208,3 +208,30 @@ and changes nothing in `split_core`.
      refusal list; rings of arcs in tilted planes; starting points and allocation order; a
      split chord; a chord output; tests and mutations; file sizes; docs.
 - **Not verified by it:** k > 1, curved and projected cuts.
+
+## 9. Implementation notes (2026-11-25)
+
+- **Files:** `editor_impl_split.h` (the core), `editor_impl_connect.h` (both primitives).
+  Tests: `test_edit_connect.cc` (W0), `test_edit_connect_loops.cc`,
+  `test_edit_connect_geom.cc` (projected and curved), `test_edit_connect_random.cc`.
+- **W1 A/B:** a trace of every primitive (code, report, allocation log, content hash)
+  before and after the move: 1,503 split and imprint calls in nine tests, 882 of them
+  refused, the same.
+- **Changed in §4:** the cycle that takes the survivor's row is always the one
+  `outer_loop_proj` picks, also for a strip across a hole, where every cycle is a hole.
+- **The tilted arc ring** of §5 isn't tested: `alignment3` carriers can't express an arc in
+  a tilted plane.
+- **Random test:** 100 seeds, 798 cuts (68 through two or three holes) and 489 joins, no
+  failure. 12 seeds run in CI.
+- **Mutations:** 89 of the two primitives and the core. They found gaps in the tests:
+  - holes were all convex, so the arcs of cut holes could be left out of the side test
+    (now: U-shaped holes with a hole in the notch);
+  - radial order of projected faces and the first coedge of a cycle weren't checked;
+  - an edge elsewhere with a chord's ID, coplanarity across collinear chords, a shared
+    vertex between chords, an outer arc that bulges past a hole.
+
+  Three checks turned out redundant and were removed. What survives is equivalent: the arc
+  points of the left child in the degeneracy test; the two-coedge count (repeated later);
+  one face on both sides of an edge (invalid before); shared edges on other loops (the
+  cycle count refuses them); the survivor's order (radial cycles start at the smaller ID);
+  `fix_projection` after a join; the survivor's own lineage record.

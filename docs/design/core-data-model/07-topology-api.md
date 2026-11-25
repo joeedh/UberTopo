@@ -437,7 +437,7 @@ allocation sequence therefore depends only on `.live`, both in memory and after
 `read` / `permute`.
 
 **Not in P3a:**
-- `connect_loops`, `add_hole`, `imprint`, `merge_vertices`;
+- `add_hole`, `imprint`, `merge_vertices` (§15), `connect_loops` (§15.1);
 - compaction and the generation floor;
 - incremental regions;
 - wire–face crossing checks (a gap the P2 validator has too).
@@ -487,6 +487,7 @@ and both are redone by running them again.
     container, else the region container (conflicts are refused).
 - `make_edge(a, b, id, &e, in)` can create the wire already embedded. A wire lying in a
   face must be made that way, or the validator reports `WireCrossesFace`.
+- `connect_loops(f, path)` and `disconnect_loops(e)`: §15.1.
 - New codes: `ChainNotSimple`, `NotEmbedded`, `HoleInside` (OI-P3b-1: cycles around
   existing holes are refused), `EdgeShared`, `Coincident`.
 
@@ -521,6 +522,33 @@ and both are redone by running them again.
 **Redo** never validates. `EditorOptions::verify_redo` (on by default in debug builds)
 compares the content hash stored at commit and fails with `JournalStale` on a
 mismatch.
+
+### 15.1 Cuts through holes
+
+Plan [2026-11-24-connect-loops.md](../../plans/2026-11-24-connect-loops.md); DEC-021.
+
+- **`connect_loops(f, path)`** splits `f` along chords that run through its holes.
+  - **The path:** a vertex of the outer loop, then two vertices of each hole the cut meets
+    (where it enters and where it leaves), then another vertex of the outer loop.
+  - **The result:** one chord per gap. Each cut hole's loop is shared out between the two
+    children's outer loops, and its row is freed. Other holes and inclusions go to the
+    child that contains them.
+  - **IDs and slots:** `derive(f, "connect_loops", 0 | 1)`. The child with the chord
+    coedges in the path's direction keeps `f`'s slot.
+  - **Refusals:** `BadArgument`, `SurfacedFace`, `NotInLoop`, `NotOuterLoop` (an end on a
+    hole, or a middle on the outer loop), `ChainNotSimple` (a hole entered and left at one
+    vertex, or on two holes, or cut twice), `EdgeExists`, `HoleOnChord`,
+    `InclusionOnChord`, `DegenerateLoop`. Crossing chords are `Invalid`.
+- **`disconnect_loops(e)`** joins two faces that share m >= 2 separate edges, from any of
+  those edges, and removes them.
+  - The two loops become m: the new outer loop first, then the holes.
+  - It also joins a strip across a hole to the face around it.
+  - Refused with `NotJoinable`: shared edges that meet (`unimprint`'s case), one shared
+    edge (`join_faces`' case), a third face on a shared edge, a shared vertex elsewhere,
+    or a union that isn't planar.
+  - Not an exact inverse: IDs differ. Undo is exact.
+- **Both are in `edit/editor_impl_connect.h`.** The cut itself is
+  `split_core` (`edit/editor_impl_split.h`), shared with `split_face` and `imprint`.
 
 ## 16. Curves and the geometry store (P4a)
 

@@ -247,7 +247,7 @@ records ([04 §6](04-identity-versions-journal.md#6-journal)).
 | `make_face(loops, surface, regions)` | `kill_face` | Face from existing edges, inserting coedges into radial cycles in order |
 | `split_edge(e, t)` → `v` | `join_edge(v)` | Edge split at a parameter value. Coedges split along with it |
 | `split_face(f, c_a, c_b, curve)` → `e` | `join_faces(e)` | Chord between two vertices of one loop |
-| `connect_loops(f, c_outer, c_hole)` | `disconnect_loops` | Used **only** inside operators that need it transiently, never left in stable output (no bridge edges) |
+| `connect_loops(f, path)` | `disconnect_loops(e)` | Splits a face along chords that run through one or more of its holes (DEC-021) |
 | `add_hole(f, loop)` | `remove_hole` | Attach an existing loop as a hole |
 | `embed(v\|e, container)` | `unembed` | Set the inclusion container |
 | `imprint(f, e_included)` | `unimprint` | Turn an included edge into loop topology, splitting the face if it separates it |
@@ -270,8 +270,9 @@ records ([04 §6](04-identity-versions-journal.md#6-journal)).
   [2026-11-23](../../plans/2026-11-23-region-maintenance.md)).
 - **P3b added** `imprint` / `unimprint`, `add_hole` / `remove_hole` and `weld` (which
   merges vertex pairs; the `merge_vertices` above) — see
-  [07 §15](07-topology-api.md#15-editing-additions-p3b). `connect_loops` is still to
-  come.
+  [07 §15](07-topology-api.md#15-editing-additions-p3b).
+- **`connect_loops` / `disconnect_loops`** came later, in a changed form (DEC-021): the
+  whole cut is one primitive, and no bridge edge exists at any time.
 
 **Booleans** are *not* primitives. They are arrangement-and-select passes (merge every
 operand into one arrangement, compute the cells, select by membership). Spike 1 covers
