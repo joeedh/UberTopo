@@ -54,6 +54,32 @@ removed afterwards.
   every column 0.08 ms; testing every page for equality by identity 0.01 ms; one scan of
   all coedges 1.0 ms.
 
+### 2.1 Baselines (W0, 2026-11-24)
+
+`bench_regions` after W0, before W1; ms. One run on a shared machine; a second run slowed
+down by 2.5× partway through, so comparisons are made with old and new binaries run
+alternately.
+
+| model | faces | shells | full build | edit | barrier `Local` | barrier `None` |
+|---|---|---|---|---|---|---|
+| city | 111 636 | 31 753 | 78 | interior wall split | 98 | 80 |
+| | | | | exterior wall split | 96 | 86 |
+| | | | | wall removed | 128 | 99 |
+| | | | | vertex moved | 107 | 83 |
+| sensors | 111 636 | 31 753 | 83 | interior wall split | 150 | 82 |
+| | | | | wall removed | 143 | 82 |
+| terrain | 102 400 | 1 | 142 | face split | 155 | 133 |
+| | | | | vertex moved | 147 | 140 |
+| hall | 21 600 | 4 002 | 458 | object split | 445 | 437 |
+| | | | | hall wall split | 452 | 442 |
+
+- **Terrain** costs more per face than the city, as every face is projected and needs a
+  triangulation.
+- **Sensors:** `ContainerGeometry` on 10⁴ embedded vertices adds about 50 ms to a `Local`
+  barrier. §5 leaves it as it is; it is the largest cost that this plan doesn't touch.
+- **Hall:** 2000 cavity shells tested against a hall of 9600 faces. Nearly all of it is
+  nesting.
+
 ## 3. Finding what changed: compare with a base copy
 
 The 2026-11-23 outline tracked touched rows through `EditIndex::mark`, reset them on a
