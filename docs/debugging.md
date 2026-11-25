@@ -600,3 +600,23 @@ Entry format:
   interactive shell.
 - **Fix:** set `MSYS_NO_PATHCONV=1` for the command, and redirect stdin from `/dev/null`
   so that a mistake can't wait for input. PowerShell has no such rewriting.
+
+## A hole edit fails on one face and works on another that looks the same
+
+- **Symptom:** `unimprint` refuses an island (`NotJoinable`, "the outer loop of both
+  faces"), or `remove_hole` gives `Invalid` with `LoopFace` and `DeadReference`.
+- **Cause:** the face's loop chain starts with a hole. That is valid (the builder keeps the
+  given order, and `join_faces` can produce it), but `unimprint` took the first loop for
+  the outer one, and `drop_hole` left `.f.l` on the freed loop. Fixed 2026-11-24
+  (`test_edit_connect`).
+- **Technique:** find the outer loop with `outer_loop_proj`, never by position, and test
+  with loops given hole first.
+
+## `split_face(a, b)` is refused and `split_face(b, a)` works
+
+- **Symptom:** `InclusionOnChord` in one direction of a cut, for a wire far from it.
+- **Cause:** `split_core` placed a wire by the positions of its ends against the right
+  child. An end on the right child's own loop is on that polygon's boundary, so it was
+  refused; one on the left child's is outside, so it passed. Fixed 2026-11-24.
+- **Technique:** classify an element that shares a vertex with the boundary by that vertex,
+  not by its position. Test every cut in both directions.

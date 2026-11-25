@@ -143,7 +143,18 @@ template <geom::CoordType C> EditCode Editor<C>::unimprint(EdgeRef e, FaceRef *s
     if (loops_of(g) != 1) {
       return pr.fail(EditCode::HoleInside, ElemKind::Face, g.i, "the island has holes");
     }
-    if (k_.first_loop(f) == lh) {
+    uint32_t lh_ordinal = 0, n_loops = 0;
+    k_.for_each_loop(f, [&](LoopRef l) {
+      lh_ordinal = l == lh ? n_loops : lh_ordinal;
+      n_loops++;
+    });
+    Skeleton<C> sk(k_);
+    FacePoints<C> fp;
+    const int axis = edit_detail::face_axis<C>(k_, f);
+    if (axis < 0 || !fp.gather(k_, f, sk)) {
+      return pr.fail(EditCode::DegenerateLoop, ElemKind::Face, f.i);
+    }
+    if (geom::outer_loop_proj<C>(fp.view(), axis) == lh_ordinal) {
       return pr.fail(EditCode::NotJoinable, ElemKind::Edge, e.i, "the cycle is the outer loop of both faces");
     }
     const double af = edit_detail::face_area<C>(k_, f), ag = edit_detail::face_area<C>(k_, g);

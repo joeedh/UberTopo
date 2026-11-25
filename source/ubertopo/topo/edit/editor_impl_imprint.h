@@ -238,6 +238,17 @@ EditCode Editor<C>::split_core(FaceRef f,
   };
   /* holes and inclusions go to the child containing them */
   litestl::util::Vector<uint32_t, 8> holes_l, holes_r;
+  /* the children's loop vertices, as (vertex, bit 0: right, bit 1: left);
+   * the cut's ends are on both */
+  litestl::util::Vector<std::pair<uint32_t, uint32_t>, 32> loop_verts;
+  for (uint32_t c : p1) {
+    const uint32_t v = k_.start_vert(CoedgeRef(c)).i;
+    loop_verts.append({v, v == a.i ? 3u : 1u});
+  }
+  for (uint32_t c : p2) {
+    const uint32_t v = k_.start_vert(CoedgeRef(c)).i;
+    loop_verts.append({v, v == b.i ? 3u : 2u});
+  }
   for (int i = 0; i < loops.size(); i++) {
     if (uint32_t(i) == l_ordinal) {
       continue;
@@ -247,7 +258,36 @@ EditCode Editor<C>::split_core(FaceRef f,
       return fail_report(EditCode::HoleOnChord, ElemKind::Loop, loops[i]);
     }
     (pc == geom::PointClass::Inside ? holes_r : holes_l).append(loops[i]);
+    k_.for_each_coedge(LoopRef(loops[i]), [&](CoedgeRef c) {
+      loop_verts.append({k_.start_vert(c).i, pc == geom::PointClass::Inside ? 1u : 2u});
+    });
   }
+  std::sort(loop_verts.begin(), loop_verts.end());
+  /* the children a wire can be in by one of its ends: a vertex of f's loops
+   * by its loop, any other by its position (none: on the cut) */
+  auto end_sides = [&](VertRef v) -> uint32_t {
+    const auto it = std::lower_bound(loop_verts.begin(), loop_verts.end(), std::pair<uint32_t, uint32_t>(v.i, 0u));
+    if (it != loop_verts.end() && (*it).first == v.i) {
+      return (*it).second;
+    }
+    const geom::PointClass pc = side_of(k_.pos(v));
+    return pc == geom::PointClass::Inside ? 1u : pc == geom::PointClass::Outside ? 2u : 0u;
+  };
+  /* a point of the wire between its ends: a skeleton point, or the midpoint,
+   * exactly */
+  auto middle_side = [&](EdgeRef e) {
+    const auto in = sk.interior(e);
+    if (in.size() > 0) {
+      return side_of(sk.pos(in[in.size() / 2]));
+    }
+    litestl::util::Vector<Point, 32> twice;
+    for (const Point &p : right_pts) {
+      twice.append(Point{p[0] + p[0], p[1] + p[1], p[2] + p[2]});
+    }
+    const auto evs = k_.edge_verts(e);
+    const Point &p = k_.pos(evs[0]), &q = k_.pos(evs[1]);
+    return geom::point_in_poly_proj<C>(Point{p[0] + q[0], p[1] + q[1], p[2] + q[2]}, view(twice, right_off), axis);
+  };
   /* the chain's own elements are not inclusions of either child */
   litestl::util::Vector<uint32_t, 32> chain_packed;
   for (uint32_t e : chain_e) {
@@ -265,11 +305,13 @@ EditCode Editor<C>::split_core(FaceRef f,
     }
     geom::PointClass pc;
     if (x & 1) {
-      const auto evs = k_.edge_verts(EdgeRef(x >> 1));
-      pc = side_of(k_.pos(evs[0]));
-      if (side_of(k_.pos(evs[1])) != pc) {
-        pc = geom::PointClass::Boundary;
-      }
+      const EdgeRef w(x >> 1);
+      const auto evs = k_.edge_verts(w);
+      const uint32_t sides = end_sides(evs[0]) & end_sides(evs[1]);
+      pc = sides == 3   ? middle_side(w)
+           : sides == 1 ? geom::PointClass::Inside
+           : sides == 2 ? geom::PointClass::Outside
+                        : geom::PointClass::Boundary;
     }
     else {
       pc = side_of(k_.pos(VertRef(x >> 1)));
@@ -719,6 +761,9 @@ template <geom::CoordType C> void Editor<C>::drop_hole(FaceRef f, LoopRef lh)
       keep.append(l.i);
     }
   });
+  if (k_.first_loop(f) == lh) {
+    setF<".f.l">(f, keep[0]); /* f has an outer loop too */
+  }
   for (int i = 0; i < keep.size(); i++) {
     const LoopRef l(keep[i]);
     setL<".l.next">(l, i + 1 < keep.size() ? keep[i + 1] : NONE);
