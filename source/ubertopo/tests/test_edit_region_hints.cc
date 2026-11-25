@@ -124,10 +124,18 @@ void test_votes()
     votes.clear();
     for (uint32_t i = 0; i < n; i++) {
       const PersistentId h = hid(uint32_t(r.below(distinct)));
-      votes.add(h);
-      if (ref[h]++ == 0) {
+      const uint32_t m = uint32_t(1 + r.below(3));
+      if (m == 1) {
+        votes.add(h);
+      }
+      else {
+        votes.add(h, m);
+      }
+      uint32_t &have = ref[h];
+      if (have == 0) {
         order.push_back(h);
       }
+      have += m;
     }
     PersistentId best{};
     uint32_t most = 0;

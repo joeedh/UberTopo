@@ -627,6 +627,71 @@ template <geom::CoordType C> static void test_carry_over()
   }
 }
 
+/* The columns a build writes are compared first (plan 2026-11-24 §4.5): a
+ * rebuild that changes nothing leaves them alone, and stale values, whatever
+ * they are, are replaced. */
+template <geom::CoordType C> static void test_compare_first()
+{
+  Model<C> m(root("compare-first"));
+  test::gen::random_city(m, 11, 24);
+  Complex<C> k;
+  BuildReport br;
+  RegionReport rr;
+  UT_CHECK(m.b.build(k, br, m.policy) && build_regions(k, rr));
+  const PersistentId h = test::complex_hash(k);
+  auto &fr = k.faces.template get<".f.region">();
+  auto &fs = k.faces.template get<".f.shell">();
+  auto &sn = k.faces.sides().template get<".fs.shell_next">();
+  auto &vc = k.verts.template get<".v.container">();
+  auto &ec = k.edges.template get<".e.container">();
+  const auto versions = [&] {
+    return std::array<uint64_t, 5>{fr.version(), fs.version(), sn.version(), vc.version(), ec.version()};
+  };
+  const auto v0 = versions();
+  const auto rebuild = [&] {
+    RegionReport r1;
+    return build_regions(k, r1) && test::complex_hash(k) == h;
+  };
+  UT_CHECK(rebuild() && versions() == v0);
+  /* one row of one column at a time, over all of them, then many at once */
+  uint32_t hinted[2] = {0, 0};
+  const auto &vh = k.verts.template get<".v.container_hint">();
+  const auto &eh = k.edges.template get<".e.container_hint">();
+  litestl::test::SplitMix64 r(5);
+  const auto spoil = [&](int col, uint32_t i) {
+    if (col == 0 || col == 1) {
+      auto &c = col == 0 ? fr : fs;
+      U32x2 x = c[i % k.faces.capacity()];
+      x[i & 1]++;
+      c.set(i % k.faces.capacity(), x);
+    }
+    else if (col == 2) {
+      sn.set(i % (2 * k.faces.capacity()), NONE - 1);
+    }
+    else if (col == 3 || col == 4) {
+      const uint32_t n = col == 3 ? k.verts.capacity() : k.edges.capacity();
+      for (uint32_t j = 0; j < n; j++) {
+        const uint32_t e = (i + j) % n;
+        if (!((col == 3 ? vh[e] : eh[e]) == ident::kNoId)) {
+          (col == 3 ? vc : ec).set(e, ident::ContainerRef{});
+          hinted[col - 3]++;
+          return;
+        }
+      }
+    }
+  };
+  for (int c = 0; c < 200; c++) {
+    spoil(c % 5, uint32_t(r.below(1u << 20)));
+    UT_CHECK(rebuild());
+  }
+  for (int c = 0; c < 200; c++) {
+    spoil(c % 5, uint32_t(r.below(1u << 20)));
+  }
+  UT_CHECK(!(test::complex_hash(k) == h));
+  UT_CHECK(rebuild());
+  UT_CHECK(hinted[0] > 0 && hinted[1] > 0);
+}
+
 /* Band counts: identical regions at 1/2/4/12 bands. */
 template <geom::CoordType C> static void test_bands()
 {
@@ -654,6 +719,7 @@ template <geom::CoordType C> static void run_all()
   test_bands<C>();
   test_votes_and_order<C>();
   test_carry_over<C>();
+  test_compare_first<C>();
 }
 
 int main()

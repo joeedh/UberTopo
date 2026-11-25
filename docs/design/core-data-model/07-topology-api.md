@@ -250,7 +250,9 @@ system on the link graph:
 
 `build_regions(k, report)` is all-or-nothing. On success it writes `.f.region`,
 `.f.shell`, the face-side chains, the shells and regions, and the resolved containers,
-and it clears `regions_dirty`.
+and it clears `regions_dirty`. The engine is `RegionBuilder` in `topo/regions/`. Face,
+side and container columns are compared first, so a rebuild that changes nothing leaves
+their pages and versions alone.
 
 1. **Shells.** Union-find over wedges. A sheet boundary (a radial cycle of one coedge)
    joins both sides of its face with no special case. Shells are indexed by their

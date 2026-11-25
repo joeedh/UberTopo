@@ -1,6 +1,7 @@
 # Plan: incremental region maintenance (Stage B of OI-P3-1)
 
-Status: **v2**, after a fresh-context review (§10). Not implemented.
+Status: **v2**, after a fresh-context review (§10). W0 and W1 implemented (§11); W2–W5
+are not.
 
 ## 1. Why and scope
 
@@ -467,3 +468,46 @@ sound; no counterexample to §4.3's claim on a combinatorially valid complex.
   13. **Minor:** §8 mixed three kinds of edit. Split.
 - **Simplification adopted:** naming is recomputed for all regions from per-shell
   summaries, instead of v1's per-hint lists and affected regions (§4.4).
+
+## 11. Implementation notes
+
+### 11.1 W1 (2026-11-24)
+
+- **Layout:** `topo/regions.cc` keeps the public entry point; the engine is
+  `topo/regions/region_builder.h` and its `*_impl.h` files.
+- **Nothing is kept per triangle.** A face keeps its volume subtotal, its box and whether
+  it triangulated. Nesting triangulates an outer shell again, once per build, if some
+  other shell lies in its box.
+- **The region's smallest side** is the label of its first shell, as shells are in label
+  order.
+- **Measured** (ms, old and new binaries run alternately three times; minimum–maximum on
+  a shared machine):
+
+| model | full build before | after | 1 band before | after | barrier `None` before | after |
+|---|---|---|---|---|---|---|
+| city | 80–86 | 41–43 | 154–174 | 64–67 | 78–120 | 45–50 |
+| sensors | 78–103 | 45–52 | 150–171 | 71–77 | 79–118 | 45–72 |
+| terrain | 142–154 | 60–61 | 225–227 | 147–151 | 142–179 | 60–72 |
+| hall | 467–478 | 345–350 | 3049–3368 | 2259–2581 | 459–593 | 325–371 |
+
+  - The city's full build was estimated at 60–65 ms (§8).
+  - The `Local` barrier on the city went from 103–160 to 63–74 ms. The checks are W4.
+- **Compared with the old builder.** A temporary hook ran both on every build of the test
+  suite (all builds at the caller's band count, then 1, 2, 4 and 12), comparing the whole complex and
+  the report: no difference in clang-cl Release and MSVC ASan. A planted difference was
+  caught in both. The tests added since then were compared in clang-cl Release.
+- **Tests:** `test_region_nesting.cc` (new), `test_compare_first` in `test_topo_regions`,
+  `test_bulge_nesting` in `test_face_skeleton`, counted votes in
+  `test_edit_region_hints`. Before, no test reached `DegenerateShell`, `TouchingShell` or
+  `NoTestPoint`.
+- **Mutations:** 46; 40 killed, 5 survive (a sixth was dead code):
+  - dropping `abs_sum` or `terms` from a shell's sum: for a fine triangulation
+    `4u·perm_sum` is already larger than `2n·u·abs_sum`, and no failing input was found.
+    Both stay, as the proof in §4.2 needs them;
+  - leaving the stored vertices out of a face's box: the triangles cover them whenever
+    the face's points can be gathered;
+  - duplicates in a shell's vertex list: the binary search doesn't mind them;
+  - ignoring `NestingDegenerate`: no input is known for which every ray direction is
+    degenerate.
+- The sixth survivor, now removed: skipping B's faces when looking for an
+  interior point of A. A candidate B shares no face with A.

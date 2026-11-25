@@ -376,6 +376,59 @@ template <geom::CoordType C> void test_bulge_box()
   UT_CHECK(has_issue(ed.report().validation, ValidateCode::WireCrossesFace, ident::ElemKind::Edge));
 }
 
+/* a shell's box covers its skeleton: a room with a bulging wall (arcs on its
+ * floor and roof edges), and a block in the bulge, outside the box of the
+ * room's vertices */
+template <geom::CoordType C> void test_bulge_nesting()
+{
+  Complex<C> k;
+  Builder<C> b;
+  uint32_t n = 0;
+  const auto block = [&](double x0, double y0, double z0, double x1, double y1, double z1, double skew) {
+    uint32_t v[8];
+    for (int i = 0; i < 8; i++) {
+      /* the skewed corner makes the -y wall non-planar, so projected */
+      const double y = (i & 2) ? y1 : (i == 5 ? y0 - skew : y0);
+      v[i] = b.vertex(test::pid(9000 + n++), test::fpt<C>((i & 1) ? x1 : x0, y, (i & 4) ? z1 : z0));
+    }
+    const uint32_t q[6][4] = {{0, 2, 3, 1}, {4, 5, 7, 6}, {0, 1, 5, 4}, {2, 6, 7, 3}, {0, 4, 6, 2}, {1, 3, 7, 5}};
+    for (const auto &f : q) {
+      b.face(test::pid(9500 + n++), {{v[f[0]], v[f[1]], v[f[2]], v[f[3]]}});
+    }
+  };
+  block(600, 0, 500, 900, 300, 700, 4);
+  block(730, -70, 580, 770, -40, 620, 0);
+  BuildPolicy pol;
+  pol.allow_projectable_faces = true;
+  BuildReport br;
+  UT_CHECK(b.build(k, br, pol) && br.projected_faces == 1);
+  Journal<C> j;
+  EditorOptions opt;
+  opt.validate = ValidateMode::None;
+  Editor<C> ed(k, &j, nullptr, opt);
+  uint32_t arcs = 0;
+  for (uint32_t e = 0; e < k.edges.capacity(); e++) {
+    const auto vs = k.edge_verts(EdgeRef(e));
+    const auto p = geom::to_double3<C>(k.pos(vs[0])), q = geom::to_double3<C>(k.pos(vs[1]));
+    if (p[0] == 600 && q[0] == 900 && p[1] < 50) {
+      EXPECT_EDIT(ed, set_arc(ed, EdgeRef(e), 1.2), EditCode::Ok); /* to y of about -100 */
+      arcs++;
+    }
+  }
+  UT_CHECK(arcs == 2);
+  EXPECT_EDIT(ed, ed.rebuild_regions(), EditCode::Ok);
+  UT_CHECK(k.regions.live_count() == 3);
+  uint32_t inner = 0;
+  k.faces.for_each_live([&](uint32_t f) {
+    const auto p = geom::to_double3<C>(k.pos(k.start_vert(k.first_coedge(k.first_loop(FaceRef(f))))));
+    if (p[0] > 700 && p[0] < 800) {
+      UT_CHECK(k.region(FaceRef(f), 0).i != 0 && k.region(FaceRef(f), 1).i != 0);
+      inner++;
+    }
+  });
+  UT_CHECK(inner == 6);
+}
+
 /* split_face assigns holes by the children's skeletons: a hole inside the
  * bulge of a curved edge goes to the child that owns that edge, whichever way
  * the chord runs */
@@ -517,6 +570,7 @@ template <geom::CoordType C> void all()
   test_reversed_range<C>();
   test_wire_chain<C>();
   test_bulge_box<C>();
+  test_bulge_nesting<C>();
   test_split_bulge<C>();
   test_d_face<C>();
   test_island_bulge<C>();

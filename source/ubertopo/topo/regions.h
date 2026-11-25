@@ -27,7 +27,10 @@
  *     hint); the same hint on two regions is a warning.
  *  6. Region columns that aren't Topo are carried over from the previous
  *     region set by persistent ID.
- *  7. Container hints (".v/.e.container_hint") resolve to region containers. */
+ *  7. Container hints (".v/.e.container_hint") resolve to region containers.
+ *
+ * The engine is topo/regions/ (RegionBuilder). It writes the face, side and
+ * container columns only where they change (plan 2026-11-24 section 4.5). */
 
 #include <cstdint>
 

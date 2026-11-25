@@ -28,17 +28,17 @@ public:
       use_map_ = false;
     }
   }
-  /** One side's hint. */
-  void add(const ident::PersistentId &h)
+  /** @p n sides' hint. */
+  void add(const ident::PersistentId &h, uint32_t n = 1)
   {
     if (!use_map_) {
       for (Vote &v : votes_) {
         if (v.h == h) {
-          v.n++;
+          v.n += n;
           return;
         }
       }
-      votes_.append({h, 1});
+      votes_.append({h, n});
       if (votes_.size() > kScan) {
         use_map_ = true;
         for (uint32_t i = 0; i < votes_.size(); i++) {
@@ -48,11 +48,11 @@ public:
       return;
     }
     if (uint32_t *p = pos_.lookup_ptr(h)) {
-      votes_[*p].n++;
+      votes_[*p].n += n;
     }
     else {
       pos_.add(h, uint32_t(votes_.size()));
-      votes_.append({h, 1});
+      votes_.append({h, n});
     }
   }
   /** The distinct hints, in the order they first voted. */
