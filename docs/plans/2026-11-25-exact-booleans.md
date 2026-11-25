@@ -1,6 +1,6 @@
 # Plan: exact Booleans with a CSG tree (P5)
 
-Status: **v3**, after two reviews (§9). S1, S2a and the labels of S2b implemented.
+Status: **v3**, after two reviews (§9). S1, S2a and S2b implemented.
 
 Phase P5 of [06](../design/core-data-model/06-modules-litestl-and-phasing.md). Background:
 [booleans-and-operations](../research/cad-kernels/booleans-and-operations.md) §1,

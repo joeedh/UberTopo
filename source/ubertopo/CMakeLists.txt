@@ -59,6 +59,7 @@ add_library(ubertopo_csg STATIC
   csg/input.cc
   csg/label.cc
   csg/pairs.cc
+  csg/select.cc
   csg/subdivide.cc
 )
 target_link_libraries(ubertopo_csg PUBLIC ubertopo_topo)
