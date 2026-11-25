@@ -118,6 +118,9 @@ enum class OpKind : uint8_t {
   /* P4b W5 */
   SetFaceSurface,  /* u: f, pool, slot, reversed, then (c, pool, slot) per listed pcurve */
   SetCoedgePcurve, /* u: c, pool, slot */
+  /* plan connect-loops */
+  ConnectLoops,    /* u: f, then the path */
+  DisconnectLoops, /* u: e */
 };
 
 /** Arguments of one operation: indices, IDs, points and raw bytes. The

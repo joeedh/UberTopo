@@ -1,42 +1,21 @@
-/* Cutting faces through their holes, and what decides where a cut's holes
- * and inclusions go (plan 2026-11-24-connect-loops). */
-
-#include <algorithm>
-#include <vector>
+/* What decides where a cut's holes and inclusions go, and which of a face's
+ * loops is the outer one (plan 2026-11-24-connect-loops). */
 
 #include "litestl/util/alloc.h"
-#include "support/edit_fixture.h"
+#include "support/cut_fixture.h"
 
 using namespace ubertopo;
 using namespace ubertopo::topo;
 using ident::PersistentId;
+using test::contained_in;
 using test::Fixture;
 using test::I3;
+using test::Loops;
 using test::pid;
 using test::pt;
+using test::sheet;
 
 namespace {
-
-using Loops = std::vector<std::vector<I3>>;
-
-/* a sheet in the air, with regions */
-template <geom::CoordType C> bool sheet(Fixture<C> &fx, const Loops &loops, const Loops &fill = {})
-{
-  test::GridBuilder<C> g;
-  g.face(loops);
-  for (const auto &l : fill) {
-    g.face({l});
-  }
-  BuildReport br;
-  RegionReport rr;
-  return g.b.build(fx.k, br) && build_regions(fx.k, rr);
-}
-
-template <geom::CoordType C> bool contained_in(const Complex<C> &k, EdgeRef e, FaceRef f)
-{
-  const ident::ContainerRef c = k.edges.template get<".e.container">()[e.i];
-  return c.kind() == ident::ContainerKind::Face && c.index() == f.i;
-}
 
 /* ---- W0: wires and the cut's direction ---- */
 

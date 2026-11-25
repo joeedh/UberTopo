@@ -300,6 +300,11 @@ void test_refusals()
   EXPECT_EDIT(ed, ed.split_face(f, corner(1, 1), corner(2, 2)), EditCode::SurfacedFace);
   EXPECT_EDIT(ed, ed.join_faces(sh.across[2][1]), EditCode::SurfacedFace);
   EXPECT_EDIT(ed, ed.unimprint(sh.across[2][1]), EditCode::SurfacedFace);
+  {
+    const VertRef path[4] = {corner(1, 1), corner(1, 2), corner(2, 1), corner(2, 2)};
+    EXPECT_EDIT(ed, ed.connect_loops(f, path), EditCode::SurfacedFace);
+  }
+  EXPECT_EDIT(ed, ed.disconnect_loops(sh.across[2][1]), EditCode::SurfacedFace);
   EXPECT_EDIT(ed, ed.imprint(f, {}), EditCode::SurfacedFace);
   EXPECT_EDIT(ed, ed.add_hole(f, {}), EditCode::SurfacedFace);
   LoopRef outer;

@@ -495,6 +495,15 @@ template <geom::CoordType C> EditCode Editor<C>::apply_op(const OpRecord<C> &op)
     }
     case OpKind::Unimprint:
       return unimprint(EdgeRef(u[0]));
+    case OpKind::ConnectLoops: {
+      litestl::util::Vector<VertRef, 8> vs;
+      for (uint32_t i = 1; i < op.u.size(); i++) {
+        vs.append(VertRef(u[i]));
+      }
+      return connect_loops(FaceRef(u[0]), std::span<const VertRef>(vs.data(), vs.size()));
+    }
+    case OpKind::DisconnectLoops:
+      return disconnect_loops(EdgeRef(u[0]));
     case OpKind::RemoveHole:
       return remove_hole(FaceRef(u[0]), LoopRef(u[1]));
     case OpKind::Weld: {

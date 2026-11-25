@@ -182,6 +182,19 @@ public:
   EditCode add_hole(FaceRef f, std::span<const EdgeRef> chain);
   /** A hole of @p f is filled; its edges and vertices become inclusions. */
   EditCode remove_hole(FaceRef f, LoopRef hole);
+  /* ---- primitives (plan connect-loops) ---- */
+  /** Splits @p f along chords that run through its holes. @p path is a
+   * vertex of the outer loop, where the cut enters and leaves each hole it
+   * meets (two vertices of that hole), and another vertex of the outer loop.
+   * The child holding the chord coedges in the path's direction keeps f's
+   * slot. */
+  EditCode connect_loops(FaceRef f,
+                         std::span<const VertRef> path,
+                         FaceRef *other = nullptr,
+                         EdgeRef *first_chord = nullptr);
+  /** Inverts connect_loops from any of its chords: joins two faces that
+   * share two or more separate edges, and removes those edges. */
+  EditCode disconnect_loops(EdgeRef e, FaceRef *survivor = nullptr);
   /* ---- primitives (P3b W7) ---- */
   /** Merges each pair of coincident vertices into the one with the smaller
    * ID and fuses the parallel edges that result (smaller edge ID survives;

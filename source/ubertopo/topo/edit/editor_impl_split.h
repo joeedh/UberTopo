@@ -16,7 +16,6 @@
 
 namespace ubertopo::topo {
 
-
 template <geom::CoordType C>
 EditCode Editor<C>::split_core(FaceRef f,
                                std::span<const CutPiece> pieces,
