@@ -37,6 +37,7 @@ CsgCode evaluate(const CsgTree &t, const OperandStore &store, const BoolOptions 
   }
   report.leaf_ids = c.leaf_ids;
   report.labels = c.labels;
+  report.label_source = c.label_source;
   for (uint32_t i = 0; i < c.operands.size(); i++) {
     const PersistentId id = c.leaf_ids[int(i)];
     const topo::Complex<geom::Lattice> &k = *c.operands[int(i)].k;

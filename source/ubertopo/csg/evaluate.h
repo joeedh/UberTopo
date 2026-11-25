@@ -31,9 +31,9 @@ struct BoolReport {
   ArrangementStats arrangement;
   uint32_t points = 0, facets = 0;
   OutputReport output;
-  /** Label names, and the first region of a leaf that has each. */
-  litestl::util::Vector<PersistentId> labels;
-  litestl::util::Vector<PersistentId> leaf_ids; /* by leaf */
+  litestl::util::Vector<PersistentId> labels;      /* names, by label */
+  litestl::util::Vector<LabelSource> label_source; /* by label: the first region with it */
+  litestl::util::Vector<PersistentId> leaf_ids;    /* by leaf */
 };
 
 /** The tree's solid as a complex with regions. @p out is written only if the

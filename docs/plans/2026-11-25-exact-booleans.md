@@ -1,6 +1,6 @@
 # Plan: exact Booleans with a CSG tree (P5)
 
-Status: **v3**, after two reviews (§9). S1 to S4 implemented; S2c's results and decision are in §7.1.
+Status: **v3**, after two reviews (§9). S1 to S4 and S6 implemented (S5 waits for the BVH plan); S2c's results and decision are in §7.1.
 
 Phase P5 of [06](../design/core-data-model/06-modules-litestl-and-phasing.md). Background:
 [booleans-and-operations](../research/cad-kernels/booleans-and-operations.md) §1,

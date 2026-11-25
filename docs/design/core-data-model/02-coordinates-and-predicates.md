@@ -187,6 +187,10 @@ The current lean is **(b) for storage, with (a) as an internal representation in
 the Boolean engine only**. That keeps `Complex<Lattice>` compact. The concept design
 supports either.
 
+**As implemented** (P5, DEC-022, [08](08-booleans.md)): that lean. The plane table is the engine's own,
+rebuilt for every evaluation; nothing of it is stored. There is no snap rounding: a result that
+can't be rounded is refused.
+
 ## 6. Frames and conversion between instantiations
 
 ```

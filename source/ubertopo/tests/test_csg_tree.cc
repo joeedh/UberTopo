@@ -450,6 +450,8 @@ void test_evaluate()
   UT_CHECK(rep.leaf_ids.size() == 3 && rep.leaf_ids[0] == id(2) && rep.leaf_ids[2] == id(4));
   UT_CHECK(rep.labels.size() == 4);
   UT_CHECK(rep.labels[1] == csg::default_label(id(2), w.store.find(w.block)->regions.get<".id">()[1]));
+  UT_CHECK(rep.label_source.size() == 4 && rep.label_source[0].leaf == kNone && rep.label_source[3].leaf == 2 &&
+           rep.label_source[3].region == 1);
   /* failures change nothing, and name the node */
   const auto before = shape(k);
   CsgTree u = t;
