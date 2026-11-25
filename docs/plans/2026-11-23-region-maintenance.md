@@ -1,8 +1,9 @@
 # Plan: cheaper region rebuilds (OI-P3-1)
 
 Status: **v2**, after a fresh-context review (§7). **Stage A implemented** (§9), and
-B0 ([2026-11-24](2026-11-24-edit-index-regions.md)); Stage B is a design outline
-waiting on decision D1.
+B0 ([2026-11-24](2026-11-24-edit-index-regions.md)). Decision D1 is made: (c), sorted
+indices (§8). Stage B has its own plan,
+[2026-11-24](2026-11-24-incremental-regions.md), which replaces §4's outline.
 
 ## 1. Why and scope
 
@@ -195,7 +196,7 @@ The steps:
     (`editor_index.h`). After a merge, `refresh_regions` re-keys almost every row.
     That is the likely cause of the 90–150 ms undo after a merge barrier, against
     about 2 ms after a split (inferred from the code, not separately timed).
-- **D1, for the owner:**
+- **D1** (decided 2026-11-24: **(c)**):
   - **(a) Sorted indices, as today.** Stage B pays the O(F) column shift and the
     index re-key on most edits that add or remove a region.
   - **(b) Stable slots.** Shells and regions become ordinary slot domains, with free
@@ -292,6 +293,10 @@ The steps:
 - **The CSR helper:** in litestl, per the rule (R4 accepted: UberTopo master waits for
   the litestl PR).
 - **D1:** decided after Stage A's measurements.
+  - **2026-11-24: (c).** Shells and regions keep their canonical sorted order. Stage B
+    pays the O(F) column shift when a region is added or removed.
+  - The editor half of (c) is done: B0 removed the region-keyed state, so nothing in
+    `EditIndex` needs re-keying.
 
 ## 9. Implementation notes (Stage A, 2026-11-23)
 
