@@ -10,12 +10,12 @@ namespace ubertopo::csg {
 /** A face of the result: a piece of its source, or (whole) the projected
  * source face itself. */
 struct ResultFace {
-  uint32_t source; /* polygon; of a whole face, its first triangle */
-  int8_t front;    /* the front is the plane's positive (+1) or negative side */
-  bool reversed;   /* the front is the source's back */
-  bool whole;
-  uint32_t label[2]; /* front, back; air included */
-  uint32_t solid[2]; /* the same, solid labels only */
+  uint32_t source = kNone; /* polygon; of a whole face, its first triangle */
+  int8_t front = 0;        /* the front is the plane's positive (+1) or negative side */
+  bool reversed = false;   /* the front is the source's back */
+  bool whole = false;
+  uint32_t label[2] = {kNone, kNone}; /* front, back; air included */
+  uint32_t solid[2] = {kNone, kNone}; /* the same, solid labels only */
   litestl::util::Vector<uint32_t, 8> pts; /* loops, the outer one first; the face on the left from the front */
   litestl::util::Vector<uint32_t, 2> off;
 };

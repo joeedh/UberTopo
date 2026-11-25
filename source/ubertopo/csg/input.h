@@ -74,12 +74,12 @@ struct SrcEdge {
 /** A planar face, or a triangle of T(f). Loops run with the interior on the
  * left, seen from the front. */
 struct Polygon {
-  uint32_t leaf, face, plane;
+  uint32_t leaf = kNone, face = kNone, plane = kNone;
   uint32_t outline = kNone; /* of a triangle: its face's */
-  uint32_t region[2]; /* front, back */
-  int8_t sign;        /* the front normal along (+1) or against the plane's */
-  int8_t axis;        /* a projection axis: the plane's normal is non-zero there */
-  bool whole;         /* the face itself, not a triangle of it */
+  uint32_t region[2] = {kNone, kNone}; /* front, back */
+  int8_t sign = 0;                     /* the front normal along (+1) or against the plane's */
+  int8_t axis = 0;                     /* a projection axis: the plane's normal is non-zero there */
+  bool whole = false;                  /* the face itself, not a triangle of it */
   I3 lo{0, 0, 0}, hi{0, 0, 0};
   litestl::util::Vector<uint32_t, 8> pts, edges; /* points; the SrcEdge from each to the next */
   litestl::util::Vector<uint32_t, 2> off;        /* loops, as offsets into pts */
@@ -104,7 +104,7 @@ struct Polygon {
 struct Outline {
   litestl::util::Vector<uint32_t, 8> pts;
   litestl::util::Vector<uint32_t, 2> off;
-  uint32_t first, count; /* polygons */
+  uint32_t first = kNone, count = 0; /* polygons */
 };
 
 struct Input {
