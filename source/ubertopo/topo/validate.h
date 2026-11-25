@@ -137,7 +137,8 @@ void validate_combinatorial(const ComplexBase &k, const VertexTopoView &v, Valid
  * read out of range. It reports at least the region issues the full layer
  * reports, and may report more where the full layer stops at a broken link.
  * For rebuild_regions barriers, whose other topology earlier commits
- * validated. */
+ * validated. A flat, parallel pre-check (validate_regions.cc) settles the
+ * usual clean case; otherwise the walk runs, and reports. */
 void validate_regions(const ComplexBase &k, const VertexTopoView &v, ValidationReport &rep);
 
 /** Restricts the embedding and global layers to some elements (sorted,

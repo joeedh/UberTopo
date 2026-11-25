@@ -1,4 +1,5 @@
 #include "ubertopo/topo/validate.h"
+#include "ubertopo/topo/validate_detail_regions.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -712,7 +713,7 @@ void validate_combinatorial(const ComplexBase &k, const VertexTopoView &v, Valid
   c.run();
 }
 
-void validate_regions(const ComplexBase &k, const VertexTopoView &v, ValidationReport &rep)
+void vdetail::validate_regions_walk(const ComplexBase &k, const VertexTopoView &v, ValidationReport &rep)
 {
   Checker c{k, v, rep, 0, 0, 0, 0, 0, {}};
   c.run_regions();

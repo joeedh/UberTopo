@@ -35,6 +35,7 @@ add_library(ubertopo_topo STATIC
   topo/schema.cc
   topo/builder.cc
   topo/validate.cc
+  topo/validate_regions.cc
   topo/regions.cc
   topo/validate_geom.cc
   topo/face_grid.cc

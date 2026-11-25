@@ -1,7 +1,7 @@
 # Plan: incremental region maintenance (Stage B of OI-P3-1)
 
-Status: **v2**, after a fresh-context review (§10). W0 and W1 implemented (§11); W2–W5
-are not.
+Status: **v2**, after a fresh-context review (§10). W0, W1 and W4 implemented (§11);
+W2, W3 and W5 are not.
 
 ## 1. Why and scope
 
@@ -511,3 +511,31 @@ sound; no counterexample to §4.3's claim on a combinatorially valid complex.
     degenerate.
 - The sixth survivor, now removed: skipping B's faces when looking for an
   interior point of A. A candidate B shares no face with A.
+
+### 11.2 W4 (2026-11-24)
+
+- **Layout:** the pre-check is `topo/validate_regions.cc`; the walk stays in
+  `validate.cc`. `validate_detail_regions.h` declares both, so a test can compare them.
+- **Shell chains.** One pass over the live sides in ascending order, checking each against
+  the side its shell's chain has next. This is the same condition as §5's list, with
+  less to count.
+- **Invariant W** in two passes: each coedge's two regions into a table, then one compare
+  per coedge.
+- **Dirty regions** need no case of their own: the pre-check is then stricter than the
+  walk, and the walk decides.
+- **Measured** at 1.1·10⁵ faces (timers around the parts; ms): IDs and region chains 0.3,
+  shells 1.0, containers 0.3, invariant W 1.8–2.5, so about 3.5 in place of 27. The column scan for `ContainerGeometry` takes
+  another 0.3.
+- **Whole barriers**, old and new binaries run alternately three times on a busy machine
+  (`None`, which this doesn't change, was 55–111 ms meanwhile): city, `Local`,
+  89–188 → 58–98; at 5·10³ faces 5–9 → 4–6.
+- **Sensors:** `ContainerGeometry` takes 58–77 ms there, and is now nearly all of what
+  `Local` adds. It is unchanged (§5); it needs a plan of its own.
+- **Tests:** `test_region_precheck.cc`: clean models are accepted at 1 and 4 bands, with
+  garbage in dead rows; one or more corruptions per rule; 6000 rounds of random damage, in
+  which the pre-check must not pass anything the walk reports, and `validate_regions`
+  must report what the walk does. The existing corruption tests run through it as well.
+- **Mutations:** 48; 43 killed, 5 survive. All five reduce a liveness check to a range
+  check, and no wrong result follows:
+  - a side's shell (two): a dead shell has no sides in the chain pass, which then fails;
+  - a coedge's loop, face and radial next (three): the walk skips such coedges.
