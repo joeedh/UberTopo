@@ -15,6 +15,11 @@ inline constexpr uint32_t kNone = 0xffffffffu;
 
 enum class CsgCode : uint8_t {
   Ok,
+  EmptyTree,
+  DuplicateId,        /* of a node */
+  UnknownNode,
+  BadTree,            /* an edit that doesn't leave a tree, or too deep */
+  BadLabel,           /* a rule for a region there isn't, or one name for solid and air */
   BadOperand,         /* not valid, or its regions are not current */
   UnsupportedOperand, /* surfaced faces, wires or inclusions */
   MixedFrames,        /* operands of different quanta */
@@ -124,7 +129,7 @@ struct Input {
 };
 
 /** Reads the faces of @p leaves into @p out. *bad_leaf names the operand of a
- * failure. */
+ * failure, if it is one's (it is not set if their common box is too large). */
 CsgCode read_operands(std::span<const Operand> leaves, Input &out, uint32_t *bad_leaf = nullptr);
 
 } // namespace ubertopo::csg

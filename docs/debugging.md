@@ -630,6 +630,19 @@ Entry format:
 - **Technique:** in generators, one random draw per statement or list element. Compare the printed
   counts of both presets.
 
+## UBSan: "load of value 37, which is not a valid value for type 'bool'"
+
+- **Symptom:** only the `gcc-ubsan` job fails, in a copy constructor. The gate on Windows is green.
+- **Cause:** a struct with a `bool` without an initialiser is copied before the member is set.
+- **Technique:** give plain members of structs that aren't aggregates defaults. Neither `msvc-asan` nor
+  `clang-cl-rel` sees this, so a green gate doesn't replace CI.
+
+## Every mutant is killed, all at once
+
+- **Cause:** the test fails without any mutant too, so each one counts as killed.
+- **Technique:** run the test on unchanged sources right before the mutants, and don't believe a
+  perfect score after an edit of the test until that run is green.
+
 ## `TouchingShell` for a solid that is flush with a ring around it
 
 - **Cause:** fans of faces with holes in the nesting test. Fixed by plan 2026-11-24-bvh, W4a (see

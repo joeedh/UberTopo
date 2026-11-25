@@ -268,7 +268,7 @@ CsgCode read_operands(std::span<const Operand> leaves, Input &out, uint32_t *bad
     }
     for (const I3 &p : out.ipos) {
       if (!in_range(p)) {
-        return fail(CsgCode::OutOfRange, l);
+        return CsgCode::OutOfRange; /* all of them together: no one's fault */
       }
     }
   }

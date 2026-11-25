@@ -33,6 +33,12 @@ inline constexpr DomainTag Region = DomainTag(259);
 inline constexpr DomainTag OpDerived = DomainTag(260);
 inline constexpr DomainTag TestOnly = DomainTag(261);
 inline constexpr DomainTag FaceSide = DomainTag(262);
+/* CSG results (csg/) */
+inline constexpr DomainTag BoolTree = DomainTag(263);
+inline constexpr DomainTag BoolLabel = DomainTag(264);
+inline constexpr DomainTag BoolVertex = DomainTag(265);
+inline constexpr DomainTag BoolFace = DomainTag(266);
+inline constexpr DomainTag BoolRegion = DomainTag(267);
 } // namespace tag
 
 namespace detail {

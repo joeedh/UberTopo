@@ -56,6 +56,7 @@ target_link_libraries(ubertopo_topo PUBLIC ubertopo_curves ubertopo_geom ubertop
 # csg/: exact Booleans from a CSG tree.
 add_library(ubertopo_csg STATIC
   csg/arrangement.cc
+  csg/evaluate.cc
   csg/input.cc
   csg/label.cc
   csg/legal.cc
@@ -65,6 +66,7 @@ add_library(ubertopo_csg STATIC
   csg/planar.cc
   csg/select.cc
   csg/subdivide.cc
+  csg/tree.cc
 )
 target_link_libraries(ubertopo_csg PUBLIC ubertopo_topo)
 

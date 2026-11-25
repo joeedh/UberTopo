@@ -1,6 +1,6 @@
 # Plan: exact Booleans with a CSG tree (P5)
 
-Status: **v3**, after two reviews (§9). S1 and S2 (a, b, c) implemented; S2c's results and decision are in §7.1.
+Status: **v3**, after two reviews (§9). S1, S2 (a, b, c) and S3 implemented; S2c's results and decision are in §7.1.
 
 Phase P5 of [06](../design/core-data-model/06-modules-litestl-and-phasing.md). Background:
 [booleans-and-operations](../research/cad-kernels/booleans-and-operations.md) §1,
@@ -38,11 +38,12 @@ Phase P5 of [06](../design/core-data-model/06-modules-litestl-and-phasing.md). B
 ```cpp
 enum class CsgOp : uint8_t { Union, Intersection, Difference };
 
-class CsgTree {                           // a value; topo/ and geom/ types only
-  CsgNode leaf(PersistentId id, CsgOperandRef operand, GridPlacement, CsgLabels);
-  CsgNode op(CsgOp, PersistentId id, std::span<const CsgNode> children);
-  void set_root(CsgNode);
-  ...edits: replace a leaf's operand or placement, insert, remove, reorder children
+class OperandStore { ... };               // immutable complexes, by content_hash
+class CsgTree {                           // a value; refers to operands by hash
+  CsgCode add_leaf(PersistentId id, PersistentId parent, const CsgLeaf &, uint32_t index = kEnd);
+  CsgCode add_op(PersistentId id, PersistentId parent, Op, uint32_t index = kEnd);
+  CsgCode wrap(PersistentId id, Op, PersistentId child);
+  CsgCode set_leaf(...); set_op(...); move(...); remove(...);   // refused edits change nothing
 };
 ```
 
@@ -298,7 +299,7 @@ A name is made of the source elements that meet there:
   - which leaf is first at a coincidence, when the tree order changes.
 
   `BoolReport` has the pieces of every source face. `csg_diff(old, new)` gives the lineage
-  between two results: kept, gone, new, and pieces whose name moved (S3).
+  between two results: kept, gone, new, and pieces whose name moved (S4).
 - **Uniqueness is checked** at the end. A collision takes an ordinal by position and is
   counted in the report.
 - **Regions** are named in a second pass: build, `build_regions`, then set the hints of
@@ -409,7 +410,8 @@ section of §3 and §4, below 40 KB each.
   - OI-1;
   - repair is needed if any unrotated fixture fails at shift 0, or if more than 1 in 1000 of
     at least 3000 rotated evaluations fails at 2^-13 m with shift 4.
-- **S3 — the tree:** `CsgTree`, its edits, hash and serialisation; `evaluate`; `csg_diff`.
+- **S3 — the tree:** `CsgTree`, its edits, hash and serialisation; `evaluate`. (`csg_diff` went to S4: before
+  it, results have no names to compare.)
 - **S4 — names** (§4.6), regions, provenance, attributes; stability tests.
 - **S5 — speed:** filters, grid or BVH for pairs and rays, threads; `bench_boolean`.
 - **S7 — repair** (OI-BOOL-2), if the owner wants it; see §7.1.
@@ -438,7 +440,9 @@ quantum shifts). Failures per 3000, at shifts 0 / 1 / 2 / 3 / 4:
 - **No silent failure seen:** in `test_csg_output`, all 734 random results at 2^-20 (with labels checked at
   points) and the 120 of 250 piles of tetrahedra that were `Ok` at a coarse quantum are valid
   and have the right labels.
-- **The named fixtures** (tests/test_csg_output.cc) all pass unrotated at shift 0.
+- **The named fixtures** (tests/test_csg_output.cc) pass unrotated at shift 0, **but for one**: the
+  pillar that is flush with a ring around it fails (§7.2). The test has a variant that isn't flush
+  instead. It isn't a failure of rounding, so the rule above isn't applied to it.
 - **Diagonals** are needed by 0.0 faces of a building, and by some 1.4% of the faces of random
   trees on a small grid.
 - **Time** (no filters, one thread): 3 ms for the arrangement of a building, and 7 ms for merging,
@@ -449,7 +453,8 @@ quantum shifts). Failures per 3000, at shifts 0 / 1 / 2 / 3 / 4:
 - **OI-1 stands:** the plane table is the engine's own, rebuilt per evaluation. No stored plane pool.
 - **Repair:** the rule of this section says it is needed if more than 1 in 1000 rotated
   evaluations fails at 2^-13 m with shift 4.
-  - buildings: 0 of 6000 (so below 0.5 in 1000, at 95%);
+  - buildings: 0 of 6000. These are two rotations each of 3000 models, so the bound for models is
+    about 1 in 1000 at 95%, not better;
   - tetrahedra: 26 of 6000, 4.3 in 1000. **The rule is met for general polyhedra,** so repair
     stays planned (OI-BOOL-2, S7).
   - It doesn't hold up S3 to S6, which don't depend on it, and the failures are reported, not
@@ -463,6 +468,16 @@ quantum shifts). Failures per 3000, at shifts 0 / 1 / 2 / 3 / 4:
 
 **With the BVH branch:** everything up to S4 is new files on committed `topo` interfaces
 (`face_triangles` until `FaceTess` is on master). S5 waits for it.
+
+### 7.3 Results of S3
+
+- **`max_quantum_shift`:** tested with a cut that is too thin for the operands' quantum.
+- **Joint range:** if all operands together are too large for the engine, no node is named.
+- **Mutations:** S3: 82 of 82 killed. S2c: what survives is `label` (a self-check), and in `legal.cc`
+  `has`, `useful`, `inside`, `stop` (they only save work: the last pass takes unneeded diagonals
+  back) and `pair order` (another order, as good).
+- **An undefined read in S2c,** found by the UBSan job after the push: a `bool` of `Polygon` was copied
+  before it was set. It had no effect on results. The commit after S2c fixes it.
 
 ## 8. Open
 

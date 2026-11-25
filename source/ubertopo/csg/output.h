@@ -29,6 +29,7 @@ private:
 
 struct OutputOptions {
   RigidPlacement placement;
+  geom::TileFrame frame; /* of the output, before the shift */
   int quantum_shift = 0; /* finer than the operands' quantum by 2^this */
   bool validate = true;
 };

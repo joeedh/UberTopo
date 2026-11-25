@@ -178,7 +178,9 @@ struct Writer {
         return fail(RoundCode::SamePosition);
       }
     }
-    topo::Builder<Lattice> b;
+    geom::TileFrame frame = options.frame;
+    frame.quantum_log2 -= options.quantum_shift;
+    topo::Builder<Lattice> b(frame);
     for (uint32_t i = 0; i < order.size(); i++) {
       key[int(order[int(i)])] =
           b.vertex(ident::derive(ident::tag::OpDerived, uint32_t(0), i), lattice(rep.positions[int(order[int(i)])]));
